@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
-import { ThemeProvider, DarkTheme } from '@react-navigation/native';
+import { ThemeProvider as NavigationThemeProvider, DarkTheme } from '@react-navigation/native';
+import { ThemeProvider } from '../src/context/ThemeContext';
 import { colors } from '../src/styles/theme';
 import { View, StyleSheet } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
@@ -28,12 +29,21 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider value={DarkTheme}>
-      <View style={styles.root}>
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        </Stack>
-      </View>
+    <ThemeProvider>
+      <NavigationThemeProvider value={DarkTheme}>
+        <View style={styles.root}>
+           <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
+             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+             <Stack.Screen 
+               name="lyrics" 
+               options={{ 
+                 presentation: 'modal',
+                 animation: 'slide_from_bottom'
+               }} 
+             />
+           </Stack>
+        </View>
+      </NavigationThemeProvider>
     </ThemeProvider>
   );
 }
