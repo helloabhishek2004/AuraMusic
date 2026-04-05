@@ -57,7 +57,7 @@ export default function FloatingNav({ state, descriptors, navigation }: any) {
     Animated.timing(glowOpacity, {
       toValue: 1,
       duration: 420,
-      useNativeDriver: true,
+      useNativeDriver: false,
     }).start();
   }, [state.index]);
 
@@ -91,7 +91,6 @@ export default function FloatingNav({ state, descriptors, navigation }: any) {
     switch (name.toLowerCase()) {
       case 'index':
       case 'home': return focused ? 'home' : 'home-outline';
-      case 'browse': return focused ? 'compass' : 'compass-outline';
       case 'library': return focused ? 'musical-notes' : 'musical-notes-outline';
       case 'search': return focused ? 'search' : 'search-outline';
       case 'settings': return focused ? 'settings' : 'settings-outline';

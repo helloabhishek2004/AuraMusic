@@ -245,7 +245,7 @@ const FloatingNav = ({ active = 2 }: { active?: number }) => {
     Animated.spring(slide, { toValue: idx * TAB_W, ...SP, useNativeDriver: true }).start();
     Animated.spring(glowX, { toValue: idx * TAB_W + TAB_W / 2, ...SP, useNativeDriver: false }).start();
     glowOp.setValue(0.25);
-    Animated.timing(glowOp, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+    Animated.timing(glowOp, { toValue: 1, duration: 400, useNativeDriver: false }).start();
     Animated.sequence([
       Animated.timing(scales[idx], { toValue: 0.88, duration: 80, useNativeDriver: true }),
       Animated.spring(scales[idx], { toValue: 1, ...PP, useNativeDriver: true }),
@@ -375,10 +375,10 @@ export default function DownloadsScreen() {
 
     Animated.parallel([
       Animated.sequence([
-        Animated.timing(fScale, { toValue: 0.88, duration: 80, useNativeDriver: true }),
-        Animated.spring(fScale, { toValue: 1, ...PP, useNativeDriver: true }),
+        Animated.timing(fScale, { toValue: 0.88, duration: 80, useNativeDriver: false }),
+        Animated.spring(fScale, { toValue: 1, ...PP, useNativeDriver: false }),
       ]),
-      Animated.spring(fSlide, { toValue: layout.x + 5, ...SP, useNativeDriver: true }),
+      Animated.spring(fSlide, { toValue: layout.x + 5, ...SP, useNativeDriver: false }),
       Animated.spring(fWidth, { toValue: layout.width - 10, ...SP, useNativeDriver: false }),
     ]).start();
   }, [fLayouts]);

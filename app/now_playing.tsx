@@ -179,6 +179,8 @@ export default function NowPlayingScreen() {
   const [isInfoVisible, setIsInfoVisible] = useState(false);
   const [scrubberWidth, setScrubberWidth] = useState(0);
   const [volumeWidth, setVolumeWidth] = useState(0);
+  const scrubberWidthRef = useRef(0);
+  const volumeWidthRef = useRef(0);
   const [currentVolume, setCurrentVolume] = useState(0.65);
 
   const currentTrack = tracks[currentTrackIndex];
@@ -264,16 +266,27 @@ export default function NowPlayingScreen() {
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
+      onPanResponderGrant: (evt, gestureState) => {
         setIsScrubbing(true);
         Animated.spring(scrubberThumbScale, { toValue: 1.5, ...MOTION.POP, useNativeDriver: true }).start();
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        
+        // Use relative location for jump-on-press
+        const w = scrubberWidthRef.current;
+        if (w > 0) {
+          const relativeX = evt.nativeEvent.locationX;
+          const progressVal = Math.max(0, Math.min(1, relativeX / w));
+          progressBarAnim.setValue(progressVal);
+          setElapsedSec(Math.floor(progressVal * currentTrack.durationSec));
+        }
       },
-      onPanResponderMove: (_, gestureState) => {
-        if (scrubberWidth <= 0) return;
-        const padding = 28;
+      onPanResponderMove: (evt, gestureState) => {
+        const w = scrubberWidthRef.current;
+        if (w <= 0) return;
+        
+        const padding = 28; // The mainCanvas padding
         const relativeX = gestureState.moveX - padding;
-        const progressVal = Math.max(0, Math.min(1, relativeX / scrubberWidth));
+        const progressVal = Math.max(0, Math.min(1, relativeX / w));
         
         progressBarAnim.setValue(progressVal);
         const newSec = Math.floor(progressVal * currentTrack.durationSec);
@@ -292,14 +305,23 @@ export default function NowPlayingScreen() {
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
+      onPanResponderGrant: (evt, gestureState) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        const w = volumeWidthRef.current;
+        if (w > 0) {
+          const relativeX = evt.nativeEvent.locationX;
+          const volVal = Math.max(0, Math.min(1, relativeX / w));
+          setCurrentVolume(volVal);
+          volumeAnim.setValue(volVal);
+        }
       },
       onPanResponderMove: (_, gestureState) => {
-        if (volumeWidth <= 0) return;
-        const padding = 28 + 18 + 14; 
-        const relativeX = gestureState.moveX - padding;
-        const volVal = Math.max(0, Math.min(1, relativeX / volumeWidth));
+        const w = volumeWidthRef.current;
+        if (w <= 0) return;
+        
+        const offset = 28 + 18 + 14; 
+        const relativeX = gestureState.moveX - offset;
+        const volVal = Math.max(0, Math.min(1, relativeX / w));
         setCurrentVolume(volVal);
         volumeAnim.setValue(volVal);
       },
@@ -354,7 +376,7 @@ export default function NowPlayingScreen() {
     setElapsedSec(0);
     progressBarAnim.setValue(0);
     backgroundProgress.setValue(0);
-    Animated.timing(backgroundProgress, { toValue: 1, duration: 800, useNativeDriver: true }).start();
+    Animated.timing(backgroundProgress, { toValue: 1, duration: 800, useNativeDriver: false }).start();
 
     const shift = direction === 'next' ? -30 : 30;
     Animated.timing(artTranslateX, { toValue: shift, duration: 120, useNativeDriver: true }).start(() => {
@@ -478,9 +500,7 @@ export default function NowPlayingScreen() {
             <Text style={styles.nowPlayingLabel}>NOW PLAYING</Text>
           </View>
 
-          <TouchableOpacity activeOpacity={0.8} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name="ellipsis-vertical-outline" size={22} color="rgba(255,255,255,0.75)" />
-          </TouchableOpacity>
+
         </View>
 
         {/* ── ALBUM ART — glass card ────────────────────────────────────────── */}
@@ -548,7 +568,11 @@ export default function NowPlayingScreen() {
         <View style={styles.scrubberSection} {...scrubberResponder.panHandlers}>
           {/* Glass track container */}
           <GlassCard style={styles.scrubberCard} borderRadius={8} blurIntensity={30}>
-            <View style={styles.scrubberOuter} onLayout={(e) => setScrubberWidth(e.nativeEvent.layout.width)}>
+            <View style={styles.scrubberOuter} onLayout={(e) => {
+              const w = e.nativeEvent.layout.width;
+              setScrubberWidth(w);
+              scrubberWidthRef.current = w;
+            }}>
               {/* Filled track */}
               <Animated.View style={[styles.scrubberInnerWrapper, { width: barWidth }]}>
                 <LinearGradient
@@ -775,7 +799,11 @@ export default function NowPlayingScreen() {
         <View style={styles.volumeSection} {...volumeResponder.panHandlers}>
           <Ionicons name="volume-low" size={18} color="rgba(255,255,255,0.30)" />
           <GlassCard style={styles.volumeCardTrack} borderRadius={4} blurIntensity={25}>
-            <View style={styles.volumeTrackInner} onLayout={(e) => setVolumeWidth(e.nativeEvent.layout.width)}>
+            <View style={styles.volumeTrackInner} onLayout={(e) => {
+              const w = e.nativeEvent.layout.width;
+              setVolumeWidth(w);
+              volumeWidthRef.current = w;
+            }}>
               <Animated.View style={[styles.volumeFillWrapper, { width: volumeAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]}>
                 <LinearGradient
                   colors={[c0, c1] as [string, string]}
@@ -893,31 +921,31 @@ const styles = StyleSheet.create({
   },
   headerCenter: { flex: 1, alignItems: 'center' },
   nowPlayingLabel: {
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 11,
+    color: 'rgba(255,255,255,0.40)',
+    fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 2.5,
+    letterSpacing: 2.2,
     fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
 
   // Album art
   albumArtSection: {
-    flex: 1,
+    flex: 1.2, // give slightly more priority
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 28,
+    marginBottom: 32,
   },
   artOuterGlow: {
     position: 'absolute',
-    width: width * 0.72,
-    height: width * 0.72,
+    width: width * 0.68,
+    height: width * 0.68,
     borderRadius: 24,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.7,
     shadowRadius: 50,
   },
   artGlassContainer: {
-    width: width * 0.78,
+    width: width * 0.74,
     aspectRatio: 1,
     borderRadius: 24,
     overflow: 'hidden',
@@ -948,10 +976,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
+    paddingRight: 4,
   },
   trackTitle: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '800',
     color: '#FFF',
     letterSpacing: -0.5,
@@ -968,9 +997,12 @@ const styles = StyleSheet.create({
   },
   likeBtn: { padding: 6 },
 
-  // Scrubber
-  scrubberSection: { marginBottom: 24 },
-  scrubberCard: { marginBottom: 10 },
+  // Scrubber hit area
+  scrubberSection: { 
+    marginBottom: 28, 
+    paddingVertical: 12, 
+  },
+  scrubberCard: { marginBottom: 6 },
   scrubberOuter: {
     height: 6,
     backgroundColor: 'rgba(255,255,255,0.08)',
@@ -987,26 +1019,27 @@ const styles = StyleSheet.create({
   scrubberThumbWrapper: {
     position: 'absolute',
     top: '50%',
-    width: 18,
-    height: 18,
-    marginLeft: -9,
-    marginTop: -9,
+    width: 24,
+    height: 24,
+    marginLeft: -12,
+    marginTop: -12,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 10,
   },
   thumbGlowRing: {
     position: 'absolute',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
     shadowRadius: 8,
   },
   scrubberThumb: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: '#FFF',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.9,
@@ -1016,7 +1049,7 @@ const styles = StyleSheet.create({
   timeLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 6,
+    marginTop: 4,
   },
   timeLabel: {
     color: 'rgba(255,255,255,0.38)',
@@ -1121,11 +1154,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // Volume
+  // Volume hit area
   volumeSection: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 4,
+    paddingVertical: 16, // big hit area
   },
   volumeCardTrack: {
     flex: 1,

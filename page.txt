@@ -1,102 +1,102 @@
-<!DOCTYPE html>
-
-<html class="dark" lang="en"><head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>AuraMusic - Create Playlist</title>
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@700;800&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@700;800&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
 <script id="tailwind-config">
       tailwind.config = {
         darkMode: "class",
         theme: {
           extend: {
-            colors: {
-              "on-primary": "#460283",
-              "on-surface-variant": "#cbc3d9",
-              "surface-container": "#1f1f25",
-              "outline-variant": "#494456",
-              "on-tertiary-container": "#cbc1ff",
-              "inverse-surface": "#e4e1e9",
-              "on-secondary-fixed": "#00201c",
-              "on-background": "#e4e1e9",
-              "secondary": "#46f5e0",
-              "secondary-fixed": "#4ffbe6",
-              "on-tertiary": "#2f009c",
-              "inverse-on-surface": "#303036",
-              "tertiary-fixed": "#e5deff",
-              "on-surface": "#e4e1e9",
-              "tertiary-container": "#5335cd",
-              "on-tertiary-fixed-variant": "#4622c0",
-              "tertiary-fixed-dim": "#c9bfff",
-              "surface": "#131318",
-              "outline": "#948da2",
-              "on-secondary-container": "#005950",
-              "on-error-container": "#ffdad6",
-              "on-secondary-fixed-variant": "#005048",
-              "surface-container-highest": "#35343a",
-              "surface-container-lowest": "#0e0e13",
-              "tertiary": "#c9bfff",
-              "surface-variant": "#35343a",
-              "inverse-primary": "#7743b5",
-              "surface-container-high": "#2a292f",
-              "error-container": "#93000a",
-              "surface-bright": "#39383e",
-              "primary": "#dab9ff",
-              "surface-dim": "#131318",
-              "surface-container-low": "#1b1b20",
-              "on-primary-fixed-variant": "#5e289b",
-              "background": "#131318",
-              "primary-fixed-dim": "#dab9ff",
-              "on-error": "#690005",
-              "on-tertiary-fixed": "#1a0063",
-              "primary-container": "#6c37a9",
-              "secondary-fixed-dim": "#17deca",
-              "on-primary-fixed": "#2a0053",
-              "error": "#ffb4ab",
-              "on-secondary": "#003731",
-              "secondary-container": "#00d8c4",
-              "on-primary-container": "#dbbbff",
-              "surface-tint": "#dab9ff",
-              "primary-fixed": "#eedbff"
+            "colors": {
+                    "surface-container-high": "#2a292f",
+                    "primary-container": "#6c37a9",
+                    "outline-variant": "#494456",
+                    "surface-container-low": "#1b1b20",
+                    "on-error": "#690005",
+                    "on-secondary": "#003731",
+                    "on-tertiary-container": "#cbc1ff",
+                    "surface-bright": "#39383e",
+                    "on-primary-fixed-variant": "#5e289b",
+                    "secondary-container": "#00d8c4",
+                    "surface-container": "#1f1f25",
+                    "background": "#131318",
+                    "inverse-surface": "#e4e1e9",
+                    "tertiary-fixed-dim": "#c9bfff",
+                    "tertiary-container": "#5335cd",
+                    "on-tertiary": "#2f009c",
+                    "on-surface": "#e4e1e9",
+                    "secondary": "#46f5e0",
+                    "surface-tint": "#dab9ff",
+                    "tertiary-fixed": "#e5deff",
+                    "tertiary": "#c9bfff",
+                    "primary": "#dab9ff",
+                    "on-secondary-fixed-variant": "#005048",
+                    "on-secondary-container": "#005950",
+                    "on-background": "#e4e1e9",
+                    "on-secondary-fixed": "#00201c",
+                    "secondary-fixed": "#4ffbe6",
+                    "on-tertiary-fixed": "#1a0063",
+                    "on-primary-fixed": "#2a0053",
+                    "surface-container-lowest": "#0e0e13",
+                    "on-error-container": "#ffdad6",
+                    "on-tertiary-fixed-variant": "#4622c0",
+                    "inverse-primary": "#7743b5",
+                    "error-container": "#93000a",
+                    "surface-variant": "#35343a",
+                    "on-surface-variant": "#cbc3d9",
+                    "inverse-on-surface": "#303036",
+                    "on-primary": "#460283",
+                    "secondary-fixed-dim": "#17deca",
+                    "primary-fixed-dim": "#dab9ff",
+                    "surface-dim": "#131318",
+                    "primary-fixed": "#eedbff",
+                    "on-primary-container": "#dbbbff",
+                    "surface": "#131318",
+                    "surface-container-highest": "#35343a",
+                    "outline": "#948da2",
+                    "error": "#ffb4ab"
             },
-            fontFamily: {
-              "headline": ["Manrope"],
-              "body": ["Inter"],
-              "label": ["Inter"]
+            "borderRadius": {
+                    "DEFAULT": "1rem",
+                    "lg": "2rem",
+                    "xl": "3rem",
+                    "full": "9999px"
             },
-            borderRadius: {"DEFAULT": "1rem", "lg": "2rem", "xl": "3rem", "full": "9999px"},
+            "fontFamily": {
+                    "headline": ["Manrope"],
+                    "body": ["Inter"],
+                    "label": ["Inter"]
+            }
           },
         },
       }
     </script>
 <style>
+        body {
+            background-color: #131318;
+            color: #e4e1e9;
+            font-family: 'Inter', sans-serif;
+        }
         .glass-pane {
             background: rgba(53, 52, 58, 0.4);
             backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
             border: 1px solid rgba(148, 141, 162, 0.2);
-            box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
         }
-        .mesh-bg {
-            background-color: #131318;
-            background-image: 
-                radial-gradient(at 0% 0%, rgba(108, 55, 169, 0.15) 0px, transparent 50%),
-                radial-gradient(at 100% 0%, rgba(70, 245, 224, 0.1) 0px, transparent 50%),
-                radial-gradient(at 50% 100%, rgba(218, 185, 255, 0.1) 0px, transparent 50%);
+        .sonic-nebula {
+            background: radial-gradient(circle at 0% 0%, #301934 0%, transparent 50%),
+                        radial-gradient(circle at 100% 0%, #1a237e 0%, transparent 50%),
+                        radial-gradient(circle at 50% 50%, #131318 0%, #131318 100%);
         }
-        .recessed-input {
-            background: rgba(14, 14, 19, 0.6);
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
-            border: 1px solid rgba(73, 68, 86, 0.5);
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
         }
-        .soul-gradient {
-            background: linear-gradient(135deg, #dab9ff 0%, #6c37a9 100%);
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
         }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 <style>
     body {
@@ -104,189 +104,198 @@
     }
   </style>
   </head>
-<body class="bg-surface text-on-surface font-body mesh-bg min-h-screen pb-40">
-<!-- Top App Bar -->
-<header class="fixed top-0 w-full z-50 bg-[#131318]/40 backdrop-blur-3xl flex items-center justify-between px-6 h-20">
-<div class="flex items-center gap-4">
-<button class="w-10 h-10 flex items-center justify-center rounded-full glass-pane hover:bg-white/10 transition-colors scale-95 active:scale-90 duration-200">
-<span class="material-symbols-outlined text-[#dab9ff]">arrow_back</span>
-</button>
-<h1 class="font-['Manrope'] font-bold tracking-tight text-[#dab9ff] text-xl">Create Playlist</h1>
+<body class="sonic-nebula min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 flex justify-between items-center px-6 py-4 w-full">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#dab9ff] hover:opacity-80 transition-opacity cursor-pointer" style="">menu</span>
 </div>
-<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors scale-95 active:scale-90 duration-200">
-<span class="material-symbols-outlined text-white/70">more_vert</span>
-</button>
+<h1 class="text-2xl font-black text-white drop-shadow-md font-['Manrope'] font-bold tracking-tight" style="">AURA</h1>
+<div class="w-10 h-10 rounded-full overflow-hidden border border-white/20 hover:opacity-80 transition-opacity cursor-pointer">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="Close-up portrait of a young person with soft studio lighting and a clean minimalist aesthetic" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDq3UiIFYmXinYSygwycRPkhHqUPl-UkDcPvDxab48mPT5NoCsBLsoOWIlUgYaDWTGtS8AXlohZaHBEqMUtjoJDm4VLoWKd804rVhD5AQxfTpklt7R3M8b06DqdJEBtweTm-qrFz2yLRHXR7aexhYT6H0hlraCiE9N0B9TKSPTHzeFPHcU0ZgIGFRBvTkScWFHehD31upgs9T0FHgUJpunctld6r4qTrHEPKNKPKI4zrpF4JC0omB_ue5YxIOFxu66HVpEq8eGJmjM" style="">
+</div>
 </header>
-<main class="pt-28 px-6 max-w-2xl mx-auto space-y-12">
-<!-- Hero Header -->
-<section class="space-y-2">
-<h2 class="font-headline text-5xl font-extrabold tracking-tighter text-white drop-shadow-sm">
-                Build your <span class="text-primary">next vibe</span>
-</h2>
-<p class="text-on-surface-variant text-lg">Set the mood, add the tracks, and let the rhythm flow.</p>
+<main class="pt-24 px-6 max-w-7xl mx-auto space-y-12">
+<!-- Welcome Section -->
+<section class="space-y-1">
+<h2 class="text-4xl md:text-5xl font-['Manrope'] font-extrabold text-white tracking-tight" style="">Good evening</h2>
+<p class="text-on-surface-variant font-body text-lg opacity-80" style="">Ready for some evening vibes?</p>
 </section>
-<!-- Cover Section -->
-<section class="flex flex-col items-center gap-6">
-<div class="relative group">
-<div class="w-[200px] h-[200px] rounded-xl overflow-hidden glass-pane flex flex-col items-center justify-center transition-transform duration-500 hover:scale-105">
-<img alt="Playlist Cover Placeholder" class="absolute inset-0 w-full h-full object-cover opacity-40 mix-blend-overlay" data-alt="Abstract musical visualization with flowing purple and teal light trails against a dark void background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCMNC1bhPx9QXWLPnqrxbUq4j4NQaGFdP9ICJgM1bLk6Pu1Qw59R79SgAbLe_4Gnoql4HK-PTdJJW-NHz3G_AvItO4-xJcue5kpYboOnyxHwvCL0VIIdZRNswnbaGgWhtAJtBJidxFEnaCVmed9zscVy6s3xksLhe1ZcxBvAcfujkby3QIVfhJfgnCV4-_gP08QuVBUqi3o80gyGT6XUTFH1TkaNXAopwMU0PY3SDD_Xp6JgzEmbe1qfa8AzQvqCuZVasCIy8SntGU"/>
-<span class="material-symbols-outlined text-6xl text-primary/40" style="font-variation-settings: 'FILL' 1;">music_note</span>
-<div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-surface/40 backdrop-blur-sm cursor-pointer">
-<span class="material-symbols-outlined text-white text-3xl">add_a_photo</span>
+<!-- Featured Cinematic Hero Card -->
+<section class="relative w-full aspect-[16/9] md:aspect-[21/9] rounded-xl overflow-hidden shadow-[0_24px_48px_rgba(0,0,0,0.4)] group">
+<img alt="Neon Dreams Album Art" class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" data-alt="Cinematic wide shot of a futuristic neon-lit cityscape at night with deep purple and electric blue atmospheric glow" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB7QyWLCr0uXkrtCWoGoXTfHFzGXwGP0GfezAi3bE1Zoy0n-ZxGCu75tlVWLIreBKwK5XYqs_bwhB9bZFS-RwHRzHg-cMww0yFFfnkcqDILEMzFzw3UzMLb7wQ9fqgC831em3RUpLtE4tqyhWEK7tn02kW1lhye7OMIwbQq2vDp-KmoMZR5SwzyyOOC7_RIGQBU2kZoZzZvgJB_GnEYPXGuzd_uECbnuBe-WvSzMuoei4vaBoL41TggGTxAg8xZZ0DOf9H-cVvvZ0k" style="">
+<div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
+<div class="absolute bottom-0 left-0 right-0 glass-pane p-8 flex flex-col md:flex-row justify-between items-end md:items-center gap-4">
+<div class="space-y-1">
+<h3 class="text-4xl md:text-6xl font-['Manrope'] font-black text-white tracking-tighter drop-shadow-lg" style="">Neon Dreams</h3>
+<p class="text-white/70 text-lg md:text-xl font-medium italic" style="">The Midnight Syndicate • New Release</p>
+</div>
+<div class="flex items-center gap-6">
+<div class="flex gap-2">
+<div class="w-2 h-2 rounded-full bg-white"></div>
+<div class="w-2 h-2 rounded-full bg-white/30"></div>
+<div class="w-2 h-2 rounded-full bg-white/30"></div>
+</div>
+<button class="w-16 h-16 rounded-full bg-gradient-to-br from-[#dab9ff] to-[#6c37a9] flex items-center justify-center text-white shadow-[0_0_20px_rgba(218,185,255,0.4)] transition-transform active:scale-90" style="">
+<span class="material-symbols-outlined text-4xl" style="font-variation-settings: &quot;FILL&quot; 1;">play_arrow</span>
+</button>
 </div>
 </div>
-</div>
-<button class="flex items-center gap-2 px-6 py-2 rounded-full glass-pane text-sm font-medium text-secondary hover:bg-secondary/10 transition-colors">
-<span class="material-symbols-outlined text-sm">auto_awesome</span>
-                Auto generate cover
-            </button>
 </section>
-<!-- Form Section -->
+<!-- Continue Listening -->
 <section class="space-y-6">
-<div class="space-y-2">
-<label class="text-xs font-semibold uppercase tracking-widest text-on-surface-variant ml-4">Playlist Name</label>
-<input class="w-full recessed-input rounded-xl px-6 py-4 text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all font-headline text-lg" placeholder="Late Night Jazz..." type="text"/>
+<div class="flex justify-between items-end">
+<h4 class="text-2xl font-['Manrope'] font-bold text-white" style="">Continue Listening</h4>
+<span class="text-primary font-medium text-sm cursor-pointer hover:underline" style="">See all</span>
 </div>
-<div class="space-y-2">
-<label class="text-xs font-semibold uppercase tracking-widest text-on-surface-variant ml-4">Description</label>
-<textarea class="w-full recessed-input rounded-xl px-6 py-4 text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all resize-none" placeholder="Describe the vibe of this collection..." rows="3"></textarea>
+<div class="flex overflow-x-auto gap-6 pb-4 hide-scrollbar">
+<!-- Card 1 -->
+<div class="flex-none w-64 group cursor-pointer">
+<div class="relative aspect-square rounded-lg overflow-hidden glass-pane p-0 mb-4">
+<img alt="Echoes of Silence" class="w-full h-full object-cover" data-alt="Abstract musical visualization with flowing light trails in deep violet and cyan against a dark void" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBuR9gtgG2taTyKjZRlQHCINlUJhPKf77RSnLwOI5myjgMiss5yfKiQWMLKqmDyPUvYFZNfajHryldnBZAOubdN0-MHrSMpeyVGMKL1XlfNUYxkpiz2gWZi2a3mXLaJa_XFGR7EJea5BCFm6wuO-FJXBi93TtaUy998C3CYdOiJ_ZoeiWvtdFxt-dqgWsT9lXrOrn6F8-HQBjIFBsqro5honANAglneK_aO_FLIYAFkm6lJyjKjKEoBnouCeINOTQ-CVrZV2MHKfTA" style="">
+<div class="absolute bottom-0 left-0 h-1 bg-primary w-2/3 shadow-[0_0_10px_#dab9ff]"></div>
+</div>
+<h5 class="text-white font-semibold truncate" style="">Echoes of Silence</h5>
+<p class="text-on-surface-variant text-sm" style="">Lumina Flux</p>
+</div>
+<!-- Card 2 -->
+<div class="flex-none w-64 group cursor-pointer">
+<div class="relative aspect-square rounded-lg overflow-hidden glass-pane p-0 mb-4">
+<img alt="Urban Jungle" class="w-full h-full object-cover" data-alt="Monochrome artistic photography of skyscrapers through a rain-streaked window with moody cinematic lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAjFukE_sRjHe5_Yn5GUu9-diK45r5uJJqkA11fLWsqdBhWFZICFt3M-famObOj7lZyps1XNA35R02BfM_qXiKHTw0J64_PwKqyYWwWrcvT-PY8gkfldq0OFOu4-C48MrU9mFbsCQmYbnrg2MgIq3rsg3fbLMkqvTc_EE7Q1m2i0kuEY9mFFVOA0J7bvSlOnBDyBcRK9Qil_y1yHmZqPpvAoniYSyhfspTprmNEzT-NAkI3CMVfqdxHK-zGg8qz71GUUBQOhdiNHbc" style="">
+<div class="absolute bottom-0 left-0 h-1 bg-primary w-1/4 shadow-[0_0_10px_#dab9ff]"></div>
+</div>
+<h5 class="text-white font-semibold truncate" style="">Urban Jungle</h5>
+<p class="text-on-surface-variant text-sm" style="">Concrete Beats</p>
+</div>
+<!-- Card 3 -->
+<div class="flex-none w-64 group cursor-pointer">
+<div class="relative aspect-square rounded-lg overflow-hidden glass-pane p-0 mb-4">
+<img alt="Velvet Skies" class="w-full h-full object-cover" data-alt="Soft ethereal clouds illuminated by a setting sun in shades of peach and lavender grain texture" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQYTUgQ2XPquYqsqGrjmf4vScXSbmcEr394dD1Ipgs4SWYnD1ou1DNWT4TjieVXD63bIHJYvreFxPXewhpZwuKp02MF2b1zi5dZblNxZ20ESUWH-GCcNVTVepkXMSXkJ4TXLH0R1x1Z5m8Dx-gwDfJQfKNxxJqg1680Ul5TH0up_QRQLESbGRAANd3_DJnjyFCYs0OzrZwBIgdVCOVFodgDLfGNImFRf_BKjf-89IHIOl_WLIGHAvAL8TNO-v4mt0RIQUz_HkdPQg" style="">
+<div class="absolute bottom-0 left-0 h-1 bg-primary w-1/2 shadow-[0_0_10px_#dab9ff]"></div>
+</div>
+<h5 class="text-white font-semibold truncate" style="">Velvet Skies</h5>
+<p class="text-on-surface-variant text-sm" style="">Aether</p>
+</div>
+<!-- Card 4 -->
+<div class="flex-none w-64 group cursor-pointer">
+<div class="relative aspect-square rounded-lg overflow-hidden glass-pane p-0 mb-4">
+<img alt="Midnight Jazz" class="w-full h-full object-cover" data-alt="Vintage microphone in a dimly lit smoky jazz club with warm golden rim light and deep shadows" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDrI5vWn0JAZGzWBNZwmsyDGPt2EjAJqGsfIY2xDIUUisAmsNnHAwRE0D7WNwp6msEyb63MTYoeUwLonpLUwCUI1gi3IgOwDsbh_ndWAQokd_lnC0523_K_2rtw6fXglXQBaYpLu1pQgi6Rajr5qwM5T9Yu9pzwUCHokJobMS33ewtAyPJCYHVufXkccdUokPLVP1tpkHZOJBE8ZfrwvD_m75DhcwnzTES9pc0RQo4mcJ58qN3nV4c70S5wVT9ZpyR53GMVMYkp1aQ" style="">
+<div class="absolute bottom-0 left-0 h-1 bg-primary w-5/6 shadow-[0_0_10px_#dab9ff]"></div>
+</div>
+<h5 class="text-white font-semibold truncate" style="">Midnight Jazz</h5>
+<p class="text-on-surface-variant text-sm" style="">The Blue Quartet</p>
+</div>
 </div>
 </section>
-<!-- Privacy & Tags -->
-<section class="space-y-8">
-<div class="space-y-4">
-<h3 class="font-headline text-xl font-bold">Privacy Setting</h3>
-<div class="flex gap-3 overflow-x-auto hide-scrollbar">
-<button class="px-6 py-3 rounded-full bg-primary text-on-primary font-semibold flex items-center gap-2 whitespace-nowrap">
-<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">public</span> Public
-                    </button>
-<button class="px-6 py-3 rounded-full glass-pane text-on-surface font-medium flex items-center gap-2 whitespace-nowrap hover:bg-white/10 transition-all">
-<span class="material-symbols-outlined text-sm">lock</span> Private
-                    </button>
-<button class="px-6 py-3 rounded-full glass-pane text-on-surface font-medium flex items-center gap-2 whitespace-nowrap hover:bg-white/10 transition-all">
-<span class="material-symbols-outlined text-sm">group</span> Shared
-                    </button>
-</div>
-</div>
-<div class="space-y-4">
-<h3 class="font-headline text-xl font-bold">What's the mood?</h3>
-<div class="flex flex-wrap gap-3">
-<button class="px-5 py-2 rounded-full glass-pane border-secondary/30 text-secondary text-sm font-medium hover:bg-secondary/10 transition-all">#Chill</button>
-<button class="px-5 py-2 rounded-full glass-pane border-primary/30 text-primary text-sm font-medium hover:bg-primary/10 transition-all">#Workout</button>
-<button class="px-5 py-2 rounded-full glass-pane text-on-surface-variant text-sm font-medium hover:bg-white/10 transition-all">#Focus</button>
-<button class="px-5 py-2 rounded-full glass-pane text-on-surface-variant text-sm font-medium hover:bg-white/10 transition-all">#Sleep</button>
-<button class="px-5 py-2 rounded-full glass-pane text-on-surface-variant text-sm font-medium hover:bg-white/10 transition-all">#Party</button>
-</div>
-</div>
-</section>
-<!-- Smart AI Assist -->
-<section class="p-8 rounded-xl glass-pane space-y-6 relative overflow-hidden">
-<div class="absolute top-0 right-0 w-32 h-32 bg-secondary/10 blur-[60px] rounded-full -mr-16 -mt-16"></div>
-<div class="flex items-center gap-4">
-<div class="w-12 h-12 rounded-full soul-gradient flex items-center justify-center">
-<span class="material-symbols-outlined text-white">auto_fix_high</span>
-</div>
-<div>
-<h3 class="font-headline text-xl font-bold">Smart AI Assist</h3>
-<p class="text-sm text-on-surface-variant">Generate a tracklist based on your mood</p>
-</div>
-</div>
-<div class="flex gap-2 overflow-x-auto hide-scrollbar">
-<button class="px-4 py-2 rounded-lg bg-surface-container-highest text-xs font-medium text-on-surface hover:text-primary transition-colors whitespace-nowrap">Late night coding</button>
-<button class="px-4 py-2 rounded-lg bg-surface-container-highest text-xs font-medium text-on-surface hover:text-primary transition-colors whitespace-nowrap">Rainy vibes</button>
-<button class="px-4 py-2 rounded-lg bg-surface-container-highest text-xs font-medium text-on-surface hover:text-primary transition-colors whitespace-nowrap">Coffee shop morning</button>
-</div>
-<button class="w-full py-4 rounded-full soul-gradient text-white font-bold tracking-wide shadow-lg shadow-primary/20 flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all">
-                Generate from mood
-            </button>
-</section>
-<!-- Song Selection -->
+<!-- Made For You Bento Grid -->
 <section class="space-y-6">
-<div class="flex items-center justify-between">
-<h3 class="font-headline text-2xl font-bold">Suggested Tracks</h3>
-<button class="text-primary text-sm font-semibold hover:underline">View all</button>
-</div>
-<div class="relative">
-<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline">search</span>
-<input class="w-full recessed-input rounded-full pl-12 pr-6 py-4 text-on-surface placeholder:text-outline focus:outline-none transition-all" placeholder="Search for artists or songs" type="text"/>
-</div>
-<div class="space-y-4">
-<!-- Song Card 1 -->
-<div class="p-4 rounded-xl glass-pane flex items-center justify-between hover:bg-white/5 transition-colors group">
-<div class="flex items-center gap-4">
-<div class="w-14 h-14 rounded-lg overflow-hidden bg-surface-container shadow-md">
-<img alt="Album Art" class="w-full h-full object-cover" data-alt="Dreamy low-angle shot of a person playing electric guitar under cinematic neon stage lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA6KrE2DRVhsNIhk6w9gAOL0ClgfrxSW5dkimsKF3YkvMK3ZmJNENwv0S7Z8hcQ2_YKdRTx6pJ6cPAPB1DYG0szIon9rjCUDQKUs583vC-kLGFYAQWW251bZj16fTGGWnc5mJkVPiLwEL19U0PDuvkMeKaXYQVoHZ5StmxEpjqHpcW_Z8UtWxj-zm4CC6RvGDilGhwwzadywNSH5eiFhkQIib2AKMsRSfXNEKyulDeXxkQ_uUiFcKD0l-Wu-A7pfHv0uX1jJVr7_70"/>
-</div>
-<div>
-<h4 class="font-bold text-white group-hover:text-primary transition-colors">Electric Dreams</h4>
-<p class="text-xs text-on-surface-variant">Neon Pulse</p>
+<h4 class="text-2xl font-['Manrope'] font-bold text-white" style="">Made For You</h4>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<!-- Daily Mix 1 -->
+<div class="col-span-1 md:col-span-2 relative h-64 rounded-lg overflow-hidden glass-pane flex items-center p-8 group cursor-pointer">
+<img alt="Daily Mix 1" class="absolute inset-0 w-full h-full object-cover opacity-40 transition-opacity group-hover:opacity-60" data-alt="Creative collage of musical instruments and abstract geometric shapes in vibrant teal and magenta colors" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCbCEPz7a_kipZIvCkizjA-gRvtXsLOA9-JTFoghz0Lie05VF_dCSzHZ2ztBnzlyVIPIrJ2xfCZMeNKuXVQTrwcijbem9x3Pse4F6zwRLouBtw3VnfLsCztxLrmNzjxNDuSiABv4pZFUjI1F0k0lhlnuoVIFVUD5ZH-rxbuBmzWTtwzZ8-MownkdckipRFY0MbcI6x0RhkzgOMx4_t9ktr99nlzj3PJPvdKgPxBFd9GAhWpdNeUaQT-k43YZsTMS9MPnz4D2XcyQdE" style="">
+<div class="relative z-10">
+<span class="bg-secondary/20 text-secondary border border-secondary/30 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mb-4 inline-block" style="">Personalized</span>
+<h5 class="text-4xl font-['Manrope'] font-black text-white" style="">Daily Mix 1</h5>
+<p class="text-white/70 max-w-xs mt-2" style="">Experimental pop, synthwave, and indie electronic just for you.</p>
 </div>
 </div>
-<button class="w-10 h-10 rounded-full glass-pane flex items-center justify-center text-primary border-primary/20 hover:bg-primary hover:text-on-primary transition-all">
-<span class="material-symbols-outlined">add</span>
-</button>
-</div>
-<!-- Song Card 2 -->
-<div class="p-4 rounded-xl glass-pane flex items-center justify-between hover:bg-white/5 transition-colors group">
-<div class="flex items-center gap-4">
-<div class="w-14 h-14 rounded-lg overflow-hidden bg-surface-container shadow-md">
-<img alt="Album Art" class="w-full h-full object-cover" data-alt="Vibrant abstract splash of paint in purple and magenta colors reflecting dynamic energy" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDedIBxxGDWOcGsmg87OhtrEBljjH-S7N3ytL0sPRF8DxOVryss8JXHF5qUxvRkpILb-GUiSuE6zMjqkyZAm7T1R-Ipq71pT06oh6w_IZwV-J28P7fmVzpih1kNBqvdD2z5lfX1ULzp-eLxsNSn2KpK3bOKCQCO5HeVQrIjO1sH9F1amQrEtvLoe9ezBwBil6f_He8eMtoiDJKJFS78-l2g65SCuo4zblQW1FpYRW5kCjK_a3PRPctJMwKQVAn89NsfuCZlOOWzWT0"/>
-</div>
-<div>
-<h4 class="font-bold text-white group-hover:text-primary transition-colors">Urban Echoes</h4>
-<p class="text-xs text-on-surface-variant">Lofi Soul</p>
+<!-- Daily Mix 2 -->
+<div class="relative h-64 rounded-lg overflow-hidden glass-pane p-8 flex flex-col justify-end group cursor-pointer">
+<img alt="Daily Mix 2" class="absolute inset-0 w-full h-full object-cover opacity-30 group-hover:opacity-50" data-alt="Atmospheric landscape of distant mountains under a starry night sky with a soft purple nebula" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAdQx6GH0zorHcncabs7EQjwwt6Ff4YQFydz1_wbFzgX0L65ePdvwSnhkkWPUhIoqLAeGzwr7ucwdLzHfwpeH3bpFU2YdaV4cZPmJewuMrK3xGRF9l3sItRS6c88RspFXNmeZZkpf9K0C12oMAyLJVpVFkeB5wO5pfTz-0V082H28TUOLxTOzRQGVFJtNc3U5uKM3qxuEVRVdgHno7aBCeEyWw4lcW46wjW1e-ipK6xgKuGLRZOtiL-ADDQbsodniQ5YHU6z2TiRbo" style="">
+<div class="relative z-10">
+<h5 class="text-2xl font-['Manrope'] font-bold text-white" style="">Focus Flow</h5>
+<p class="text-white/70 text-sm mt-1" style="">Deep ambient for concentration.</p>
 </div>
 </div>
-<button class="w-10 h-10 rounded-full glass-pane flex items-center justify-center text-primary border-primary/20 hover:bg-primary hover:text-on-primary transition-all">
-<span class="material-symbols-outlined">add</span>
-</button>
 </div>
-<!-- Song Card 3 -->
-<div class="p-4 rounded-xl glass-pane flex items-center justify-between hover:bg-white/5 transition-colors group">
-<div class="flex items-center gap-4">
-<div class="w-14 h-14 rounded-lg overflow-hidden bg-surface-container shadow-md">
-<img alt="Album Art" class="w-full h-full object-cover" data-alt="Minimalist landscape of distant mountains under a soft lilac sky with a single bright star" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_pfk2W4OxUjM_kUH6PqD9tJ-uHrgqNDz4bbGyWbl3lLhNIXuQV_XaqaXl7IIIKlI_UMwGIelsh7UBiY1dfDWzr2i3K_OJNkGBmeZ6myO8hjxi7OijhfQ-Llr8rVN5ua4NRDg_jCMwIy0RIzfben5NniAtfucoNJRSPZwKgBRB4OC1X0X4jIdJoyNG9Pr1wierBCgkVQX3QcDl4JzGzAjpYvb4PPtGeuR9TgBKPnPxwKl4SBxg2-2STqIMdYdmpn00RtQh2hiGSH8"/>
+</section>
+<!-- Recently Played Circle Cards -->
+<section class="space-y-6">
+<h4 class="text-2xl font-['Manrope'] font-bold text-white" style="">Recently Played</h4>
+<div class="flex overflow-x-auto gap-8 pb-4 hide-scrollbar">
+<div class="flex-none text-center space-y-3 cursor-pointer group">
+<div class="w-32 h-32 rounded-full overflow-hidden border-2 border-transparent group-hover:border-primary transition-all p-1">
+<img alt="Artist 1" class="w-full h-full object-cover rounded-full" data-alt="Modern pop artist silhouette against a bright orange studio background with dramatic lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAv0JnQ4vMAUMZPLHf8_5kSD5mlzNell4lTFMe4PW1ntOTOWHLrkl9mG9j6UHuz5l03jHV1QhqkqlW02aAAiissJPNm66GBtmnUEdUIhd5TO4jkDJGnA2XM5dn0iZe0uHKdWaevk9k3xgDBQPgZzlNW4FlJCPUmKgPFqQ4OkotUNamHfhbLR5JNjOw0OUWEPXU940b8lSMV1EaeRO40UgPJFBXCZWmgC9iWPClYDFkB3ln3Ny0R6QHjYN-tdmuMPLPuIvc6cbY2qeg" style="">
 </div>
-<div>
-<h4 class="font-bold text-white group-hover:text-primary transition-colors">Midnight Voyage</h4>
-<p class="text-xs text-on-surface-variant">The Explorers</p>
+<p class="text-white font-medium" style="">Solstice</p>
 </div>
+<div class="flex-none text-center space-y-3 cursor-pointer group">
+<div class="w-32 h-32 rounded-full overflow-hidden border-2 border-transparent group-hover:border-primary transition-all p-1">
+<img alt="Artist 2" class="w-full h-full object-cover rounded-full" data-alt="Elegant singer performing on a stage with a warm spotlight and blurred audience background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuClekhO35H1-CBAh_IAbps85MfN8ykBnyWS2XmdjmuGoVmkVcXFGyaaV_4FC0CvNMXPmwrrCHc1CVhd3WadESEIS0oaSO8wGQ5-4MgxJRn4jyoYONpus0InxiVvB-qXG6ZyeQQSUm821V6o_nDcQJN0TM-sO_PCRKpFBuwiEignbri7blbD7fa2cwu19ZyVIJet6gf4BuIIWVo3158xmp_VOi6CW0ytmQGJxEcvzrh2Q1UaaWxztFzmR1Qq1p-Aaa8sHP4lP5aop0Y" style="">
 </div>
-<button class="w-10 h-10 rounded-full glass-pane flex items-center justify-center text-primary border-primary/20 hover:bg-primary hover:text-on-primary transition-all">
-<span class="material-symbols-outlined">add</span>
-</button>
+<p class="text-white font-medium" style="">Luna Ray</p>
+</div>
+<div class="flex-none text-center space-y-3 cursor-pointer group">
+<div class="w-32 h-32 rounded-full overflow-hidden border-2 border-transparent group-hover:border-primary transition-all p-1">
+<img alt="Artist 3" class="w-full h-full object-cover rounded-full" data-alt="Daft punk style chrome helmet reflecting colorful studio lights in a dark environment" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAhQcif7-QjsbzxTmqO7ML0bZ3y3oCamVAUk1prt5w0xLlKY_t3FtWqDz-eossEpXpNHLHzaNLfw6oLqTdpcF5IxNPd_PHC2negic679aJ_98U1Vhym0ULwPVHp0GPe3hwJYqdIeT7WXZDvLG-_9z2CDMuF3xDv962rDDOb-wdEKx9EPrVg9uTuza5Zlitmn-0rLBBbiDOgsESsZI2Wx-hjETVoXc6cC5viEFkr8T_hxzgx265dnxJlF2p0lTm9mUJ6ForN5qArmPc" style="">
+</div>
+<p class="text-white font-medium" style="">Divergent</p>
+</div>
+<div class="flex-none text-center space-y-3 cursor-pointer group">
+<div class="w-32 h-32 rounded-full overflow-hidden border-2 border-transparent group-hover:border-primary transition-all p-1">
+<img alt="Artist 4" class="w-full h-full object-cover rounded-full" data-alt="Close-up of a guitarist's hands playing an electric guitar under stage lights" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBCslLD1MTG0kvSVXYU0c1-dbbS-gSzb6fk9E1YhAPIZBchARTBlvTZSDB5DrfQSxDlNbEQ0G8D0jqFmo5YLvX-mf872-AT7u8C1jCJaWqlrGHWeirtByAMOrWcyzbZJU4CKhHRUcc1mzKhhke_ic13jSQhVbhJ1ENGDC1keE7_oH0FEv1fObQgFxLgi8zwCLZ__Ix5eZKr1xODHgEMxNdHuig0K7KrFTYzRrBsT6_R6l-TwSmzcWa7ur47A_jNx_ahxrQsvw489nI" style="">
+</div>
+<p class="text-white font-medium" style="">The Rift</p>
+</div>
+<div class="flex-none text-center space-y-3 cursor-pointer group">
+<div class="w-32 h-32 rounded-full overflow-hidden border-2 border-transparent group-hover:border-primary transition-all p-1">
+<img alt="Artist 5" class="w-full h-full object-cover rounded-full" data-alt="Cool indie artist wearing sunglasses and a vintage denim jacket against a graffiti wall" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDbdWZQX1qd0PYzSDtyhA2xg8XvWEG36Mg4hsT5iZSUNeAQ276aHHgkFD7gZnmlEzFOypRGeWkWfT92jvqHIDvs5mAgZN8fSlV7hpB0KP2ZsVP9Z_1yG83Nq3eTmFmZLPu1UFZ-ZYV-_lqDAU2X7Q94havbnhRCa0SfFLm-Nr901BC6aE_r5w_ZjUlp_ajP8SPVht575mnITxGrvF7eRfOk9wPOvC_z-A21oR-fSa1CixdekJcGbfNuYHTekMBW4YyIW8SS9xnBdRc" style="">
+</div>
+<p class="text-white font-medium" style="">Neo-Soul</p>
 </div>
 </div>
 </section>
 </main>
-<!-- Bottom Action Area -->
-<div class="fixed bottom-0 left-0 right-0 z-50 p-6 bg-gradient-to-t from-surface via-surface/95 to-transparent pt-12">
-<div class="max-w-2xl mx-auto flex flex-col gap-4">
-<button class="w-full py-5 rounded-full soul-gradient text-white font-bold text-lg tracking-wide shadow-[0_24px_48px_rgba(108,55,169,0.3)] hover:scale-[1.02] active:scale-95 transition-all duration-300">
-                Create Playlist
-            </button>
-<button class="w-full py-2 text-on-surface-variant font-medium text-sm hover:text-white transition-colors">
-                Save as Draft
-            </button>
+<!-- Floating Mini Player -->
+<div class="fixed bottom-28 left-1/2 -translate-x-1/2 w-[90%] max-w-2xl z-50">
+<div class="glass-pane rounded-full px-4 py-2 flex items-center justify-between shadow-[0_24px_48px_rgba(0,0,0,0.5)]">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-md overflow-hidden">
+<img alt="Now Playing" class="w-full h-full object-cover" data-alt="Neon cityscape detail from album art" src="https://lh3.googleusercontent.com/aida-public/AB6AXuATgiGsvl2xjIWXk5Q9E0NMYaZjt6j4NMisg4_it0GyyngxQZQaeJOIwOMGSromYkNhqWarw8BQ3-e9O2gkXU5vI9syqDCjK2Gwfzn5ygbcr68QX0OqgsfnsVvB3uMBV3sa_G1Z1I1qbkaa7u9iJz5I2FbRuhzU1DbJMk_zXGAKAzzdrFpYJpK4TlYxeIasGyJsBEYj1OLZmpCw8ip1rRuQo0p0-3DZkuEvbqdikyMxRdkFmq23leuZtYcU2Yhzvb7X7l5X2wvEkio" style="">
+</div>
+<div class="hidden sm:block">
+<h6 class="text-white text-sm font-bold truncate" style="">Neon Dreams</h6>
+<p class="text-white/60 text-xs truncate" style="">The Midnight Syndicate</p>
 </div>
 </div>
-<!-- Floating Navigation Shell (BottomNavBar) -->
-<nav class="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] md:w-[400px] z-[60] glass-pane rounded-full border border-white/20 shadow-[0_24px_48px_rgba(0,0,0,0.4)] px-4 flex justify-around items-center h-20">
-<a class="flex flex-col items-center justify-center text-white/50 p-3 hover:text-white transition-all scale-105 duration-300 ease-out" href="#">
-<span class="material-symbols-outlined">home</span>
-<span class="font-['Inter'] text-[10px] font-medium">Home</span>
+<div class="flex-1 max-w-xs mx-4 relative h-1 bg-white/20 rounded-full overflow-hidden">
+<div class="absolute left-0 top-0 h-full bg-primary w-2/5 shadow-[0_0_8px_#dab9ff]"></div>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 text-white/70 hover:text-white transition-colors" style="">
+<span class="material-symbols-outlined text-xl" style="">skip_previous</span>
+</button>
+<button class="w-8 h-8 rounded-full bg-white flex items-center justify-center text-background shadow-lg transition-transform active:scale-90" style="">
+<span class="material-symbols-outlined text-xl" style="font-variation-settings: &quot;FILL&quot; 1;">play_arrow</span>
+</button>
+<button class="p-2 text-white/70 hover:text-white transition-colors" style="">
+<span class="material-symbols-outlined text-xl" style="">skip_next</span>
+</button>
+</div>
+</div>
+</div>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md z-50 flex justify-around items-center px-4 bg-[#35343a]/50 backdrop-blur-3xl rounded-full border border-white/20 shadow-[0_24px_48px_rgba(0,0,0,0.06)] h-20">
+<!-- Home (Active) -->
+<a class="flex flex-col items-center justify-center bg-gradient-to-br from-[#dab9ff] to-[#6c37a9] text-white rounded-full p-4 scale-96 active:scale-90 transition-transform" href="#" style="">
+<span class="material-symbols-outlined" style="font-variation-settings: &quot;FILL&quot; 1;">home</span>
+<span class="font-['Inter'] text-[10px] font-medium mt-0.5" style="">Home</span>
 </a>
-<a class="flex flex-col items-center justify-center text-white/50 p-3 hover:text-white transition-all scale-105 duration-300 ease-out" href="#">
-<span class="material-symbols-outlined">search</span>
-<span class="font-['Inter'] text-[10px] font-medium">Explore</span>
+<!-- Explore -->
+<a class="flex flex-col items-center justify-center text-white/60 p-3 hover:text-white transition-colors scale-96 active:scale-90" href="#" style="">
+<span class="material-symbols-outlined" style="">explore</span>
+<span class="font-['Inter'] text-[10px] font-medium mt-0.5" style="">Explore</span>
 </a>
-<a class="flex flex-col items-center justify-center bg-gradient-to-br from-[#dab9ff] to-[#6200EE] text-white rounded-full p-3 scale-105 duration-300 ease-out" href="#">
-<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">library_music</span>
-<span class="font-['Inter'] text-[10px] font-medium">Library</span>
+<!-- Library -->
+<a class="flex flex-col items-center justify-center text-white/60 p-3 hover:text-white transition-colors scale-96 active:scale-90" href="#" style="">
+<span class="material-symbols-outlined" style="">library_music</span>
+<span class="font-['Inter'] text-[10px] font-medium mt-0.5" style="">Library</span>
 </a>
-<a class="flex flex-col items-center justify-center text-white/50 p-3 hover:text-white transition-all scale-105 duration-300 ease-out" href="#">
-<span class="material-symbols-outlined">person</span>
-<span class="font-['Inter'] text-[10px] font-medium">Profile</span>
+<!-- Premium -->
+<a class="flex flex-col items-center justify-center text-white/60 p-3 hover:text-white transition-colors scale-96 active:scale-90" href="#" style="">
+<span class="material-symbols-outlined" style="">workspace_premium</span>
+<span class="font-['Inter'] text-[10px] font-medium mt-0.5" style="">Premium</span>
 </a>
 </nav>
 </body></html>

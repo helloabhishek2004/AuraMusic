@@ -1,40 +1,44 @@
 import { Tabs } from 'expo-router';
 import FloatingNav from '../../src/components/FloatingNav';
+import MiniPlayer from '../../src/components/MiniPlayer';
 import { colors } from '../../src/styles/theme';
 
 export default function TabLayout() {
   return (
-    <Tabs
-      tabBar={(props) => <FloatingNav {...props} />}
-      screenOptions={{
-        headerShown: false,
-        sceneStyle: { backgroundColor: colors.background }
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
+    <>
+      <Tabs
+        tabBar={(props) => <FloatingNav {...props} />}
+        screenOptions={{
+          headerShown: false,
+          sceneStyle: { backgroundColor: colors.background }
         }}
-      />
-      <Tabs.Screen
-        name="browse"
-        options={{
-          title: 'Browse',
-        }}
-      />
-      <Tabs.Screen
-        name="library"
-        options={{
-          title: 'Library',
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: 'Settings',
-        }}
-      />
-    </Tabs>
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: 'Home',
+          }}
+        />
+        <Tabs.Screen
+          name="browse"
+          options={{
+            title: 'Browse',
+          }}
+        />
+        <Tabs.Screen
+          name="library"
+          options={{
+            title: 'Library',
+          }}
+        />
+        <Tabs.Screen
+          name="settings"
+          options={{
+            title: 'Settings',
+          }}
+        />
+      </Tabs>
+      <MiniPlayer />
+    </>
   );
 }

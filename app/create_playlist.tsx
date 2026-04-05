@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import {
    View,
    Text,
@@ -9,6 +9,9 @@ import {
    Animated,
    StatusBar,
    Dimensions,
+   Platform,
+   Alert,
+   Keyboard,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,318 +21,655 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+const { width: SW, height: SH } = Dimensions.get('window');
+const isTablet = SW >= 768;
+const PAD = isTablet ? 32 : 24;
 
+// ── Tokens ────────────────────────────────────────────────────────────────────
 const C = {
-   primary: '#dab9ff',
-   primaryMid: '#6c37a9',
-   secondary: '#46f5e0',
-   surface: '#131318',
-   text: '#e4e1e9',
-   muted: '#cbc3d9',
-   border: 'rgba(255,255,255,0.1)',
+   primary: '#BF5AF2',
+   primaryMid: '#9B38DA',
+   primaryDp: '#7B2FBE',
+   accent: '#46f5e0',
+   bg: '#0D0D12',
+   surface: 'rgba(22,22,30,0.80)',
+   border: 'rgba(255,255,255,0.09)',
+   text: '#FFFFFF',
+   muted: 'rgba(200,192,215,0.70)',
+   dim: 'rgba(170,160,190,0.45)',
+   inputBg: '#FFFFFF',
+   inputText: '#131318',
+   placeholder: 'rgba(100,95,115,0.90)',
 };
 
-const GlassCard = ({ children, style, radius = 24 }: any) => (
-   <View style={[styles.glassBase, { borderRadius: radius }, style]}>
-      <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
-      <View style={[StyleSheet.absoluteFill, styles.glassStroke, { borderRadius: radius }]} />
+const SP = { tension: 60, friction: 9 };
+const PP = { tension: 200, friction: 8 };
+
+const h2r = (hex: string, a: number) => {
+   const r = parseInt(hex.slice(1, 3), 16);
+   const g = parseInt(hex.slice(3, 5), 16);
+   const b = parseInt(hex.slice(5, 7), 16);
+   return `rgba(${r},${g},${b},${a})`;
+};
+
+// ── Full song catalogue (for search + suggested) ──────────────────────────────
+const ALL_SONGS = [
+   { id: '1', title: 'Electric Dreams', artist: 'Neon Pulse', art: 'https://picsum.photos/seed/ed/200' },
+   { id: '2', title: 'Urban Echoes', artist: 'Lofi Soul', art: 'https://picsum.photos/seed/ue/200' },
+   { id: '3', title: 'Midnight Voyage', artist: 'The Explorers', art: 'https://picsum.photos/seed/mv/200' },
+   { id: '4', title: 'Crystal Rain', artist: 'Aurora Drift', art: 'https://picsum.photos/seed/cr/200' },
+   { id: '5', title: 'Neon Horizon', artist: 'Synthwave City', art: 'https://picsum.photos/seed/nh/200' },
+   { id: '6', title: 'Void Walker', artist: 'Deep Bass Theory', art: 'https://picsum.photos/seed/vw/200' },
+   { id: '7', title: 'Solar Flare', artist: 'Cosmic Echo', art: 'https://picsum.photos/seed/sf/200' },
+   { id: '8', title: 'Spectral Drift', artist: 'Aether Flow', art: 'https://picsum.photos/seed/sd/200' },
+   { id: '9', title: 'Quantum Bloom', artist: 'The Synthesizer', art: 'https://picsum.photos/seed/qb/200' },
+   { id: '10', title: 'Starbound Journey', artist: 'Nebula Voyager', art: 'https://picsum.photos/seed/sj/200' },
+   { id: '11', title: 'Luminous Path', artist: 'Lofi Dreamer', art: 'https://picsum.photos/seed/lp/200' },
+   { id: '12', title: 'Cascade Waves', artist: 'Calm Horizon', art: 'https://picsum.photos/seed/cw/200' },
+];
+const MOODS = ['#Chill', '#Workout', '#Focus', '#Sleep', '#Party'];
+
+// ── 4-Layer Liquid Glass ──────────────────────────────────────────────────────
+const Glass = ({ children, style, r = 20, blur = 60, accent = false }: any) => (
+   <View style={[{ borderRadius: r, overflow: 'hidden', backgroundColor: C.surface, borderWidth: 1, borderColor: C.border }, style]}>
+      <BlurView intensity={blur} tint="dark" style={StyleSheet.absoluteFill} />
+      {/* L2 specular top */}
+      <View style={{ position: 'absolute', top: 0, left: r * 0.5, right: r * 0.5, height: 1.5, backgroundColor: 'rgba(255,255,255,0.22)', zIndex: 8 }} />
+      {/* L2 specular left strip */}
+      <View style={{ position: 'absolute', left: 7, top: 10, bottom: 10, width: 2.5, backgroundColor: 'rgba(255,255,255,0.13)', transform: [{ skewX: '-8deg' }], zIndex: 8 }} />
+      {/* optional accent tint */}
+      {accent && <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: r, backgroundColor: h2r(C.primary, 0.07) }} />}
+      {/* L4 refraction */}
+      <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: r, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', backgroundColor: 'rgba(255,255,255,0.025)' }} />
       {children}
    </View>
 );
 
-const FadeIn = ({ children, delay = 0 }: any) => {
-   const opacity = useRef(new Animated.Value(0)).current;
-   const translate = useRef(new Animated.Value(12)).current;
-
+// ── Materialise entrance ──────────────────────────────────────────────────────
+const Mat = ({ children, delay = 0, style }: any) => {
+   const sc = useRef(new Animated.Value(0.94)).current;
+   const op = useRef(new Animated.Value(0)).current;
+   const ty = useRef(new Animated.Value(14)).current;
    useEffect(() => {
-      Animated.parallel([
-         Animated.timing(opacity, { toValue: 1, duration: 500, delay, useNativeDriver: true }),
-         Animated.spring(translate, { toValue: 0, delay, useNativeDriver: true }),
-      ]).start();
+      const t = setTimeout(() => {
+         Animated.parallel([
+            Animated.spring(sc, { toValue: 1, ...SP, useNativeDriver: true }),
+            Animated.timing(op, { toValue: 1, duration: 380, useNativeDriver: true }),
+            Animated.spring(ty, { toValue: 0, ...SP, useNativeDriver: true }),
+         ]).start();
+      }, delay);
+      return () => clearTimeout(t);
    }, []);
+   return <Animated.View style={[{ opacity: op, transform: [{ scale: sc }, { translateY: ty }] }, style]}>{children}</Animated.View>;
+};
+
+// ── Press scale hook ──────────────────────────────────────────────────────────
+const useP = () => {
+   const sc = useRef(new Animated.Value(1)).current;
+   return {
+      sc,
+      onIn: () => Animated.spring(sc, { toValue: 0.88, ...PP, useNativeDriver: true }).start(),
+      onOut: () => Animated.spring(sc, { toValue: 1.0, ...PP, useNativeDriver: true }).start(),
+   };
+};
+
+// ── Track row (add/remove) ────────────────────────────────────────────────────
+const TrackRow = ({ track, added, onToggle }: any) => {
+   const p = useP();
+   const sc = useRef(new Animated.Value(1)).current;
+   const bg = useRef(new Animated.Value(0)).current;
+
+   const toggle = () => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      // pulse icon
+      Animated.sequence([
+         Animated.spring(sc, { toValue: 0.7, ...PP, useNativeDriver: true }),
+         Animated.spring(sc, { toValue: 1.0, ...PP, useNativeDriver: true }),
+      ]).start();
+      Animated.timing(bg, { toValue: added ? 0 : 1, duration: 250, useNativeDriver: false }).start();
+      onToggle(track.id);
+   };
+
+   const btnBg = bg.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0.07)', h2r(C.primary, 0.20)] });
+   const btnBorder = bg.interpolate({ inputRange: [0, 1], outputRange: [C.border, h2r(C.primary, 0.50)] });
 
    return (
-      <Animated.View style={{ opacity, transform: [{ translateY: translate }] }}>
-         {children}
+      <Animated.View style={{ transform: [{ scale: p.sc }] }}>
+         <Glass style={s.trackItem} r={20} blur={55}>
+            <TouchableOpacity
+               style={s.trackInner}
+               onPressIn={p.onIn} onPressOut={p.onOut}
+               activeOpacity={1}
+            >
+               <Image source={{ uri: track.art }} style={s.trackArt} contentFit="cover" transition={200} />
+               <View style={s.trackMeta}>
+                  <Text style={s.trackTitle} numberOfLines={1}>{track.title}</Text>
+                  <Text style={s.trackArtist} numberOfLines={1}>{track.artist}</Text>
+               </View>
+               {/* + / ✓ button */}
+               <TouchableOpacity onPress={toggle} activeOpacity={1} style={s.addBtnOuter}>
+                  <Animated.View style={[s.addBtn, { backgroundColor: btnBg, borderColor: btnBorder }]}>
+                     <Animated.View style={{ transform: [{ scale: sc }] }}>
+                        <Ionicons
+                           name={added ? 'checkmark' : 'add'}
+                           size={20}
+                           color={added ? C.primary : C.text}
+                        />
+                     </Animated.View>
+                  </Animated.View>
+               </TouchableOpacity>
+            </TouchableOpacity>
+         </Glass>
       </Animated.View>
    );
 };
 
+// ── Cover art placeholder ────────────────────────────────────────────────────
+const CoverArt = ({ addedTracks }: { addedTracks: string[] }) => {
+   const pulse = useRef(new Animated.Value(1)).current;
+   useEffect(() => {
+      Animated.loop(Animated.sequence([
+         Animated.timing(pulse, { toValue: 1.05, duration: 2200, useNativeDriver: true }),
+         Animated.timing(pulse, { toValue: 1.0, duration: 2200, useNativeDriver: true }),
+      ])).start();
+   }, []);
+
+   const firstThree = addedTracks.slice(0, 4);
+   return (
+      <Animated.View style={[s.coverOuter, { transform: [{ scale: pulse }] }]}>
+         <Glass style={s.coverBox} r={28} blur={40}>
+            {/* bg gradient inside art */}
+            <LinearGradient
+               colors={[h2r(C.primaryDp, 0.55), h2r(C.primaryMid, 0.30), 'transparent']}
+               style={StyleSheet.absoluteFill}
+            />
+            {firstThree.length === 0 ? (
+               <View style={s.coverEmpty}>
+                  <Ionicons name="musical-note" size={64} color={h2r(C.primary, 0.35)} />
+                  <Text style={s.coverHint}>Add tracks to{'\n'}preview cover</Text>
+               </View>
+            ) : (
+               <View style={s.coverGrid}>
+                  {ALL_SONGS.filter(t => firstThree.includes(t.id)).map((t, i) => (
+                     <Image key={t.id} source={{ uri: t.art }} style={[s.coverGridImg, firstThree.length === 1 && { width: 180, height: 180, borderRadius: 20 }]} contentFit="cover" />
+                  ))}
+               </View>
+            )}
+            {/* refraction ring */}
+            <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }} />
+            {/* top specular arc */}
+            <View style={{ position: 'absolute', top: 0, left: 28, right: 28, height: 1.5, backgroundColor: 'rgba(255,255,255,0.24)' }} />
+            {/* drop shadow bloom */}
+         </Glass>
+         <View style={s.coverGlow} />
+      </Animated.View>
+   );
+};
+
+// ── MAIN SCREEN ───────────────────────────────────────────────────────────────
 export default function CreatePlaylistScreen() {
    const insets = useSafeAreaInsets();
    const router = useRouter();
 
    const [name, setName] = useState('');
    const [desc, setDesc] = useState('');
-   const [privacy, setPrivacy] = useState('Public');
    const [mood, setMood] = useState('#Chill');
+   const [query, setQuery] = useState('');
+   const [added, setAdded] = useState<string[]>([]);
+   const [showAll, setShowAll] = useState(false);
 
-   const moods = ['#Chill', '#Workout', '#Focus', '#Sleep', '#Party'];
+   // Animated bg
+   const bgP = useRef(new Animated.Value(0)).current;
+   useEffect(() => {
+      Animated.loop(Animated.sequence([
+         Animated.timing(bgP, { toValue: 1, duration: 7000, useNativeDriver: false }),
+         Animated.timing(bgP, { toValue: 2, duration: 7000, useNativeDriver: false }),
+         Animated.timing(bgP, { toValue: 0, duration: 7000, useNativeDriver: false }),
+      ])).start();
+   }, []);
+   const b1Op = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: [0.14, 0.22, 0.10] });
+   const b2Op = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: [0.08, 0.14, 0.18] });
+   const b1T = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: ['-5%', '10%', '-8%'] });
 
-   const tracks = useMemo(() => [
-      { id: '1', title: 'Electric Dreams', artist: 'Neon Pulse', art: 'https://picsum.photos/200?1' },
-      { id: '2', title: 'Urban Echoes', artist: 'Lofi Soul', art: 'https://picsum.photos/200?2' },
-      { id: '3', title: 'Midnight Voyage', artist: 'The Explorers', art: 'https://picsum.photos/200?3' },
-   ], []);
+   // Real-time search filter
+   const filtered = useMemo(() => {
+      if (!query.trim()) return showAll ? ALL_SONGS : ALL_SONGS.slice(0, 3);
+      return ALL_SONGS.filter(t =>
+         t.title.toLowerCase().includes(query.toLowerCase()) ||
+         t.artist.toLowerCase().includes(query.toLowerCase())
+      );
+   }, [query, showAll]);
+
+   const toggleAdded = useCallback((id: string) => {
+      setAdded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+   }, []);
+
+   const backP = useP();
+   const createP = useP();
+
+   const handleCreate = () => {
+      if (!name.trim()) {
+         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+         Alert.alert('Name required', 'Please give your playlist a name.');
+         return;
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Playlist Created!', `"${name}" has been created with ${added.length} track${added.length !== 1 ? 's' : ''}.`);
+   };
 
    return (
-      <View style={styles.root}>
-         <StatusBar barStyle="light-content" />
-         
-         {/* Deep Mesh Background */}
-         <View style={StyleSheet.absoluteFill}>
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: '#131318' }]} />
-            <LinearGradient colors={['rgba(108, 55, 169, 0.12)', 'transparent']} style={styles.glowTopLeft} />
-            <LinearGradient colors={['rgba(70, 245, 224, 0.08)', 'transparent']} style={styles.glowTopRight} />
+      <View style={s.root}>
+         <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+
+         {/* ── ANIMATED BG ───────────────────────────────────────────────────── */}
+         <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]} />
+            <Animated.View style={[s.blob, { width: SW * 0.90, height: SW * 0.90, backgroundColor: '#2a0053', left: '-25%', top: b1T, opacity: b1Op }]} />
+            <Animated.View style={[s.blob, { width: SW * 0.70, height: SW * 0.70, backgroundColor: '#003731', right: '-25%', bottom: '15%', opacity: b2Op }]} />
+            <Animated.View style={[s.blob, {
+               width: SW * 0.50, height: SW * 0.50, backgroundColor: '#1a0038', left: '-8%', bottom: '35%',
+               opacity: bgP.interpolate({ inputRange: [0, 1, 2], outputRange: [0.06, 0.13, 0.08] })
+            }]} />
+            <LinearGradient
+               colors={['rgba(13,13,18,0.05)', 'rgba(13,13,18,0.60)', 'rgba(13,13,18,0.95)']}
+               locations={[0, 0.4, 1]}
+               style={StyleSheet.absoluteFill}
+            />
          </View>
 
-         {/* Header */}
-         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-            <TouchableOpacity onPress={() => router.back()} style={styles.headerBtnOuter}>
-               <GlassCard style={styles.headerBtn} radius={22}>
-                  <Ionicons name="arrow-back" size={20} color={C.primary} />
-               </GlassCard>
-            </TouchableOpacity>
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-               <Text style={styles.headerTitle}>Create Playlist</Text>
-            </View>
+         {/* ── HEADER ────────────────────────────────────────────────────────── */}
+         <View style={[s.header, { paddingTop: insets.top + (isTablet ? 24 : 16) }]}>
+            <Animated.View style={{ transform: [{ scale: backP.sc }] }}>
+               <TouchableOpacity
+                  style={s.backCircle}
+                  onPressIn={backP.onIn} onPressOut={backP.onOut}
+                  onPress={() => router.back()} activeOpacity={1}
+               >
+                  <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+                  <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 22, borderWidth: 1, borderColor: C.border, backgroundColor: 'rgba(255,255,255,0.04)' }} />
+                  <Ionicons name="chevron-back" size={22} color={C.primary} />
+               </TouchableOpacity>
+            </Animated.View>
+
+            <Text style={s.headerTitle}>Create Playlist</Text>
+            {/* balance spacer — no 3-dot needed */}
+            <View style={{ width: 44 }} />
          </View>
 
+         {/* ── SCROLL ────────────────────────────────────────────────────────── */}
          <ScrollView
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 200, paddingTop: 20 }}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingHorizontal: PAD, paddingTop: 20, paddingBottom: 180 }}
          >
-            {/* Title Section */}
-            <FadeIn delay={100}>
-               <View style={styles.heroSection}>
-                  <Text style={styles.heroTitle}>Build your <Text style={{ color: C.primary }}>next vibe</Text></Text>
-                  <Text style={styles.heroSub}>Set the mood, add the tracks, and let the rhythm flow.</Text>
+            {/* Hero text */}
+            <Mat delay={60}>
+               <View style={s.heroSection}>
+                  <Text style={s.heroTitle}>
+                     Build your <Text style={{ color: C.primary }}>next vibe</Text>
+                  </Text>
+                  <Text style={s.heroSub}>Set the mood, add the tracks, and let the rhythm flow.</Text>
                </View>
-            </FadeIn>
+            </Mat>
 
-            {/* Cover Section */}
-            <FadeIn delay={180}>
-               <View style={styles.coverWrap}>
-                  <GlassCard style={styles.coverBox} radius={24}>
-                     <View style={styles.coverPlaceholder}>
-                        <Ionicons name="musical-note" size={64} color="rgba(218, 185, 255, 0.3)" />
-                     </View>
-                  </GlassCard>
-                  <TouchableOpacity style={styles.autoGenBtn}>
-                     <GlassCard style={styles.autoGenGlass} radius={20}>
-                        <View style={styles.autoGenContent}>
-                           <Ionicons name="sparkles" size={14} color={C.secondary} />
-                           <Text style={styles.autoGenText}>Auto generate cover</Text>
+            {/* Cover art */}
+            <Mat delay={120}>
+               <View style={s.coverWrap}>
+                  <CoverArt addedTracks={added} />
+                  {/* Auto generate cover pill */}
+                  <TouchableOpacity style={s.autoGenBtn} activeOpacity={0.85}>
+                     <Glass style={s.autoGenGlass} r={22} blur={50} accent>
+                        <View style={s.autoGenRow}>
+                           <Ionicons name="sparkles" size={13} color={C.accent} />
+                           <Text style={s.autoGenText}>Auto generate cover</Text>
                         </View>
-                     </GlassCard>
+                     </Glass>
                   </TouchableOpacity>
                </View>
-            </FadeIn>
+            </Mat>
 
-            {/* Form Fields */}
-            <FadeIn delay={260}>
-               <View style={styles.formSection}>
-                  <View style={styles.inputGroup}>
-                     <Text style={styles.inputLabel}>PLAYLIST NAME</Text>
-                     <TextInput
-                        placeholder="Late Night Jazz..."
-                        placeholderTextColor="#6a6575"
-                        style={styles.nameInput}
-                        value={name}
-                        onChangeText={setName}
-                     />
+            {/* Form fields */}
+            <Mat delay={180}>
+               <View style={s.formSection}>
+                  {/* Playlist name — white pill (matches image) */}
+                  <View style={s.inputGroup}>
+                     <Text style={s.inputLabel}>PLAYLIST NAME</Text>
+                     <View style={s.nameInputWrap}>
+                        <TextInput
+                           placeholder="Late Night Jazz..."
+                           placeholderTextColor={C.placeholder}
+                           style={s.nameInput}
+                           value={name}
+                           onChangeText={setName}
+                           returnKeyType="done"
+                           onSubmitEditing={() => Keyboard.dismiss()}
+                        />
+                     </View>
                   </View>
-                  <View style={styles.inputGroup}>
-                     <Text style={styles.inputLabel}>DESCRIPTION</Text>
-                     <TextInput
-                        placeholder="Describe the vibe of this collection..."
-                        placeholderTextColor="#6a6575"
-                        style={[styles.nameInput, styles.descInput]}
-                        multiline
-                        value={desc}
-                        onChangeText={setDesc}
-                     />
-                  </View>
-               </View>
-            </FadeIn>
 
-            {/* Privacy */}
-            <FadeIn delay={340}>
-               <View style={styles.sectionWrap}>
-                  <Text style={styles.sectionHeading}>Privacy Setting</Text>
-                  <View style={styles.privacyRow}>
-                     <TouchableOpacity onPress={() => setPrivacy('Public')} style={[styles.privacyBtn, privacy === 'Public' && styles.privacyActive]}>
-                        {privacy === 'Public' ? <LinearGradient colors={[C.primary, C.primaryMid]} style={StyleSheet.absoluteFill} /> : <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255,255,255,0.06)' }]} />}
-                        <Ionicons name="globe" size={16} color={privacy === 'Public' ? '#131318' : 'white'} />
-                        <Text style={[styles.privacyText, { color: privacy === 'Public' ? '#131318' : 'white' }]}>Public</Text>
-                     </TouchableOpacity>
-
-                     <TouchableOpacity onPress={() => setPrivacy('Private')} style={[styles.privacyBtn, privacy === 'Private' && styles.privacyActive]}>
-                        {privacy === 'Private' ? <LinearGradient colors={[C.primary, C.primaryMid]} style={StyleSheet.absoluteFill} /> : <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255,255,255,0.06)' }]} />}
-                        <Ionicons name="lock-closed" size={16} color={privacy === 'Private' ? '#131318' : 'white'} />
-                        <Text style={[styles.privacyText, { color: privacy === 'Private' ? '#131318' : 'white' }]}>Private</Text>
-                     </TouchableOpacity>
-
-                     <TouchableOpacity onPress={() => setPrivacy('Shared')} style={[styles.privacyBtn, privacy === 'Shared' && styles.privacyActive]}>
-                        {privacy === 'Shared' ? <LinearGradient colors={[C.primary, C.primaryMid]} style={StyleSheet.absoluteFill} /> : <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255,255,255,0.06)' }]} />}
-                        <Ionicons name="people" size={16} color={privacy === 'Shared' ? '#131318' : 'white'} />
-                        <Text style={[styles.privacyText, { color: privacy === 'Shared' ? '#131318' : 'white' }]}>Shared</Text>
-                     </TouchableOpacity>
+                  {/* Description — glass dark */}
+                  <View style={s.inputGroup}>
+                     <Text style={s.inputLabel}>DESCRIPTION</Text>
+                     <Glass style={s.descWrap} r={20} blur={50}>
+                        <TextInput
+                           placeholder="Describe the vibe of this collection..."
+                           placeholderTextColor={C.dim}
+                           style={s.descInput}
+                           multiline
+                           value={desc}
+                           onChangeText={setDesc}
+                           textAlignVertical="top"
+                        />
+                     </Glass>
                   </View>
                </View>
-            </FadeIn>
+            </Mat>
 
-            {/* Mood Tags */}
-            <FadeIn delay={420}>
-               <View style={styles.sectionWrap}>
-                  <Text style={styles.sectionHeading}>What's the mood?</Text>
-                  <View style={styles.moodWrap}>
-                     {moods.map((item) => (
-                        <TouchableOpacity key={item} onPress={() => setMood(item)}>
-                           <GlassCard style={[styles.moodTag, mood === item && styles.moodTagActive]} radius={18}>
-                              <Text style={[styles.moodTagText, mood === item && { color: C.secondary }]}>{item}</Text>
-                           </GlassCard>
-                        </TouchableOpacity>
-                     ))}
+            {/* Mood tags */}
+            <Mat delay={260}>
+               <View style={s.sectionBlock}>
+                  <Text style={s.sectionTitle}>What's the mood?</Text>
+                  <View style={s.moodRow}>
+                     {MOODS.map((item, idx) => {
+                        const active = mood === item;
+                        const mp = useP();
+                        return (
+                           <Animated.View key={item} style={{ transform: [{ scale: mp.sc }] }}>
+                              <TouchableOpacity
+                                 onPress={() => { setMood(item); Haptics.selectionAsync(); }}
+                                 onPressIn={mp.onIn} onPressOut={mp.onOut}
+                                 activeOpacity={1}
+                              >
+                                 <Glass style={[s.moodTag, active && s.moodTagActive]} r={18} blur={40} accent={active}>
+                                    {active && (
+                                       <LinearGradient
+                                          colors={[h2r(C.primary, 0.18), h2r(C.primaryMid, 0.10)]}
+                                          style={StyleSheet.absoluteFill}
+                                       />
+                                    )}
+                                    <Text style={[s.moodText, active && s.moodTextActive]}>{item}</Text>
+                                 </Glass>
+                              </TouchableOpacity>
+                           </Animated.View>
+                        );
+                     })}
                   </View>
                </View>
-            </FadeIn>
+            </Mat>
 
-            {/* Suggested Tracks */}
-            <FadeIn delay={500}>
-               <View style={styles.listHeader}>
-                  <Text style={styles.sectionHeadingLarge}>Suggested Tracks</Text>
-                  <TouchableOpacity><Text style={styles.viewAll}>View all</Text></TouchableOpacity>
+            {/* Suggested tracks + search */}
+            <Mat delay={340}>
+               <View style={s.listHeader}>
+                  <Text style={s.listTitle}>Suggested Tracks</Text>
+                  <TouchableOpacity onPress={() => { setShowAll(v => !v); Haptics.selectionAsync(); }}>
+                     <Text style={s.viewAll}>{showAll ? 'Show less' : 'View all'}</Text>
+                  </TouchableOpacity>
                </View>
-               <View style={styles.searchWrap}>
-                  <Ionicons name="search" size={20} color="#6a6575" style={{ marginLeft: 16 }} />
+            </Mat>
+
+            {/* Search bar */}
+            <Mat delay={380}>
+               <Glass style={s.searchBar} r={30} blur={60}>
+                  <Ionicons name="search" size={19} color={C.dim} style={s.searchIcon} />
                   <TextInput
                      placeholder="Search for artists or songs"
-                     placeholderTextColor="#6a6575"
-                     style={styles.searchInput}
+                     placeholderTextColor={C.dim}
+                     style={s.searchInput}
+                     value={query}
+                     onChangeText={setQuery}
+                     returnKeyType="search"
+                     clearButtonMode="while-editing"
                   />
-               </View>
-               <View style={styles.trackList}>
-                  {tracks.map((track) => (
-                     <GlassCard key={track.id} style={styles.trackItem} radius={20}>
-                        <Image source={{ uri: track.art }} style={styles.trackArt} />
-                        <View style={styles.trackMeta}>
-                           <Text style={styles.trackTitle}>{track.title}</Text>
-                           <Text style={styles.trackArtist}>{track.artist}</Text>
-                        </View>
-                        <TouchableOpacity style={styles.addBtn}>
-                           <Ionicons name="add" size={22} color={C.primary} />
-                        </TouchableOpacity>
-                     </GlassCard>
-                  ))}
-               </View>
-            </FadeIn>
+                  {query.length > 0 && (
+                     <TouchableOpacity onPress={() => setQuery('')} style={s.clearBtn}>
+                        <Ionicons name="close-circle" size={18} color={C.dim} />
+                     </TouchableOpacity>
+                  )}
+               </Glass>
+            </Mat>
+
+            {/* Track list */}
+            <View style={s.trackList}>
+               {filtered.length === 0 ? (
+                  <Mat delay={0}>
+                     <View style={s.emptySearch}>
+                        <Ionicons name="search-outline" size={36} color={C.dim} />
+                        <Text style={s.emptyText}>No results for "{query}"</Text>
+                     </View>
+                  </Mat>
+               ) : (
+                  filtered.map((track, idx) => (
+                     <Mat key={track.id} delay={idx * 40}>
+                        <TrackRow track={track} added={added.includes(track.id)} onToggle={toggleAdded} />
+                     </Mat>
+                  ))
+               )}
+            </View>
+
+            {/* Added count badge */}
+            {added.length > 0 && (
+               <Mat delay={0}>
+                  <View style={s.addedBadge}>
+                     <Glass style={s.addedBadgeInner} r={16} blur={50} accent>
+                        <LinearGradient colors={[h2r(C.primary, 0.15), h2r(C.primaryMid, 0.08)]} style={StyleSheet.absoluteFill} />
+                        <Ionicons name="musical-notes" size={16} color={C.primary} />
+                        <Text style={s.addedText}>{added.length} track{added.length !== 1 ? 's' : ''} added</Text>
+                     </Glass>
+                  </View>
+               </Mat>
+            )}
          </ScrollView>
 
-         {/* Sticky Footer */}
-         <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-            <View style={StyleSheet.absoluteFill}>
-               <LinearGradient colors={['transparent', '#131318']} style={{ flex: 1 }} />
-            </View>
-            <TouchableOpacity style={styles.createBtn} activeOpacity={0.9}>
-               <LinearGradient colors={[C.primary, C.primaryMid]} style={StyleSheet.absoluteFill} />
-               <Text style={styles.createText}>Create Playlist</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.draftBtn}>
-               <Text style={styles.draftText}>Save as Draft</Text>
-            </TouchableOpacity>
+         {/* ── STICKY FOOTER ─────────────────────────────────────────────────── */}
+         <View style={[s.footer, { paddingBottom: insets.bottom + 20 }]}>
+            {/* Fade overlay */}
+            <LinearGradient
+               colors={['transparent', 'rgba(13,13,18,0.80)', C.bg]}
+               style={s.footerFade}
+               pointerEvents="none"
+            />
+            <Animated.View style={[{ width: '100%' }, { transform: [{ scale: createP.sc }] }]}>
+               <TouchableOpacity
+                  style={s.createBtn}
+                  onPressIn={createP.onIn} onPressOut={createP.onOut}
+                  onPress={handleCreate} activeOpacity={1}
+               >
+                  {/* 4-layer glass pill button */}
+                  <LinearGradient
+                     colors={[C.primary, C.primaryMid, C.primaryDp]}
+                     start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                     style={StyleSheet.absoluteFill}
+                  />
+                  {/* specular top arc */}
+                  <View style={{ position: 'absolute', top: 4, left: 32, right: 32, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.30)' }} />
+                  {/* specular left */}
+                  <View style={{ position: 'absolute', left: 14, top: 10, width: 28, bottom: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.16)', transform: [{ skewX: '-8deg' }] }} />
+                  {/* refraction */}
+                  <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 32, borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)', backgroundColor: 'rgba(255,255,255,0.04)' }} />
+                  <Text style={s.createText}>Create Playlist</Text>
+               </TouchableOpacity>
+            </Animated.View>
          </View>
       </View>
    );
 }
 
-const styles = StyleSheet.create({
-   root: { flex: 1, backgroundColor: '#131318' },
-   glassBase: { overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-   glassStroke: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+// ── Styles ────────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+   root: { flex: 1, backgroundColor: C.bg },
+   blob: { position: 'absolute', borderRadius: SW * 0.5 },
 
-   glowTopLeft: { position: 'absolute', top: -100, left: -100, width: 300, height: 300, borderRadius: 150 },
-   glowTopRight: { position: 'absolute', top: -50, right: -50, width: 250, height: 250, borderRadius: 125 },
+   // header
+   header: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: PAD, paddingBottom: 12,
+   },
+   backCircle: {
+      width: 44, height: 44, borderRadius: 22,
+      justifyContent: 'center', alignItems: 'center', overflow: 'hidden',
+   },
+   headerTitle: {
+      fontSize: 18, fontWeight: '700', color: C.text,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+      letterSpacing: -0.2,
+   },
 
-   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
-   headerBtnOuter: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
-   headerBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-   headerTitle: { color: 'white', fontSize: 18, fontWeight: '700' },
-
+   // hero
    heroSection: { marginBottom: 32 },
-   heroTitle: { color: 'white', fontSize: 42, fontWeight: '800', letterSpacing: -1.2, lineHeight: 48 },
-   heroSub: { color: C.muted, fontSize: 16, marginTop: 8, lineHeight: 22 },
+   heroTitle: {
+      fontSize: isTablet ? 48 : 40, fontWeight: '900', color: C.text,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+      letterSpacing: -1.3, lineHeight: isTablet ? 54 : 46,
+   },
+   heroSub: {
+      fontSize: 16, color: C.muted, marginTop: 10, lineHeight: 23,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+   },
 
+   // cover
    coverWrap: { alignItems: 'center', marginBottom: 40 },
-   coverBox: { width: 200, height: 200, justifyContent: 'center', alignItems: 'center' },
-   coverPlaceholder: { opacity: 0.8 },
-   autoGenBtn: { marginTop: 22 },
-   autoGenGlass: { paddingVertical: 10, paddingHorizontal: 18 },
-   autoGenContent: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-   autoGenText: { color: C.secondary, fontWeight: '700', fontSize: 14 },
+   coverOuter: { position: 'relative', alignItems: 'center' },
+   coverBox: {
+      width: isTablet ? 220 : 196, height: isTablet ? 220 : 196,
+      justifyContent: 'center', alignItems: 'center',
+      ...Platform.select({
+         ios: { shadowColor: C.primary, shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.55, shadowRadius: 28 },
+         android: { elevation: 20 },
+      }),
+   },
+   coverEmpty: { alignItems: 'center', gap: 10 },
+   coverHint: { fontSize: 12, color: C.dim, textAlign: 'center', fontWeight: '500' },
+   coverGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', padding: 4, gap: 4, borderRadius: 24, overflow: 'hidden' },
+   coverGridImg: { width: 88, height: 88, borderRadius: 10 },
+   coverGlow: {
+      position: 'absolute', bottom: -16, left: '15%', right: '15%', height: 32,
+      ...Platform.select({
+         ios: { shadowColor: C.primary, shadowRadius: 20, shadowOpacity: 0.60, shadowOffset: { width: 0, height: 0 } },
+      }),
+   },
+   autoGenBtn: { marginTop: 20 },
+   autoGenGlass: { paddingVertical: 11, paddingHorizontal: 20 },
+   autoGenRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+   autoGenText: {
+      fontSize: 14, fontWeight: '700', color: C.accent,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium'
+   },
 
-   formSection: { gap: 24, marginBottom: 32 },
-   inputGroup: { gap: 8 },
-   inputLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginLeft: 16 },
-   nameInput: { 
-      backgroundColor: 'white', 
-      borderRadius: 40, 
-      height: 60, 
-      color: '#131318', 
-      fontSize: 18, 
-      fontWeight: '600', 
+   // form
+   formSection: { gap: 22, marginBottom: 32 },
+   inputGroup: { gap: 9 },
+   inputLabel: {
+      fontSize: 11, fontWeight: '800', color: 'rgba(255,255,255,0.45)',
+      letterSpacing: 1.6, marginLeft: 4,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+   },
+   // white pill (matches image exactly)
+   nameInputWrap: {
+      backgroundColor: C.inputBg, borderRadius: 40, height: 62,
+      justifyContent: 'center',
+      ...Platform.select({
+         ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.14, shadowRadius: 14 },
+         android: { elevation: 6 },
+      }),
+   },
+   nameInput: {
+      fontSize: 17, fontWeight: '600', color: C.inputText,
       paddingHorizontal: 24,
-      shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
    },
-   descInput: { 
-      backgroundColor: 'rgba(255,255,255,0.06)', 
-      height: 110, 
-      textAlignVertical: 'top', 
-      paddingTop: 18, 
-      color: 'white',
+   descWrap: { minHeight: 108 },
+   descInput: {
+      fontSize: 15, color: C.text, padding: 18, minHeight: 108,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+   },
+
+   // mood
+   sectionBlock: { marginBottom: 32 },
+   sectionTitle: {
+      fontSize: 22, fontWeight: '800', color: C.text, marginBottom: 16,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', letterSpacing: -0.3,
+   },
+   moodRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+   moodTag: { paddingHorizontal: 18, paddingVertical: 10, overflow: 'hidden' },
+   moodTagActive: { borderColor: h2r(C.primary, 0.50) },
+   moodText: {
+      fontSize: 14, fontWeight: '600', color: C.muted,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+   },
+   moodTextActive: { color: C.primary, fontWeight: '700' },
+
+   // track list
+   listHeader: {
+      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 18,
+   },
+   listTitle: {
+      fontSize: isTablet ? 28 : 24, fontWeight: '800', color: C.text,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium', letterSpacing: -0.4,
+   },
+   viewAll: { fontSize: 14, fontWeight: '700', color: C.primary },
+
+   // search
+   searchBar: { flexDirection: 'row', alignItems: 'center', height: 56, marginBottom: 18 },
+   searchIcon: { marginLeft: 18, marginRight: 4 },
+   searchInput: {
+      flex: 1, fontSize: 16, color: C.text, paddingHorizontal: 8,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+   },
+   clearBtn: { paddingRight: 14 },
+
+   // tracks
+   trackList: { gap: 11 },
+   trackItem: {},
+   trackInner: { flexDirection: 'row', alignItems: 'center', padding: 12, gap: 14 },
+   trackArt: {
+      width: isTablet ? 60 : 54, height: isTablet ? 60 : 54, borderRadius: 12,
+      backgroundColor: 'rgba(255,255,255,0.05)',
+   },
+   trackMeta: { flex: 1 },
+   trackTitle: {
+      fontSize: isTablet ? 16 : 15, fontWeight: '700', color: C.text,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+   },
+   trackArtist: { fontSize: 12, color: C.muted, marginTop: 3 },
+   addBtnOuter: { padding: 2 },
+   addBtn: {
+      width: 38, height: 38, borderRadius: 19,
+      justifyContent: 'center', alignItems: 'center',
       borderWidth: 1,
-      borderColor: 'rgba(255,255,255,0.1)',
    },
 
-   sectionWrap: { marginBottom: 32 },
-   sectionHeading: { color: 'white', fontSize: 20, fontWeight: '700', marginBottom: 16 },
-   privacyRow: { flexDirection: 'row', gap: 12 },
-   privacyBtn: { 
-      flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, paddingVertical: 12, borderRadius: 24,
-      overflow: 'hidden', minWidth: 100, justifyContent: 'center',
-   },
-   privacyActive: { elevation: 8, shadowColor: C.primary, shadowOpacity: 0.2, shadowRadius: 10 },
-   privacyText: { fontSize: 14, fontWeight: '700' },
+   // empty search
+   emptySearch: { alignItems: 'center', paddingVertical: 32, gap: 10 },
+   emptyText: { fontSize: 15, color: C.dim, fontWeight: '500' },
 
-   moodWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-   moodTag: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: 'rgba(255,255,255,0.04)' },
-   moodTagActive: { borderColor: C.primary, backgroundColor: 'rgba(218,185,255,0.1)' },
-   moodTagText: { color: '#cbc3d9', fontWeight: '600', fontSize: 14 },
-
-   listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 20 },
-   sectionHeadingLarge: { color: 'white', fontSize: 26, fontWeight: '800' },
-   viewAll: { color: C.primary, fontWeight: '700', fontSize: 14 },
-   searchWrap: { 
-      flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 30, height: 60,
-      marginBottom: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+   // added badge
+   addedBadge: { alignItems: 'center', marginTop: 20 },
+   addedBadgeInner: {
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      paddingHorizontal: 18, paddingVertical: 10, overflow: 'hidden',
    },
-   searchInput: { flex: 1, paddingHorizontal: 16, color: 'white', fontSize: 16 },
-   trackList: { gap: 12 },
-   trackItem: { flexDirection: 'row', alignItems: 'center', padding: 12 },
-   trackArt: { width: 56, height: 56, borderRadius: 12 },
-   trackMeta: { flex: 1, marginLeft: 16 },
-   trackTitle: { color: 'white', fontWeight: '700', fontSize: 16 },
-   trackArtist: { color: C.muted, fontSize: 12, marginTop: 4 },
-   addBtn: { 
-      width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', 
-      alignItems: 'center', justifyContent: 'center',
-   },
+   addedText: { fontSize: 14, fontWeight: '700', color: C.primary },
 
-   footer: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 24, alignItems: 'center' },
-   footerOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 200 },
-   createBtn: { width: '100%', height: 64, borderRadius: 32, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', elevation: 12 },
-   createText: { color: 'black', fontSize: 18, fontWeight: '800' },
-   draftBtn: { marginTop: 14, marginBottom: 8 },
-   draftText: { color: C.muted, fontWeight: '600', fontSize: 14 },
+   // footer
+   footer: {
+      position: 'absolute', bottom: 0, left: 0, right: 0,
+      paddingHorizontal: PAD, alignItems: 'center',
+   },
+   footerFade: {
+      position: 'absolute', top: -60, left: 0, right: 0, bottom: 0,
+   },
+   createBtn: {
+      width: '100%', height: 62, borderRadius: 32,
+      overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
+      ...Platform.select({
+         ios: { shadowColor: C.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.55, shadowRadius: 18 },
+         android: { elevation: 14 },
+      }),
+   },
+   createText: {
+      fontSize: 18, fontWeight: '800', color: '#FFF', zIndex: 2,
+      fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+      letterSpacing: -0.2,
+      textShadowColor: 'rgba(0,0,0,0.25)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4,
+   },
 });

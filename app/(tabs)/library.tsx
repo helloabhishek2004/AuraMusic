@@ -212,7 +212,6 @@ const PLAYLISTS = [
   { id: 'late-drive', name: 'Late Drive', count: '34 Songs', art: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=400&q=80' },
 ];
 
-const TABS = ['Playlists', 'Albums', 'Artists', 'Songs', 'Downloaded'];
 
 // ── MAIN SCREEN ───────────────────────────────────────────────────────────────
 export default function LibraryScreen() {
@@ -271,10 +270,10 @@ export default function LibraryScreen() {
 
     Animated.parallel([
       Animated.sequence([
-        Animated.timing(tabPillScale, { toValue: 0.88, duration: 80, useNativeDriver: true }),
-        Animated.spring(tabPillScale, { toValue: 1, ...MOTION.POP, useNativeDriver: true }),
+        Animated.timing(tabPillScale, { toValue: 0.88, duration: 80, useNativeDriver: false }),
+        Animated.spring(tabPillScale, { toValue: 1, ...MOTION.POP, useNativeDriver: false }),
       ]),
-      Animated.spring(tabSlide, { toValue: layout.x + 6, ...MOTION.SLIDE, useNativeDriver: true }),
+      Animated.spring(tabSlide, { toValue: layout.x + 6, ...MOTION.SLIDE, useNativeDriver: false }),
       Animated.spring(tabWidth, { toValue: layout.width - 12, ...MOTION.SLIDE, useNativeDriver: false }),
     ]).start();
   }, [layouts]);
@@ -336,50 +335,7 @@ export default function LibraryScreen() {
           </View>
         </Mat>
 
-        {/* ── TAB BAR — sticky liquid glass ──────────────────────────────────── */}
-        <View style={ss.tabBarOuter}>
-          <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />
-          {/* top edge */}
-          <View style={ss.tabBarTopEdge} />
-          {/* bottom border */}
-          <View style={ss.tabBarBottomEdge} />
-          {/* refraction */}
-          <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.015)' }} />
 
-          <View style={[ss.tabScroll, { width: SCREEN_W }]}>
-            {/* Sliding glass pill */}
-            <Animated.View
-              pointerEvents="none"
-              style={[ss.tabActivePill, {
-                width: tabWidth,
-                transform: [{ translateX: tabSlide }, { scale: tabPillScale }],
-              }]}
-            >
-              <LinearGradient
-                colors={[C.primary, C.primaryMid, C.primaryDeep]}
-                start={{ x: 0, y: 0 }} end={{ x: 0.6, y: 1 }}
-                style={StyleSheet.absoluteFill}
-              />
-              <View style={ss.pillSpecTop} />
-              <View style={ss.pillSpecLeft} />
-              <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', backgroundColor: 'rgba(255,255,255,0.04)' }} />
-            </Animated.View>
-
-            {TABS.map((tab, idx) => (
-              <TouchableOpacity
-                key={tab}
-                onLayout={(e) => handleTabLayout(idx, e)}
-                onPress={() => selectTab(tab, idx)}
-                activeOpacity={1}
-                style={[ss.tabItem, { flex: 1, alignItems: 'center' }]}
-              >
-                <Text style={[ss.tabText, activeTab === tab && ss.tabTextActive]}>
-                  {tab.toUpperCase()}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
 
         {/* ── PAGE CONTENT ──────────────────────────────────────────────────── */}
         <View style={ss.content}>
