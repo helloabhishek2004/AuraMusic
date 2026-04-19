@@ -19,6 +19,8 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { useMusic } from '@/src/context/MusicContext';
+import { RepeatMode } from 'react-native-track-player';
 
 const { width, height } = Dimensions.get('window');
 
@@ -149,32 +151,25 @@ export default function NowPlayingScreen() {
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
 
-  // Find initial track from params
-  const findTrackIndex = (id: string | string[]) => {
-    const idx = tracks.findIndex(t => t.id === id);
-    return idx === -1 ? 0 : idx;
-  };
+  const {
+    currentTrack: globalTrack,
+    isPlaying: globalIsPlaying,
+    progress: globalProgress,
+    elapsedSec: globalElapsed,
+    play,
+    pause,
+    next,
+    prev,
+    seek,
+    setTrack,
+    toggleRepeat,
+    toggleShuffle,
+    repeatMode,
+    isShuffle
+  } = useMusic();
 
-  // State
-  const [currentTrackIndex, setCurrentTrackIndex] = useState(findTrackIndex(params.trackId as string));
-  
-  // Update track when params change
-  useEffect(() => {
-    if (params.trackId) {
-      const idx = findTrackIndex(params.trackId as string);
-      if (idx !== currentTrackIndex) {
-        setCurrentTrackIndex(idx);
-        setElapsedSec(0);
-        progressBarAnim.setValue(0);
-      }
-    }
-  }, [params.trackId]);
-  const [prevTrackIndex, setPrevTrackIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(true);
   const [isLiked, setIsLiked] = useState(true);
   const [isDownloaded, setIsDownloaded] = useState(false);
-  const [activeFilter, setActiveFilter] = useState('none');
-  const [elapsedSec, setElapsedSec] = useState(93); // start at 02:14 demo
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [isInfoVisible, setIsInfoVisible] = useState(false);
   const [scrubberWidth, setScrubberWidth] = useState(0);
@@ -182,10 +177,14 @@ export default function NowPlayingScreen() {
   const scrubberWidthRef = useRef(0);
   const volumeWidthRef = useRef(0);
   const [currentVolume, setCurrentVolume] = useState(0.65);
+  const scrubberStepRef = useRef(0);
+  const volumeStepRef = useRef(0);
 
-  const currentTrack = tracks[currentTrackIndex];
-  const prevTrack = tracks[prevTrackIndex];
-  const progress = elapsedSec / currentTrack.durationSec;
+  const currentTrack = globalTrack || tracks[0];
+  const [prevTrack, setPrevTrack] = useState(tracks[0]);
+  const progress = globalProgress;
+  const elapsedSec = globalElapsed;
+  const isPlaying = globalIsPlaying;
 
   // ── Animated values ─────────────────────────────────────────────────────────
   const scrubberAnim = useRef(new Animated.Value(progress)).current;
@@ -217,6 +216,23 @@ export default function NowPlayingScreen() {
   const shuffleBtnScale = useRef(new Animated.Value(1)).current;
   const repeatBtnScale = useRef(new Animated.Value(1)).current;
   const castBtnScale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (params.trackId && params.trackId !== globalTrack?.id) {
+      const track = tracks.find(t => t.id === params.trackId);
+      if (track) {
+        setTrack({
+          id: track.id,
+          url: track.id === '1' ? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' : 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', // dummy fallback
+          title: track.title,
+          artist: track.artist,
+          art: track.art,
+          durationSec: track.durationSec,
+          dominantColors: track.dominantColors,
+        });
+      }
+    }
+  }, [params.trackId]);
 
   // ── Loops & entrance ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -270,27 +286,33 @@ export default function NowPlayingScreen() {
         setIsScrubbing(true);
         Animated.spring(scrubberThumbScale, { toValue: 1.5, ...MOTION.POP, useNativeDriver: true }).start();
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        
+
         // Use relative location for jump-on-press
         const w = scrubberWidthRef.current;
         if (w > 0) {
           const relativeX = evt.nativeEvent.locationX;
           const progressVal = Math.max(0, Math.min(1, relativeX / w));
           progressBarAnim.setValue(progressVal);
-          setElapsedSec(Math.floor(progressVal * currentTrack.durationSec));
+          seek(progressVal);
         }
       },
       onPanResponderMove: (evt, gestureState) => {
         const w = scrubberWidthRef.current;
         if (w <= 0) return;
-        
+
         const padding = 28; // The mainCanvas padding
         const relativeX = gestureState.moveX - padding;
         const progressVal = Math.max(0, Math.min(1, relativeX / w));
-        
+
+        // Premium tactile notch feel
+        const step = Math.floor(progressVal * 100);
+        if (step !== scrubberStepRef.current) {
+          scrubberStepRef.current = step;
+          Haptics.selectionAsync();
+        }
+
         progressBarAnim.setValue(progressVal);
-        const newSec = Math.floor(progressVal * currentTrack.durationSec);
-        setElapsedSec(newSec);
+        seek(progressVal);
       },
       onPanResponderRelease: () => {
         setIsScrubbing(false);
@@ -318,16 +340,24 @@ export default function NowPlayingScreen() {
       onPanResponderMove: (_, gestureState) => {
         const w = volumeWidthRef.current;
         if (w <= 0) return;
-        
-        const offset = 28 + 18 + 14; 
+
+        const offset = 28 + 18 + 14;
         const relativeX = gestureState.moveX - offset;
         const volVal = Math.max(0, Math.min(1, relativeX / w));
+
+        // Maximum Intensity Continuous Haptic Experience (Entire Range)
+        const step = Math.floor(volVal * 100);
+        if (step !== volumeStepRef.current) {
+          volumeStepRef.current = step;
+          // Maximum intensity impact
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          // Secondary rigid feedback for extra texture
+        }
+
         setCurrentVolume(volVal);
         volumeAnim.setValue(volVal);
       },
-      onPanResponderRelease: () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      },
+
     })
   ).current;
 
@@ -349,44 +379,40 @@ export default function NowPlayingScreen() {
     }
   }, [isPlaying]);
 
-  // ── Progress bar auto-advance ─────────────────────────────────────────────────
+  // ── Progress bar auto-advance (removed, handled by global context) ──────────────────
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-    if (isPlaying && !isScrubbing) {
-      interval = setInterval(() => {
-        setElapsedSec(prev => {
-          const next = prev >= currentTrack.durationSec ? 0 : prev + 1;
-          const p = next / currentTrack.durationSec;
-          Animated.timing(progressBarAnim, {
-            toValue: p,
-            duration: 980,
-            useNativeDriver: false,
-          }).start();
-          return next;
-        });
-      }, 1000);
+    if (!isScrubbing) {
+      Animated.timing(progressBarAnim, {
+        toValue: progress,
+        duration: 980,
+        useNativeDriver: true,
+      }).start();
     }
-    return () => clearInterval(interval);
-  }, [isPlaying, currentTrackIndex, isScrubbing]);
+  }, [progress, isScrubbing]);
 
-  // ── Track change ─────────────────────────────────────────────────────────────
-  const handleTrackChange = (nextIndex: number, direction: 'next' | 'prev') => {
-    setPrevTrackIndex(currentTrackIndex);
-    setCurrentTrackIndex(nextIndex);
-    setElapsedSec(0);
-    progressBarAnim.setValue(0);
+  const onNext = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid);
+    setPrevTrack(currentTrack);
+    next();
     backgroundProgress.setValue(0);
-    Animated.timing(backgroundProgress, { toValue: 1, duration: 800, useNativeDriver: false }).start();
-
-    const shift = direction === 'next' ? -30 : 30;
-    Animated.timing(artTranslateX, { toValue: shift, duration: 120, useNativeDriver: true }).start(() => {
-      artTranslateX.setValue(-shift);
+    Animated.timing(backgroundProgress, { toValue: 1, duration: 800, useNativeDriver: true }).start();
+    Animated.timing(artTranslateX, { toValue: -30, duration: 120, useNativeDriver: true }).start(() => {
+      artTranslateX.setValue(30);
       Animated.spring(artTranslateX, { toValue: 0, ...MOTION.POP, useNativeDriver: true }).start();
     });
   };
 
-  const onNext = () => handleTrackChange((currentTrackIndex + 1) % tracks.length, 'next');
-  const onPrev = () => handleTrackChange((currentTrackIndex - 1 + tracks.length) % tracks.length, 'prev');
+  const onPrev = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid);
+    setPrevTrack(currentTrack);
+    prev();
+    backgroundProgress.setValue(0);
+    Animated.timing(backgroundProgress, { toValue: 1, duration: 800, useNativeDriver: true }).start();
+    Animated.timing(artTranslateX, { toValue: 30, duration: 120, useNativeDriver: true }).start(() => {
+      artTranslateX.setValue(-30);
+      Animated.spring(artTranslateX, { toValue: 0, ...MOTION.POP, useNativeDriver: true }).start();
+    });
+  };
 
   const onShare = async () => {
     try {
@@ -395,12 +421,19 @@ export default function NowPlayingScreen() {
   };
 
   // ── Press helpers ─────────────────────────────────────────────────────────────
-  const pressIn = (v: Animated.Value) => Animated.spring(v, { toValue: 0.88, ...MOTION.POP, useNativeDriver: true }).start();
+  const pressIn = (v: Animated.Value) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Animated.spring(v, { toValue: 0.88, ...MOTION.POP, useNativeDriver: true }).start();
+  };
   const pressOut = (v: Animated.Value) => Animated.spring(v, { toValue: 1.0, ...MOTION.POP, useNativeDriver: true }).start();
 
   // ── Derived animated progress bar width ──────────────────────────────────────
-  const barWidth = progressBarAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
-  const thumbLeft = progressBarAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+  // ── Derived animated progress bar positions (Native Driver Optimized) ──────────────────
+  const barTranslateX = progressBarAnim.interpolate({ inputRange: [0, 1], outputRange: [-width, 0] });
+  const thumbTranslateX = progressBarAnim.interpolate({ inputRange: [0, 1], outputRange: [0, width - 60] }); // Roughly 60px padding/margin
+  
+  const volumeTranslateX = volumeAnim.interpolate({ inputRange: [0, 1], outputRange: [-240, 0] }); // Assuming volume bar width around 240
+  const volThumbTranslateX = volumeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 240] });
 
   const c0 = currentTrack.dominantColors[0];
   const c1 = currentTrack.dominantColors[1];
@@ -573,8 +606,11 @@ export default function NowPlayingScreen() {
               setScrubberWidth(w);
               scrubberWidthRef.current = w;
             }}>
-              {/* Filled track */}
-              <Animated.View style={[styles.scrubberInnerWrapper, { width: barWidth }]}>
+              {/* Filled track (Optimized for 120Hz) */}
+              <Animated.View style={[
+                styles.scrubberInnerWrapper, 
+                { width: '100%', transform: [{ translateX: barTranslateX }] }
+              ]}>
                 <LinearGradient
                   colors={[c0, c1] as [string, string]}
                   start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
@@ -588,10 +624,9 @@ export default function NowPlayingScreen() {
                 />
               </Animated.View>
 
-              {/* Thumb */}
               <Animated.View style={[
                 styles.scrubberThumbWrapper,
-                { left: thumbLeft },
+                { transform: [{ translateX: thumbTranslateX }] },
               ]}>
                 {/* Glow ring */}
                 <Animated.View style={[
@@ -662,7 +697,7 @@ export default function NowPlayingScreen() {
 
             <Animated.View style={{ transform: [{ scale: playBtnScale }] }}>
               <TouchableOpacity
-                onPress={() => setIsPlaying(!isPlaying)}
+                onPress={() => isPlaying ? pause() : play()}
                 onPressIn={() => pressIn(playBtnScale)}
                 onPressOut={() => pressOut(playBtnScale)}
                 activeOpacity={1}
@@ -711,12 +746,12 @@ export default function NowPlayingScreen() {
         <View style={styles.secondaryControls}>
           <Animated.View style={{ transform: [{ scale: shuffleBtnScale }] }}>
             <TouchableOpacity
-              onPress={() => setActiveFilter(activeFilter === 'shuffle' ? 'none' : 'shuffle')}
+              onPress={toggleShuffle}
               onPressIn={() => pressIn(shuffleBtnScale)}
               onPressOut={() => pressOut(shuffleBtnScale)}
               activeOpacity={1}
             >
-              <Ionicons name="shuffle" size={22} color={activeFilter === 'shuffle' ? c0 : 'rgba(180,180,195,0.65)'} />
+              <Ionicons name="shuffle" size={22} color={isShuffle ? c0 : 'rgba(180,180,195,0.65)'} />
             </TouchableOpacity>
           </Animated.View>
 
@@ -732,12 +767,12 @@ export default function NowPlayingScreen() {
 
           <Animated.View style={{ transform: [{ scale: repeatBtnScale }] }}>
             <TouchableOpacity
-              onPress={() => setActiveFilter(activeFilter === 'repeat' ? 'none' : 'repeat')}
+              onPress={toggleRepeat}
               onPressIn={() => pressIn(repeatBtnScale)}
               onPressOut={() => pressOut(repeatBtnScale)}
               activeOpacity={1}
             >
-              <Ionicons name="repeat" size={22} color={activeFilter === 'repeat' ? c0 : 'rgba(180,180,195,0.65)'} />
+              <Ionicons name={repeatMode === RepeatMode.Track ? "repeat-outline" : "repeat"} size={22} color={repeatMode !== RepeatMode.Off ? c0 : 'rgba(180,180,195,0.65)'} />
             </TouchableOpacity>
           </Animated.View>
         </View>
@@ -748,34 +783,34 @@ export default function NowPlayingScreen() {
           { opacity: iconRowOpacity, transform: [{ scale: iconRowScale }] }
         ]}>
           {[
-            { 
-              key: 'lyrics', 
-              icon: 'chatbubble-ellipses-outline', 
-              label: 'LYRICS', 
-              scale: lyricsBtnScale, 
-              color: 'rgba(255,255,255,0.65)', 
+            {
+              key: 'lyrics',
+              icon: 'chatbubble-ellipses-outline',
+              label: 'LYRICS',
+              scale: lyricsBtnScale,
+              color: 'rgba(255,255,255,0.65)',
               onPress: () => router.push({
                 pathname: '/lyrics',
                 params: { trackId: currentTrack.id }
-              }) 
+              })
             },
             { key: 'download', icon: isDownloaded ? 'checkmark-circle' : 'arrow-down-circle-outline', label: 'DOWNLOAD', scale: dlBtnScale, color: isDownloaded ? '#46f5e0' : 'rgba(255,255,255,0.65)', onPress: () => setIsDownloaded(!isDownloaded) },
             { key: 'share', icon: 'share-outline', label: 'SHARE', scale: shareBtnScale, color: 'rgba(255,255,255,0.65)', onPress: onShare },
-            { 
-              key: 'info', 
-              icon: 'information-circle-outline', 
-              label: 'INFO', 
-              scale: infoBtnScale, 
-              color: 'rgba(255,255,255,0.65)', 
-              onPress: () => setIsInfoVisible(true) 
+            {
+              key: 'info',
+              icon: 'information-circle-outline',
+              label: 'INFO',
+              scale: infoBtnScale,
+              color: 'rgba(255,255,255,0.65)',
+              onPress: () => setIsInfoVisible(true)
             },
-            { 
-              key: 'settings', 
-              icon: 'settings-outline', 
-              label: 'SETTINGS', 
-              scale: settingsBtnScale, 
-              color: 'rgba(255,255,255,0.65)', 
-              onPress: () => router.push('/(tabs)/settings') 
+            {
+              key: 'settings',
+              icon: 'settings-outline',
+              label: 'SETTINGS',
+              scale: settingsBtnScale,
+              color: 'rgba(255,255,255,0.65)',
+              onPress: () => router.push('/(tabs)/settings')
             },
           ].map(item => (
             <View key={item.key} style={styles.iconButtonContainer}>
@@ -804,7 +839,10 @@ export default function NowPlayingScreen() {
               setVolumeWidth(w);
               volumeWidthRef.current = w;
             }}>
-              <Animated.View style={[styles.volumeFillWrapper, { width: volumeAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]}>
+              <Animated.View style={[
+                styles.volumeFillWrapper, 
+                { width: '100%', transform: [{ translateX: volumeTranslateX }] }
+              ]}>
                 <LinearGradient
                   colors={[c0, c1] as [string, string]}
                   start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
@@ -817,12 +855,12 @@ export default function NowPlayingScreen() {
                   style={StyleSheet.absoluteFill}
                 />
               </Animated.View>
-              {/* Volume thumb */}
+              {/* Volume thumb (Optimized for 120Hz) */}
               <Animated.View style={[
-                styles.volumeThumb, 
-                { 
-                  left: volumeAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }), 
-                  shadowColor: c0 
+                styles.volumeThumb,
+                {
+                  transform: [{ translateX: volThumbTranslateX }],
+                  shadowColor: c0
                 }
               ]} />
             </View>
@@ -839,56 +877,56 @@ export default function NowPlayingScreen() {
         animationType="fade"
         onRequestClose={() => setIsInfoVisible(false)}
       >
-        <TouchableOpacity 
-          style={styles.modalOverlay} 
-          activeOpacity={1} 
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
           onPress={() => setIsInfoVisible(false)}
         >
           <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
-          
+
           <GlassCard style={styles.infoModalContent} borderRadius={30} blurIntensity={80}>
-             <View style={styles.infoHeader}>
-               <Text style={styles.infoTitle}>Track Details</Text>
-               <TouchableOpacity onPress={() => setIsInfoVisible(false)}>
-                 <Ionicons name="close-circle-outline" size={28} color="rgba(255,255,255,0.4)" />
-               </TouchableOpacity>
-             </View>
+            <View style={styles.infoHeader}>
+              <Text style={styles.infoTitle}>Track Details</Text>
+              <TouchableOpacity onPress={() => setIsInfoVisible(false)}>
+                <Ionicons name="close-circle-outline" size={28} color="rgba(255,255,255,0.4)" />
+              </TouchableOpacity>
+            </View>
 
-             <View style={styles.infoDivider} />
+            <View style={styles.infoDivider} />
 
-             <View style={styles.infoGrid}>
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoLabel}>Bitrate</Text>
-                  <Text style={styles.infoValue}>320kbps (HQ)</Text>
-                </View>
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoLabel}>Sample Rate</Text>
-                  <Text style={styles.infoValue}>44.1kHz</Text>
-                </View>
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoLabel}>Format</Text>
-                  <Text style={styles.infoValue}>FLAC</Text>
-                </View>
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoLabel}>Length</Text>
-                  <Text style={styles.infoValue}>{formatTime(currentTrack.durationSec)}</Text>
-                </View>
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoLabel}>Genre</Text>
-                  <Text style={styles.infoValue}>Synthwave / Retro</Text>
-                </View>
-                <View style={styles.infoItem}>
-                  <Text style={styles.infoLabel}>Copyright</Text>
-                  <Text style={styles.infoValue}>© 2026 Cosmic Records</Text>
-                </View>
-             </View>
+            <View style={styles.infoGrid}>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Bitrate</Text>
+                <Text style={styles.infoValue}>320kbps (HQ)</Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Sample Rate</Text>
+                <Text style={styles.infoValue}>44.1kHz</Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Format</Text>
+                <Text style={styles.infoValue}>FLAC</Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Length</Text>
+                <Text style={styles.infoValue}>{formatTime(currentTrack.durationSec)}</Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Genre</Text>
+                <Text style={styles.infoValue}>Synthwave / Retro</Text>
+              </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>Copyright</Text>
+                <Text style={styles.infoValue}>© 2026 Cosmic Records</Text>
+              </View>
+            </View>
 
-             <TouchableOpacity 
-               style={[styles.infoCloseBtn, { backgroundColor: c0 }]} 
-               onPress={() => setIsInfoVisible(false)}
-             >
-                <Text style={styles.infoCloseText}>DONE</Text>
-             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.infoCloseBtn, { backgroundColor: c0 }]}
+              onPress={() => setIsInfoVisible(false)}
+            >
+              <Text style={styles.infoCloseText}>DONE</Text>
+            </TouchableOpacity>
           </GlassCard>
         </TouchableOpacity>
       </Modal>
@@ -998,9 +1036,9 @@ const styles = StyleSheet.create({
   likeBtn: { padding: 6 },
 
   // Scrubber hit area
-  scrubberSection: { 
-    marginBottom: 28, 
-    paddingVertical: 12, 
+  scrubberSection: {
+    marginBottom: 28,
+    paddingVertical: 12,
   },
   scrubberCard: { marginBottom: 6 },
   scrubberOuter: {

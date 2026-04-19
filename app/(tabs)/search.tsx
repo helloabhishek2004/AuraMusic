@@ -16,7 +16,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
 const { width: SW, height: SH } = Dimensions.get('window');
@@ -108,11 +108,12 @@ const Mat = ({ children, delay = 0, style }: any) => {
 // ── Press scale hook ────────────────────────────────────────────────────────
 const useP = () => {
   const sc = useRef(new Animated.Value(1)).current;
-  return {
-    sc,
-    onIn: () => Animated.spring(sc, { toValue: 0.88, ...PP, useNativeDriver: true }).start(),
-    onOut: () => Animated.spring(sc, { toValue: 1.0, ...PP, useNativeDriver: true }).start(),
+  const onIn = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Animated.spring(sc, { toValue: 0.94, ...PP, useNativeDriver: true }).start();
   };
+  const onOut = () => Animated.spring(sc, { toValue: 1.0, ...PP, useNativeDriver: true }).start();
+  return { sc, onIn, onOut };
 };
 
 // ── Liked state hook ────────────────────────────────────────────────────────
@@ -265,7 +266,15 @@ export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const [query, setQuery] = useState('');
+  const { query: initialQuery } = useLocalSearchParams<{ query?: string }>();
+  const [query, setQuery] = useState(initialQuery || '');
+
+  useEffect(() => {
+    if (initialQuery) {
+      setQuery(initialQuery);
+    }
+  }, [initialQuery]);
+
   const [recent, setRecent] = useState(INIT_RECENT);
   const [topLiked, setTopLiked] = useState(false);
 
@@ -273,14 +282,15 @@ export default function SearchScreen() {
   const bgP = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.loop(Animated.sequence([
-      Animated.timing(bgP, { toValue: 1, duration: 7000, useNativeDriver: false }),
-      Animated.timing(bgP, { toValue: 2, duration: 7000, useNativeDriver: false }),
-      Animated.timing(bgP, { toValue: 0, duration: 7000, useNativeDriver: false }),
+      Animated.timing(bgP, { toValue: 1, duration: 7000, useNativeDriver: true }),
+      Animated.timing(bgP, { toValue: 2, duration: 7000, useNativeDriver: true }),
+      Animated.timing(bgP, { toValue: 0, duration: 7000, useNativeDriver: true }),
     ])).start();
   }, []);
   const b1Op = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: [0.13, 0.20, 0.10] });
   const b2Op = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: [0.08, 0.14, 0.17] });
-  const b1T = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: ['-5%', '12%', '-8%'] });
+  const b1T = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: [0, 30, -10] }); // Pulse translateY
+  const b2T = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: [0, -20, 10] }); // Pulse translateY
 
   // top result heart
   const topHeart = useHeart();
@@ -288,11 +298,12 @@ export default function SearchScreen() {
   const playBtnP = useP();
 
   const handlePlay = useCallback((id: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     router.push({ pathname: '/now_playing', params: { trackId: id } });
   }, []);
 
   const handleDeleteRecent = useCallback((id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setRecent(prev => prev.filter(r => r.id !== id));
   }, []);
@@ -310,8 +321,8 @@ export default function SearchScreen() {
       {/* ── ANIMATED BG ──────────────────────────────────────────────── */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]} />
-        <Animated.View style={[s.blob, { width: SW * 0.85, height: SW * 0.85, backgroundColor: '#2a0053', left: '-25%', top: b1T, opacity: b1Op }]} />
-        <Animated.View style={[s.blob, { width: SW * 0.65, height: SW * 0.65, backgroundColor: '#003731', right: '-22%', bottom: '20%', opacity: b2Op }]} />
+         <Animated.View style={[s.blob, { width: SW * 0.85, height: SW * 0.85, backgroundColor: '#2a0053', transform: [{ translateX: -SW * 0.25 }, { translateY: b1T }], opacity: b1Op }]} />
+         <Animated.View style={[s.blob, { width: SW * 0.65, height: SW * 0.65, backgroundColor: '#003731', transform: [{ translateX: SW * 0.22 }, { translateY: b2T }], opacity: b2Op }]} />
         <Animated.View style={[s.blob, {
           width: SW * 0.45, height: SW * 0.45, backgroundColor: '#1a0038', left: '-8%', bottom: '40%',
           opacity: bgP.interpolate({ inputRange: [0, 1, 2], outputRange: [0.05, 0.12, 0.08] })

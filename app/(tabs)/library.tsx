@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 
 // ── Responsive Dimensions ────────────────────────────────────────────────────
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -117,7 +118,10 @@ const Mat = ({ children, delay = 0, style }: any) => {
 // ── Press-scale hook ──────────────────────────────────────────────────────────
 const usePress = () => {
   const sc = useRef(new Animated.Value(1)).current;
-  const onIn = () => Animated.spring(sc, { toValue: 0.88, ...MOTION.POP, useNativeDriver: true }).start();
+  const onIn = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Animated.spring(sc, { toValue: 0.88, ...MOTION.POP, useNativeDriver: true }).start();
+  };
   const onOut = () => Animated.spring(sc, { toValue: 1.0, ...MOTION.POP, useNativeDriver: true }).start();
   return { sc, onIn, onOut };
 };
@@ -133,7 +137,10 @@ const TrackRow = ({ track, delay }: any) => {
           style={ss.trackRow}
           onPressIn={p.onIn} onPressOut={p.onOut}
           activeOpacity={1}
-          onPress={() => router.push({ pathname: '/now_playing', params: { trackId: track.id } })}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            router.push({ pathname: '/now_playing', params: { trackId: track.id } });
+          }}
         >
           <Glass style={ss.trackCard} radius={16} blur={40}>
             <View style={ss.trackInner}>
@@ -167,7 +174,10 @@ const PlaylistCell = ({ item, delay, router }: any) => {
     <Mat delay={delay}>
       <Animated.View style={[ss.gridCell, { width: GRID_ART_W, transform: [{ scale: p.sc }] }]}>
         <TouchableOpacity
-          onPress={() => router.push({ pathname: '/playlist/[id]', params: { id: item.id } })}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            router.push({ pathname: '/playlist/[id]', params: { id: item.id } });
+          }}
           onPressIn={p.onIn} onPressOut={p.onOut}
           activeOpacity={1}
         >
@@ -231,18 +241,18 @@ export default function LibraryScreen() {
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(bgPhase, { toValue: 1, duration: 5000, useNativeDriver: false }),
-        Animated.timing(bgPhase, { toValue: 2, duration: 5000, useNativeDriver: false }),
-        Animated.timing(bgPhase, { toValue: 0, duration: 5000, useNativeDriver: false }),
+        Animated.timing(bgPhase, { toValue: 1, duration: 5000, useNativeDriver: true }),
+        Animated.timing(bgPhase, { toValue: 2, duration: 5000, useNativeDriver: true }),
+        Animated.timing(bgPhase, { toValue: 0, duration: 5000, useNativeDriver: true }),
       ])
     ).start();
   }, []);
 
-  // Interpolated glow positions — moves the blobs slowly
-  const blob1X = bgPhase.interpolate({ inputRange: [0, 1, 2], outputRange: ['-25%', '-10%', '-30%'] });
-  const blob1Y = bgPhase.interpolate({ inputRange: [0, 1, 2], outputRange: ['8%', '18%', '5%'] });
-  const blob2X = bgPhase.interpolate({ inputRange: [0, 1, 2], outputRange: ['-20%', '-35%', '-15%'] });
-  const blob2Y = bgPhase.interpolate({ inputRange: [0, 1, 2], outputRange: ['55%', '45%', '60%'] });
+  // Interpolated glow positions (Native Optimized)
+  const blob1X = bgPhase.interpolate({ inputRange: [0, 1, 2], outputRange: [-SCREEN_W * 0.1, 0, -SCREEN_W * 0.15] });
+  const blob1Y = bgPhase.interpolate({ inputRange: [0, 1, 2], outputRange: [20, 60, 10] });
+  const blob2X = bgPhase.interpolate({ inputRange: [0, 1, 2], outputRange: [SCREEN_W * 0.1, SCREEN_W * 0.2, 0] });
+  const blob2Y = bgPhase.interpolate({ inputRange: [0, 1, 2], outputRange: [20, -10, 40] });
   const blob1Op = bgPhase.interpolate({ inputRange: [0, 1, 2], outputRange: [0.14, 0.20, 0.12] });
   const blob2Op = bgPhase.interpolate({ inputRange: [0, 1, 2], outputRange: [0.10, 0.14, 0.18] });
 
@@ -270,11 +280,11 @@ export default function LibraryScreen() {
 
     Animated.parallel([
       Animated.sequence([
-        Animated.timing(tabPillScale, { toValue: 0.88, duration: 80, useNativeDriver: false }),
-        Animated.spring(tabPillScale, { toValue: 1, ...MOTION.POP, useNativeDriver: false }),
+        Animated.timing(tabPillScale, { toValue: 0.88, duration: 80, useNativeDriver: true }),
+        Animated.spring(tabPillScale, { toValue: 1, ...MOTION.POP, useNativeDriver: true }),
       ]),
-      Animated.spring(tabSlide, { toValue: layout.x + 6, ...MOTION.SLIDE, useNativeDriver: false }),
-      Animated.spring(tabWidth, { toValue: layout.width - 12, ...MOTION.SLIDE, useNativeDriver: false }),
+      Animated.spring(tabSlide, { toValue: layout.x + 6, ...MOTION.SLIDE, useNativeDriver: true }),
+      Animated.spring(tabWidth, { toValue: layout.width - 12, ...MOTION.SLIDE, useNativeDriver: false }), // Width cannot be native
     ]).start();
   }, [layouts]);
 
@@ -291,7 +301,7 @@ export default function LibraryScreen() {
         <Animated.View style={[ss.blob, {
           width: SCREEN_W * 0.85, height: SCREEN_W * 0.85,
           backgroundColor: '#2a0053',
-          left: blob1X, top: blob1Y,
+          transform: [{ translateX: blob1X }, { translateY: blob1Y }],
           opacity: blob1Op,
         }]} />
 
@@ -299,7 +309,7 @@ export default function LibraryScreen() {
         <Animated.View style={[ss.blob, {
           width: SCREEN_W * 0.75, height: SCREEN_W * 0.75,
           backgroundColor: '#003731',
-          right: blob2X, top: blob2Y,
+          transform: [{ translateX: blob2X }, { translateY: blob2Y }],
           opacity: blob2Op,
         }]} />
 

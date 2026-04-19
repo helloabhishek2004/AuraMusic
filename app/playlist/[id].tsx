@@ -134,10 +134,13 @@ const Materialise = ({ children, delay = 0, style }: any) => {
 };
 
 // ── Press-scale helper ────────────────────────────────────────────────────────
-const usePressScale = () => {
+const usePressScale = (target = 0.94) => {
   const scale = useRef(new Animated.Value(1)).current;
-  const onIn  = () => Animated.spring(scale, { toValue: 0.88, ...MOTION.POP, useNativeDriver: true }).start();
-  const onOut = () => Animated.spring(scale, { toValue: 1.0,  ...MOTION.POP, useNativeDriver: true }).start();
+  const onIn = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Animated.spring(scale, { toValue: target, ...MOTION.POP, useNativeDriver: true }).start();
+  };
+  const onOut = () => Animated.spring(scale, { toValue: 1, ...MOTION.POP, useNativeDriver: true }).start();
   return { scale, onIn, onOut };
 };
 
@@ -423,7 +426,7 @@ export default function PlaylistScreen() {
             {/* Shuffle — full liquid glass gradient pill */}
             <Animated.View style={[styles.shuffleBtnOuter, { transform: [{ scale: shufflePress.scale }] }]}>
               <TouchableOpacity
-                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
+                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)}
                 onPressIn={shufflePress.onIn} onPressOut={shufflePress.onOut}
                 activeOpacity={1}
                 style={{ flex: 1 }}
@@ -468,6 +471,10 @@ export default function PlaylistScreen() {
                 <TouchableOpacity
                   activeOpacity={1}
                   onPressIn={playPress.onIn} onPressOut={playPress.onOut}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    router.push({ pathname: '/now_playing', params: { trackId: PLAYLIST_DATA.tracks[0].id } });
+                  }}
                   style={styles.playBtnShell}
                 >
                   <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
@@ -503,7 +510,7 @@ export default function PlaylistScreen() {
               <View style={styles.suggestedAccentBar} />
               <Text style={styles.suggestedTitle}>Suggested Songs</Text>
             </View>
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}>
               <Text style={styles.refreshText}>Refresh</Text>
             </TouchableOpacity>
           </View>
@@ -519,7 +526,13 @@ export default function PlaylistScreen() {
                     <Text style={styles.suggestedName} numberOfLines={1}>{item.title}</Text>
                     <Text style={styles.suggestedArtist} numberOfLines={1}>{item.artist}</Text>
                   </View>
-                  <TouchableOpacity style={styles.addBtn}>
+                   <TouchableOpacity 
+                    style={styles.addBtn}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    }}
+                  >
                     <LinearGradient
                       colors={[hexToRgba(COLORS.primary, 0.20), hexToRgba(COLORS.primaryDeep, 0.15)]}
                       style={styles.addBtnGrad}

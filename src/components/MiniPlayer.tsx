@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
@@ -6,83 +6,146 @@ import {
   TouchableOpacity,
   Dimensions,
   Platform,
+  Animated,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useMusic } from '../context/MusicContext';
+import { useRouter } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 
 const { width: SW } = Dimensions.get('window');
 
-/**
- * Global Mini Player Component 
- * Inspired by the design in page.txt
- */
+const SP = { tension: 60, friction: 9 };
+const POP = { tension: 200, friction: 8 };
+
 export default function MiniPlayer() {
-  const progress = 0.42;
+  const { currentTrack, isPlaying, progress, play, pause, next } = useMusic();
+  const router = useRouter();
+  
+  const scale = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+
+  if (!currentTrack) return null;
+
+  const handlePressIn = () => {
+    Animated.spring(scale, { toValue: 0.95, ...POP, useNativeDriver: true }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scale, { toValue: 1, ...POP, useNativeDriver: true }).start();
+  };
+
+  const handleOpenNowPlaying = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push({
+      pathname: '/now_playing',
+      params: { trackId: currentTrack.id },
+    });
+  };
+
+  const handlePlayPause = (e: any) => {
+    e.stopPropagation();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (isPlaying) {
+      pause();
+    } else {
+      play();
+    }
+  };
+
+  const handleNext = (e: any) => {
+    e.stopPropagation();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    next();
+  };
 
   return (
-    <View style={s.container}>
-      {/* ── 4-LAYER GLASS CONTAINER ── */}
-      <View style={s.glassEffect}>
-        <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />
-        
-        {/* Specular Highlights & Border */}
-        <View pointerEvents="none" style={s.specTop} />
-        <View pointerEvents="none" style={s.specLeft} />
-        <View pointerEvents="none" style={s.refraction} />
-        
-        <View style={s.content}>
-          {/* Thumb */}
-          <View style={s.artWrap}>
-            <Image 
-              source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuB7QyWLCr0uXkrtCWoGoXTfHFzGXwGP0GfezAi3bE1Zoy0n-ZxGCu75tlVWLIreBKwK5XYqs_bwhB9bZFS-RwHRzHg-cMww0yFFfnkcqDILEMzFzw3UzMLb7wQ9fqgC831em3RUpLtE4tqyhWEK7tn02kW1lhye7OMIwbQq2vDp-KmoMZR5SwzyyOOC7_RIGQBU2kZoZzZvgJB_GnEYPXGuzd_uECbnuBe-WvSzMuoei4vaBoL41TggGTxAg8xZZ0DOf9H-cVvvZ0k' }}
-              style={s.art}
-              contentFit="cover"
-            />
-          </View>
+    <Animated.View 
+      style={[
+        s.container,
+        { transform: [{ scale }], opacity }
+      ]}
+    >
+      <TouchableOpacity
+        activeOpacity={1}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        onPress={handleOpenNowPlaying}
+        style={StyleSheet.absoluteFill}
+      >
+        {/* ── 4-LAYER GLASS CONTAINER ── */}
+        <View style={s.glassEffect}>
+          <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />
+          
+          {/* Specular Highlights & Border */}
+          <View pointerEvents="none" style={s.specTop} />
+          <View pointerEvents="none" style={s.specLeft} />
+          <View pointerEvents="none" style={s.refraction} />
+          
+          <View style={s.content}>
+            {/* Thumb */}
+            <View style={s.artWrap}>
+              <Image 
+                source={{ uri: currentTrack.art }}
+                style={s.art}
+                contentFit="cover"
+                transition={200}
+              />
+            </View>
 
-          {/* Titles (hidden on small screens if space is tight) */}
-          <View style={s.meta}>
-            <Text style={s.title} numberOfLines={1}>Neon Dreams</Text>
-            <Text style={s.artist} numberOfLines={1}>The Midnight Syndicate</Text>
-          </View>
+            {/* Titles */}
+            <View style={s.meta}>
+              <Text style={s.title} numberOfLines={1}>{currentTrack.title}</Text>
+              <Text style={s.artist} numberOfLines={1}>{currentTrack.artist}</Text>
+            </View>
 
-          {/* Progress Bar (Global bar style) */}
-          <View style={s.progressRow}>
-            <View style={s.pbBase}>
-              <View style={[s.pbFill, { width: `${progress * 100}%` }]} />
-              <View style={[s.pbGlow, { width: `${progress * 100}%` }]} />
+            {/* Progress Bar */}
+            <View style={s.progressRow}>
+              <View style={s.pbBase}>
+                <Animated.View style={[s.pbFill, { width: `${progress * 100}%` }]} />
+                <View style={[s.pbGlow, { width: `${progress * 100}%` }]} />
+              </View>
+            </View>
+
+            {/* Controls */}
+            <View style={s.controls}>
+              <TouchableOpacity 
+                style={s.controlBtn} 
+                onPress={handlePlayPause}
+                activeOpacity={0.7}
+              >
+                <Ionicons name={isPlaying ? "pause" : "play"} size={20} color="#000" style={!isPlaying ? { marginLeft: 2 } : {}} />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={s.nextBtn} 
+                onPress={handleNext}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="play-skip-forward" size={20} color="rgba(255,255,255,0.8)" />
+              </TouchableOpacity>
             </View>
           </View>
-
-          {/* Controls */}
-          <View style={s.controls}>
-            <TouchableOpacity style={s.controlBtn}>
-              <Ionicons name="play" size={20} color="#000" />
-            </TouchableOpacity>
-            <TouchableOpacity style={s.nextBtn}>
-              <Ionicons name="play-skip-forward" size={18} color="rgba(255,255,255,0.7)" />
-            </TouchableOpacity>
-          </View>
         </View>
-      </View>
-    </View>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
 const s = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 110, // above the floating nav
+    bottom: 110, 
     left: 20,
     right: 20,
-    height: 60,
+    height: 64,
     zIndex: 999,
   },
   glassEffect: {
     flex: 1,
-    borderRadius: 30,
+    borderRadius: 22,
     overflow: 'hidden',
     backgroundColor: 'rgba(18, 18, 22, 0.75)',
     borderWidth: 1,
@@ -118,7 +181,7 @@ const s = StyleSheet.create({
   },
   refraction: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 30,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: 'rgba(255,255,255,0.02)',
@@ -127,32 +190,35 @@ const s = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
   },
   artWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   art: { width: '100%', height: '100%' },
   meta: {
     marginLeft: 12,
-    flex: 1.5,
+    flex: 1.2,
   },
-  title: { color: '#FFF', fontSize: 13, fontWeight: '700' },
-  artist: { color: 'rgba(255,255,255,0.5)', fontSize: 11, marginTop: 1 },
+  title: { color: '#FFF', fontSize: 14, fontWeight: '700', letterSpacing: -0.2 },
+  artist: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 1 },
   
   progressRow: {
     flex: 1,
-    marginHorizontal: 16,
+    marginHorizontal: 12,
   },
   pbBase: {
-    height: 3,
+    height: 4,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 1.5,
+    borderRadius: 2,
     overflow: 'hidden',
+    position: 'relative',
   },
   pbFill: {
     height: '100%',
@@ -163,29 +229,27 @@ const s = StyleSheet.create({
     position: 'absolute',
     height: '100%',
     backgroundColor: '#BF5AF2',
-    opacity: 0.4,
-    shadowColor: '#BF5AF2',
-    shadowRadius: 6,
-    shadowOpacity: 1,
+    opacity: 0.5,
   },
   
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
+    paddingRight: 4,
   },
   controlBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#FFF',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#FFF',
-    shadowRadius: 8,
-    shadowOpacity: 0.3,
+    shadowColor: '#BF5AF2',
+    shadowRadius: 10,
+    shadowOpacity: 0.4,
   },
   nextBtn: {
-    padding: 4,
+    padding: 6,
   },
 });

@@ -15,6 +15,7 @@ import {
   Alert,
   PanResponder,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -78,7 +79,10 @@ const CustomSwitch = ({ value, onValueChange, activeColor }: { value: boolean; o
   });
 
   return (
-    <Pressable onPress={() => onValueChange(!value)}>
+    <Pressable onPress={() => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onValueChange(!value);
+    }}>
       <Animated.View style={[styles.switchTrack, { backgroundColor }]}>
         <Animated.View style={[styles.switchThumb, { transform: [{ translateX }] }]} />
       </Animated.View>
@@ -113,10 +117,14 @@ const QualityModal = ({
             <Text style={styles.modalTitle}>{title}</Text>
           </View>
           {options.map((option) => (
-            <TouchableOpacity 
+             <TouchableOpacity 
               key={option} 
               style={styles.modalOption} 
-              onPress={() => { onSelect(option); onClose(); }}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onSelect(option);
+                onClose();
+              }}
             >
               <Text style={[
                 styles.modalOptionText, 
@@ -127,7 +135,10 @@ const QualityModal = ({
               {selectedOption === option && <Ionicons name="checkmark" size={20} color={activeColor} />}
             </TouchableOpacity>
           ))}
-          <TouchableOpacity style={styles.modalCloseBtn} onPress={onClose}>
+          <TouchableOpacity style={styles.modalCloseBtn} onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onClose();
+          }}>
             <Text style={styles.modalCloseText}>CLOSE</Text>
           </TouchableOpacity>
         </View>
@@ -165,6 +176,7 @@ export default function SettingsScreen() {
 
   const handleClearCache = () => {
     if (storageUsed <= 0.1) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setStorageUsed(prev => Number((prev - 0.5).toFixed(1)));
     setCacheAcknowledgement(true);
     setTimeout(() => setCacheAcknowledgement(false), 2000);
@@ -195,7 +207,11 @@ export default function SettingsScreen() {
         if (newValue > SLIDER_WIDTH) newValue = SLIDER_WIDTH;
         pan.setValue(newValue);
         const seconds = Math.round((newValue / SLIDER_WIDTH) * 12);
-        setCrossfadeSeconds(seconds);
+        
+        if (seconds !== crossfadeSeconds) {
+          Haptics.selectionAsync();
+          setCrossfadeSeconds(seconds);
+        }
       },
       onPanResponderRelease: () => {}
     })
@@ -343,7 +359,10 @@ export default function SettingsScreen() {
               {accentColors.map(color => (
                 <TouchableOpacity 
                   key={color} 
-                  onPress={() => setAccentColor(color)}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    setAccentColor(color);
+                  }}
                   style={[
                     styles.colorCircle, 
                     { backgroundColor: color },
