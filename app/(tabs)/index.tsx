@@ -574,6 +574,16 @@ export default function HomeScreen() {
     { id: 'cosmic', title: 'Cosmic Wave', artist: 'Digital Echo', image: 'https://picsum.photos/300/300?random=10' },
     { id: 'midnight', title: 'Midnight Flow', artist: 'Luna Ray', image: 'https://picsum.photos/300/300?random=11' },
   ];
+  const trackUrls: Record<string, string> = {
+    nebula: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+    neon: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+    solar: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+    cosmic: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
+    midnight: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3',
+    '1': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3',
+    '2': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3',
+    '3': 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+  };
 
   const artists = [
     { id: '1', name: 'Solstice', image: 'https://picsum.photos/300/300?random=4' },
@@ -609,6 +619,7 @@ export default function HomeScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     setTrack({
       id: track.id,
+      url: trackUrls[track.id] ?? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3',
       title: track.title,
       artist: track.artist,
       art: track.image,

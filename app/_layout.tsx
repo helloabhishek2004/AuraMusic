@@ -12,13 +12,6 @@ import { Manrope_700Bold } from '@expo-google-fonts/manrope';
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
-import TrackPlayer from 'react-native-track-player';
-try {
-  TrackPlayer.registerPlaybackService(() => require('../service').PlaybackService);
-} catch (e) {
-  // Ignore
-}
-
 export default function RootLayout() {
   const [fontsLoaded, error] = useFonts({
     Inter_400Regular,
