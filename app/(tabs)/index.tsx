@@ -642,6 +642,7 @@ export default function HomeScreen() {
       <AnimatedGradientBackground />
 
       <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[s.scrollContent, { paddingTop: insets.top + 10, paddingBottom: 180 }]}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
@@ -670,6 +671,7 @@ export default function HomeScreen() {
           />
           <ScrollView
             horizontal
+            contentInsetAdjustmentBehavior="automatic"
             showsHorizontalScrollIndicator={false}
             style={s.hzScroll}
             scrollEnabled={!expandedContinueListening}
@@ -761,7 +763,7 @@ export default function HomeScreen() {
         {/* Recently Played Artists */}
         <MaterialEntrance delay={400}>
           <SectionHeader title="Recently Played" />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.artistScroll}>
+          <ScrollView horizontal contentInsetAdjustmentBehavior="automatic" showsHorizontalScrollIndicator={false} style={s.artistScroll}>
             {artists.map((artist) => (
               <CircleArtistCard
                 key={artist.id}
@@ -782,7 +784,7 @@ export default function HomeScreen() {
         {/* Trending Section */}
         <MaterialEntrance delay={500}>
           <SectionHeader title="Trending Now" />
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.hzScroll}>
+          <ScrollView horizontal contentInsetAdjustmentBehavior="automatic" showsHorizontalScrollIndicator={false} style={s.hzScroll}>
             {albums.map((album) => (
               <View key={album.id} style={{ marginRight: 16 }}>
                 <BentoCard

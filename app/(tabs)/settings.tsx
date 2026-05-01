@@ -244,7 +244,8 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      <ScrollView 
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 120 }]}
         showsVerticalScrollIndicator={false}
       >

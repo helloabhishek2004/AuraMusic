@@ -335,6 +335,7 @@ export default function SearchScreen() {
       </View>
 
       <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[s.scroll, { paddingTop: insets.top + (isTablet ? 28 : 20) }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -540,7 +541,9 @@ export default function SearchScreen() {
             ) : (
               <>
                 <Mat delay={0}>
-                  <Text style={[s.resultsFor]}>Results for "<Text style={{ color: C.primary }}>{query}</Text>"</Text>
+                  <Text style={[s.resultsFor]}>
+                    Results for <Text style={{ color: C.primary }}>{`"${query}"`}</Text>
+                  </Text>
                 </Mat>
 
                 {filteredSongs.length > 0 && (

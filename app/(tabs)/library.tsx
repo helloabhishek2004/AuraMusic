@@ -330,6 +330,7 @@ export default function LibraryScreen() {
       </View>
 
       <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
         stickyHeaderIndices={[1]}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 160 }}

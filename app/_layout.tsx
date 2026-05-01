@@ -1,16 +1,20 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Stack } from 'expo-router';
 import { ThemeProvider as NavigationThemeProvider, DarkTheme } from '@react-navigation/native';
-import { ThemeProvider } from '../src/context/ThemeContext';
-import { MusicProvider } from '../src/context/MusicContext';
-import { colors } from '../src/styles/theme';
-import { View, StyleSheet } from 'react-native';
+import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
+import { MusicProvider, useNowPlayingTrack } from '../src/context/MusicContext';
+import { palette } from '../src/design/tokens';
+import { StyleSheet } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
+import { StatusBar } from 'expo-status-bar';
 import { useFonts, Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
 import { Manrope_700Bold } from '@expo-google-fonts/manrope';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { enableFreeze } from 'react-native-screens';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
+enableFreeze(true);
+SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 export default function RootLayout() {
   const [fontsLoaded, error] = useFonts({
@@ -21,9 +25,24 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (fontsLoaded || error) {
-      SplashScreen.hideAsync();
+      SplashScreen.hideAsync().catch(() => undefined);
     }
   }, [fontsLoaded, error]);
+
+  const navigationTheme = useMemo(
+    () => ({
+      ...DarkTheme,
+      colors: {
+        ...DarkTheme.colors,
+        background: palette.background,
+        card: 'transparent',
+        border: 'transparent',
+        primary: palette.primary,
+        text: palette.ink,
+      },
+    }),
+    []
+  );
 
   if (!fontsLoaded && !error) {
     return null;
@@ -31,29 +50,59 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
-      <NavigationThemeProvider value={DarkTheme}>
+      <NavigationThemeProvider value={navigationTheme}>
         <MusicProvider>
-          <View style={styles.root}>
-             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
-               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-               <Stack.Screen 
-                 name="lyrics" 
-                 options={{ 
-                   presentation: 'modal',
-                   animation: 'slide_from_bottom'
-                 }} 
-               />
-             </Stack>
-          </View>
+          <GestureHandlerRootView style={styles.root}>
+            <DynamicTrackTheme />
+            <StatusBar style="light" translucent backgroundColor="transparent" />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: 'transparent' },
+                animation: 'slide_from_right',
+                animationDuration: 220,
+                gestureEnabled: true,
+              }}
+            >
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="now_playing"
+                options={{
+                  animation: 'slide_from_bottom',
+                  presentation: 'fullScreenModal',
+                }}
+              />
+              <Stack.Screen
+                name="lyrics"
+                options={{
+                  presentation: 'modal',
+                  animation: 'slide_from_bottom',
+                }}
+              />
+            </Stack>
+          </GestureHandlerRootView>
         </MusicProvider>
       </NavigationThemeProvider>
     </ThemeProvider>
   );
 }
 
+function DynamicTrackTheme() {
+  const track = useNowPlayingTrack();
+  const { setAlbumAccent } = useTheme();
+
+  useEffect(() => {
+    if (track?.dominantColors?.length) {
+      setAlbumAccent(track.dominantColors);
+    }
+  }, [setAlbumAccent, track?.dominantColors, track?.id]);
+
+  return null;
+}
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: palette.background,
   }
 });

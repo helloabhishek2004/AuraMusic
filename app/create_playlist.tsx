@@ -114,6 +114,37 @@ const useP = () => {
 };
 
 // ── Track row (add/remove) ────────────────────────────────────────────────────
+const MoodChip = ({ item, active, onPress }: { item: string; active: boolean; onPress: () => void }) => {
+   const mp = useP();
+
+   return (
+      <Animated.View style={{ transform: [{ scale: mp.sc }] }}>
+         <TouchableOpacity
+            onPress={() => {
+               onPress();
+               Haptics.selectionAsync();
+            }}
+            onPressIn={mp.onIn}
+            onPressOut={mp.onOut}
+            activeOpacity={1}
+            accessibilityRole="button"
+            accessibilityLabel={`Set mood to ${item.replace('#', '')}`}
+            accessibilityState={{ selected: active }}
+         >
+            <Glass style={[s.moodTag, active && s.moodTagActive]} r={18} blur={40} accent={active}>
+               {active && (
+                  <LinearGradient
+                     colors={[h2r(C.primary, 0.18), h2r(C.primaryMid, 0.10)]}
+                     style={StyleSheet.absoluteFill}
+                  />
+               )}
+               <Text style={[s.moodText, active && s.moodTextActive]}>{item}</Text>
+            </Glass>
+         </TouchableOpacity>
+      </Animated.View>
+   );
+};
+
 const TrackRow = ({ track, added, onToggle }: any) => {
    const p = useP();
    const sc = useRef(new Animated.Value(1)).current;
@@ -298,6 +329,7 @@ export default function CreatePlaylistScreen() {
 
          {/* ── SCROLL ────────────────────────────────────────────────────────── */}
          <ScrollView
+            contentInsetAdjustmentBehavior="automatic"
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingHorizontal: PAD, paddingTop: 20, paddingBottom: 180 }}
@@ -368,29 +400,12 @@ export default function CreatePlaylistScreen() {
             {/* Mood tags */}
             <Mat delay={260}>
                <View style={s.sectionBlock}>
-                  <Text style={s.sectionTitle}>What's the mood?</Text>
+                  <Text style={s.sectionTitle}>{"What's the mood?"}</Text>
                   <View style={s.moodRow}>
-                     {MOODS.map((item, idx) => {
+                     {MOODS.map((item) => {
                         const active = mood === item;
-                        const mp = useP();
                         return (
-                           <Animated.View key={item} style={{ transform: [{ scale: mp.sc }] }}>
-                              <TouchableOpacity
-                                 onPress={() => { setMood(item); Haptics.selectionAsync(); }}
-                                 onPressIn={mp.onIn} onPressOut={mp.onOut}
-                                 activeOpacity={1}
-                              >
-                                 <Glass style={[s.moodTag, active && s.moodTagActive]} r={18} blur={40} accent={active}>
-                                    {active && (
-                                       <LinearGradient
-                                          colors={[h2r(C.primary, 0.18), h2r(C.primaryMid, 0.10)]}
-                                          style={StyleSheet.absoluteFill}
-                                       />
-                                    )}
-                                    <Text style={[s.moodText, active && s.moodTextActive]}>{item}</Text>
-                                 </Glass>
-                              </TouchableOpacity>
-                           </Animated.View>
+                           <MoodChip key={item} item={item} active={active} onPress={() => setMood(item)} />
                         );
                      })}
                   </View>
@@ -434,7 +449,7 @@ export default function CreatePlaylistScreen() {
                   <Mat delay={0}>
                      <View style={s.emptySearch}>
                         <Ionicons name="search-outline" size={36} color={C.dim} />
-                        <Text style={s.emptyText}>No results for "{query}"</Text>
+                        <Text style={s.emptyText}>{`No results for "${query}"`}</Text>
                      </View>
                   </Mat>
                ) : (

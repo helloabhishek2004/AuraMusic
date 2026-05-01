@@ -7,4 +7,16 @@ export const PlaybackService = async function() {
     TrackPlayer.addEventListener(Event.RemotePrevious, () => TrackPlayer.skipToPrevious());
     TrackPlayer.addEventListener(Event.RemoteStop, () => TrackPlayer.reset());
     TrackPlayer.addEventListener(Event.RemoteSeek, (event) => TrackPlayer.seekTo(event.position));
+    TrackPlayer.addEventListener(Event.RemoteDuck, async (event) => {
+        if (event.permanent) {
+            await TrackPlayer.stop();
+            return;
+        }
+
+        if (event.paused) {
+            await TrackPlayer.pause();
+        } else {
+            await TrackPlayer.play();
+        }
+    });
 };

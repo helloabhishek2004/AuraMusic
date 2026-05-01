@@ -519,6 +519,8 @@ export default function NowPlayingScreen() {
         <View style={styles.header}>
           <Animated.View style={{ transform: [{ scale: likeBtnScale }] }}>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Close now playing"
               onPress={() => router.back()}
               onPressIn={() => pressIn(likeBtnScale)}
               onPressOut={() => pressOut(likeBtnScale)}
@@ -577,11 +579,14 @@ export default function NowPlayingScreen() {
         {/* ── SONG INFO ────────────────────────────────────────────────────── */}
         <View style={styles.songInfoSection}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.trackTitle} numberOfLines={1}>{currentTrack.title}</Text>
-            <Text style={styles.artistName} numberOfLines={1}>{currentTrack.artist}</Text>
+            <Text allowFontScaling maxFontSizeMultiplier={1.2} style={styles.trackTitle} numberOfLines={1}>{currentTrack.title}</Text>
+            <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.artistName} numberOfLines={1}>{currentTrack.artist}</Text>
           </View>
           <Animated.View style={{ transform: [{ scale: likeBtnScale }] }}>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={isLiked ? 'Remove from favorites' : 'Add to favorites'}
+              accessibilityState={{ selected: isLiked }}
               onPress={() => setIsLiked(!isLiked)}
               onPressIn={() => pressIn(likeBtnScale)}
               onPressOut={() => pressOut(likeBtnScale)}
@@ -601,7 +606,13 @@ export default function NowPlayingScreen() {
         <View style={styles.scrubberSection} {...scrubberResponder.panHandlers}>
           {/* Glass track container */}
           <GlassCard style={styles.scrubberCard} borderRadius={8} blurIntensity={30}>
-            <View style={styles.scrubberOuter} onLayout={(e) => {
+            <View
+              accessible
+              accessibilityRole="adjustable"
+              accessibilityLabel="Playback position"
+              accessibilityValue={{ min: 0, max: Math.round(currentTrack.durationSec), now: Math.round(elapsedSec) }}
+              style={styles.scrubberOuter}
+              onLayout={(e) => {
               const w = e.nativeEvent.layout.width;
               setScrubberWidth(w);
               scrubberWidthRef.current = w;
@@ -665,6 +676,8 @@ export default function NowPlayingScreen() {
           {/* Prev */}
           <Animated.View style={{ transform: [{ scale: prevBtnScale }] }}>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Previous track"
               onPress={onPrev}
               onPressIn={() => pressIn(prevBtnScale)}
               onPressOut={() => pressOut(prevBtnScale)}
@@ -697,6 +710,8 @@ export default function NowPlayingScreen() {
 
             <Animated.View style={{ transform: [{ scale: playBtnScale }] }}>
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={isPlaying ? 'Pause playback' : 'Play track'}
                 onPress={() => isPlaying ? pause() : play()}
                 onPressIn={() => pressIn(playBtnScale)}
                 onPressOut={() => pressOut(playBtnScale)}
@@ -731,6 +746,8 @@ export default function NowPlayingScreen() {
           {/* Next */}
           <Animated.View style={{ transform: [{ scale: nextBtnScale }] }}>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Next track"
               onPress={onNext}
               onPressIn={() => pressIn(nextBtnScale)}
               onPressOut={() => pressOut(nextBtnScale)}
@@ -746,6 +763,9 @@ export default function NowPlayingScreen() {
         <View style={styles.secondaryControls}>
           <Animated.View style={{ transform: [{ scale: shuffleBtnScale }] }}>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={isShuffle ? 'Turn shuffle off' : 'Turn shuffle on'}
+              accessibilityState={{ selected: isShuffle }}
               onPress={toggleShuffle}
               onPressIn={() => pressIn(shuffleBtnScale)}
               onPressOut={() => pressOut(shuffleBtnScale)}
@@ -757,6 +777,8 @@ export default function NowPlayingScreen() {
 
           <Animated.View style={{ transform: [{ scale: castBtnScale }] }}>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Cast or connect to nearby audio"
               onPressIn={() => pressIn(castBtnScale)}
               onPressOut={() => pressOut(castBtnScale)}
               activeOpacity={1}
@@ -767,6 +789,9 @@ export default function NowPlayingScreen() {
 
           <Animated.View style={{ transform: [{ scale: repeatBtnScale }] }}>
             <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={repeatMode === RepeatMode.Off ? 'Turn repeat on' : repeatMode === RepeatMode.Track ? 'Repeat queue' : 'Turn repeat off'}
+              accessibilityState={{ selected: repeatMode !== RepeatMode.Off }}
               onPress={toggleRepeat}
               onPressIn={() => pressIn(repeatBtnScale)}
               onPressOut={() => pressOut(repeatBtnScale)}
@@ -816,6 +841,8 @@ export default function NowPlayingScreen() {
             <View key={item.key} style={styles.iconButtonContainer}>
               <Animated.View style={{ transform: [{ scale: item.scale }] }}>
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={item.label.toLowerCase()}
                   onPress={item.onPress}
                   onPressIn={() => pressIn(item.scale)}
                   onPressOut={() => pressOut(item.scale)}

@@ -401,6 +401,7 @@ export default function DownloadsScreen() {
       </View>
 
       <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 192 }}
         stickyHeaderIndices={[1]}

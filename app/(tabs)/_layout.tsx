@@ -1,16 +1,25 @@
+import React, { useCallback } from 'react';
 import { Tabs } from 'expo-router';
 import FloatingNav from '../../src/components/FloatingNav';
 import MiniPlayer from '../../src/components/MiniPlayer';
-import { colors } from '../../src/styles/theme';
+import { AtmosphericBackground } from '../../src/components/ui/atmospheric-background';
+import { palette } from '../../src/design/tokens';
 
 export default function TabLayout() {
+  const renderTabBar = useCallback((props: any) => <FloatingNav {...props} />, []);
+
   return (
     <>
+      <AtmosphericBackground intensity={0.85} />
       <Tabs
-        tabBar={(props) => <FloatingNav {...props} />}
+        backBehavior="history"
+        detachInactiveScreens
+        tabBar={renderTabBar}
         screenOptions={{
           headerShown: false,
-          sceneStyle: { backgroundColor: colors.background }
+          lazy: true,
+          freezeOnBlur: true,
+          sceneStyle: { backgroundColor: palette.background }
         }}
       >
         <Tabs.Screen
@@ -20,9 +29,9 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="browse"
+          name="search"
           options={{
-            title: 'Browse',
+            title: 'Search',
           }}
         />
         <Tabs.Screen

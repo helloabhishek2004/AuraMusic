@@ -246,10 +246,16 @@ export default function LyricsScreen() {
           data={lyrics}
           keyExtractor={(_, index) => index.toString()}
           renderItem={renderLyricItem}
+          contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           snapToInterval={120} // Match item height for snappy scrolling
           decelerationRate="fast"
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          updateCellsBatchingPeriod={32}
+          removeClippedSubviews
           getItemLayout={(_, index) => ({
             length: 120,
             offset: 120 * index,

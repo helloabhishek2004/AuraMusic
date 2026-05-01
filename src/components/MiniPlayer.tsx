@@ -1,255 +1,274 @@
-import React, { useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Dimensions,
-  Platform,
-  Animated,
-} from 'react-native';
+import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Animated, GestureResponderEvent, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
-import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useMusic } from '../context/MusicContext';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import { LiquidGlass } from '@/src/components/ui/liquid-glass';
+import { PressScale } from '@/src/components/ui/press-scale';
+import { glass, palette, radius } from '@/src/design/tokens';
+import { minimumHitSlop, useResponsiveMetrics } from '@/src/hooks/use-responsive-metrics';
+import { useMusicControls, useMusicProgress, useNowPlayingTrack } from '@/src/context/MusicContext';
+import { clamp } from '@/src/utils/color';
+import { impact } from '@/src/utils/haptics';
 
-const { width: SW } = Dimensions.get('window');
+const NAV_HEIGHT = 72;
 
-const SP = { tension: 60, friction: 9 };
-const POP = { tension: 200, friction: 8 };
-
-export default function MiniPlayer() {
-  const { currentTrack, isPlaying, progress, play, pause, next } = useMusic();
+function MiniPlayer() {
+  const track = useNowPlayingTrack();
+  const { isPlaying, play, pause, next } = useMusicControls();
+  const { progress } = useMusicProgress();
   const router = useRouter();
-  
-  const scale = useRef(new Animated.Value(1)).current;
-  const opacity = useRef(new Animated.Value(1)).current;
+  const insets = useSafeAreaInsets();
+  const metrics = useResponsiveMetrics();
+  const progressAnim = useRef(new Animated.Value(clamp(progress))).current;
 
-  if (!currentTrack) return null;
+  useEffect(() => {
+    Animated.timing(progressAnim, {
+      toValue: clamp(progress),
+      duration: 280,
+      useNativeDriver: false,
+    }).start();
+  }, [progress, progressAnim]);
 
-  const handlePressIn = () => {
-    Animated.spring(scale, { toValue: 0.95, ...POP, useNativeDriver: true }).start();
-  };
+  const progressWidth = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  });
 
-  const handlePressOut = () => {
-    Animated.spring(scale, { toValue: 1, ...POP, useNativeDriver: true }).start();
-  };
+  const accent = track?.dominantColors?.[0] ?? palette.primary;
+  const accentDeep = track?.dominantColors?.[1] ?? palette.primaryDeep;
+  const bottom = Math.max(insets.bottom + NAV_HEIGHT + 28, 112);
+  const showProgressRail = metrics.width >= 390;
 
-  const handleOpenNowPlaying = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const handleOpenNowPlaying = useCallback(() => {
+    if (!track) return;
+    impact(Haptics.ImpactFeedbackStyle.Light);
     router.push({
       pathname: '/now_playing',
-      params: { trackId: currentTrack.id },
+      params: { trackId: track.id },
     });
-  };
+  }, [router, track]);
 
-  const handlePlayPause = (e: any) => {
-    e.stopPropagation();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (isPlaying) {
-      pause();
-    } else {
-      play();
-    }
-  };
+  const handlePlayPause = useCallback(
+    (event: GestureResponderEvent) => {
+      event.stopPropagation();
+      impact(Haptics.ImpactFeedbackStyle.Medium);
+      if (isPlaying) {
+        pause();
+      } else {
+        play();
+      }
+    },
+    [isPlaying, pause, play]
+  );
 
-  const handleNext = (e: any) => {
-    e.stopPropagation();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    next();
-  };
+  const handleNext = useCallback(
+    (event: GestureResponderEvent) => {
+      event.stopPropagation();
+      impact(Haptics.ImpactFeedbackStyle.Medium);
+      next();
+    },
+    [next]
+  );
+
+  const gradientColors = useMemo(
+    () => [accent, accentDeep] as const,
+    [accent, accentDeep]
+  );
+
+  if (!track) return null;
 
   return (
-    <Animated.View 
-      style={[
-        s.container,
-        { transform: [{ scale }], opacity }
-      ]}
+    <PressScale
+      haptic={false}
+      scaleTo={0.985}
+      wrapperStyle={[styles.container, { bottom, width: metrics.navWidth }]}
+      style={styles.pressArea}
+      accessibilityRole="button"
+      accessibilityLabel={`Open now playing. ${track.title} by ${track.artist}.`}
+      onPress={handleOpenNowPlaying}
     >
-      <TouchableOpacity
-        activeOpacity={1}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        onPress={handleOpenNowPlaying}
-        style={StyleSheet.absoluteFill}
+      <LiquidGlass
+        dense
+        gradient
+        accentColor={accent}
+        accentOpacity={0.07}
+        intensity={glass.denseBlur}
+        borderRadius={radius.lg}
+        style={styles.glass}
+        contentStyle={styles.content}
       >
-        {/* ── 4-LAYER GLASS CONTAINER ── */}
-        <View style={s.glassEffect}>
-          <BlurView intensity={70} tint="dark" style={StyleSheet.absoluteFill} />
-          
-          {/* Specular Highlights & Border */}
-          <View pointerEvents="none" style={s.specTop} />
-          <View pointerEvents="none" style={s.specLeft} />
-          <View pointerEvents="none" style={s.refraction} />
-          
-          <View style={s.content}>
-            {/* Thumb */}
-            <View style={s.artWrap}>
-              <Image 
-                source={{ uri: currentTrack.art }}
-                style={s.art}
-                contentFit="cover"
-                transition={200}
-              />
-            </View>
+        <View style={styles.artWrap}>
+          <Image
+            source={{ uri: track.art }}
+            style={styles.art}
+            contentFit="cover"
+            transition={180}
+            accessibilityLabel={`${track.title} artwork`}
+          />
+        </View>
 
-            {/* Titles */}
-            <View style={s.meta}>
-              <Text style={s.title} numberOfLines={1}>{currentTrack.title}</Text>
-              <Text style={s.artist} numberOfLines={1}>{currentTrack.artist}</Text>
-            </View>
+        <View style={styles.meta}>
+          <Text
+            allowFontScaling
+            maxFontSizeMultiplier={1.25}
+            style={styles.title}
+            numberOfLines={1}
+          >
+            {track.title}
+          </Text>
+          <Text
+            allowFontScaling
+            maxFontSizeMultiplier={1.25}
+            style={styles.artist}
+            numberOfLines={1}
+          >
+            {track.artist}
+          </Text>
+        </View>
 
-            {/* Progress Bar */}
-            <View style={s.progressRow}>
-              <View style={s.pbBase}>
-                <Animated.View style={[s.pbFill, { width: `${progress * 100}%` }]} />
-                <View style={[s.pbGlow, { width: `${progress * 100}%` }]} />
-              </View>
-            </View>
-
-            {/* Controls */}
-            <View style={s.controls}>
-              <TouchableOpacity 
-                style={s.controlBtn} 
-                onPress={handlePlayPause}
-                activeOpacity={0.7}
-              >
-                <Ionicons name={isPlaying ? "pause" : "play"} size={20} color="#000" style={!isPlaying ? { marginLeft: 2 } : {}} />
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={s.nextBtn} 
-                onPress={handleNext}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="play-skip-forward" size={20} color="rgba(255,255,255,0.8)" />
-              </TouchableOpacity>
+        {showProgressRail && (
+          <View style={styles.progressRail} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            <View style={styles.progressTrack}>
+              <Animated.View style={[styles.progressFill, { width: progressWidth, backgroundColor: accent }]} />
+              <Animated.View style={[styles.progressGlow, { width: progressWidth, backgroundColor: accent }]} />
             </View>
           </View>
+        )}
+
+        <View style={styles.controls}>
+          <PressScale
+            scaleTo={0.9}
+            hitSlop={minimumHitSlop}
+            accessibilityRole="button"
+            accessibilityLabel={isPlaying ? 'Pause playback' : 'Play current track'}
+            onPress={handlePlayPause}
+            style={[styles.playButton, { backgroundColor: palette.ink }]}
+          >
+            <Ionicons
+              name={isPlaying ? 'pause' : 'play'}
+              size={20}
+              color="#08080d"
+              style={!isPlaying && styles.playIconOffset}
+            />
+          </PressScale>
+          <PressScale
+            scaleTo={0.9}
+            hitSlop={minimumHitSlop}
+            accessibilityRole="button"
+            accessibilityLabel="Skip to next track"
+            onPress={handleNext}
+            style={styles.nextButton}
+          >
+            <Ionicons name="play-skip-forward" size={20} color={palette.inkMuted} />
+          </PressScale>
         </View>
-      </TouchableOpacity>
-    </Animated.View>
+
+        <View pointerEvents="none" style={[styles.underlight, { backgroundColor: gradientColors[0] }]} />
+      </LiquidGlass>
+    </PressScale>
   );
 }
 
-const s = StyleSheet.create({
+export default memo(MiniPlayer);
+
+const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 110, 
-    left: 20,
-    right: 20,
-    height: 64,
-    zIndex: 999,
+    alignSelf: 'center',
+    zIndex: 40,
   },
-  glassEffect: {
-    flex: 1,
-    borderRadius: 22,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(18, 18, 22, 0.75)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 12 },
-        shadowOpacity: 0.4,
-        shadowRadius: 16,
-      },
-      android: { elevation: 12 },
-    }),
+  pressArea: {
+    minHeight: 64,
   },
-  specTop: {
-    position: 'absolute',
-    top: 0,
-    left: 30,
-    right: 30,
-    height: 1.5,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    zIndex: 5,
-  },
-  specLeft: {
-    position: 'absolute',
-    left: 8,
-    top: 10,
-    bottom: 10,
-    width: 2.5,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    transform: [{ skewX: '-8deg' }],
-    zIndex: 5,
-  },
-  refraction: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.02)',
+  glass: {
+    minHeight: 64,
+    boxShadow: '0 14px 32px rgba(0, 0, 0, 0.40)',
   },
   content: {
-    flex: 1,
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
+    gap: 11,
   },
   artWrap: {
     width: 48,
     height: 48,
-    borderRadius: 12,
+    borderRadius: 13,
     overflow: 'hidden',
-    backgroundColor: '#000',
+    backgroundColor: '#050507',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: palette.border,
   },
-  art: { width: '100%', height: '100%' },
-  meta: {
-    marginLeft: 12,
-    flex: 1.2,
-  },
-  title: { color: '#FFF', fontSize: 14, fontWeight: '700', letterSpacing: -0.2 },
-  artist: { color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 1 },
-  
-  progressRow: {
-    flex: 1,
-    marginHorizontal: 12,
-  },
-  pbBase: {
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 2,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  pbFill: {
+  art: {
+    width: '100%',
     height: '100%',
-    backgroundColor: '#BF5AF2',
-    zIndex: 2,
   },
-  pbGlow: {
+  meta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  title: {
+    color: palette.ink,
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: 'Inter_500Medium',
+  },
+  artist: {
+    marginTop: 1,
+    color: palette.inkDim,
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: 'Inter_400Regular',
+  },
+  progressRail: {
+    width: 72,
+  },
+  progressTrack: {
+    height: 4,
+    borderRadius: 4,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressGlow: {
     position: 'absolute',
     height: '100%',
-    backgroundColor: '#BF5AF2',
-    opacity: 0.5,
+    opacity: 0.42,
   },
-  
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingRight: 4,
+    gap: 8,
   },
-  controlBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#FFF',
-    justifyContent: 'center',
+  playButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
-    shadowColor: '#BF5AF2',
-    shadowRadius: 10,
-    shadowOpacity: 0.4,
+    justifyContent: 'center',
   },
-  nextBtn: {
-    padding: 6,
+  playIconOffset: {
+    marginLeft: 2,
+  },
+  nextButton: {
+    width: 34,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  underlight: {
+    position: 'absolute',
+    left: 28,
+    right: 28,
+    bottom: -10,
+    height: 18,
+    opacity: 0.22,
   },
 });

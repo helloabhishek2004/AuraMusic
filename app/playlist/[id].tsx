@@ -310,6 +310,7 @@ export default function PlaylistScreen() {
 
       {/* ── SCROLLABLE CONTENT ──────────────────────────────────────────────── */}
       <Animated.ScrollView
+        contentInsetAdjustmentBehavior="automatic"
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
         scrollEventThrottle={16}
         contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: 180 }}
