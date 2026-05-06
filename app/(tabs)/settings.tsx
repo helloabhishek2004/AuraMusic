@@ -234,11 +234,10 @@ export default function SettingsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.background }]}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       
       <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <View style={styles.headerTopRow}>
-
           <Text style={styles.headerTitle}>Settings</Text>
           <View style={{ width: 40 }} /> 
         </View>
@@ -246,7 +245,7 @@ export default function SettingsScreen() {
 
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 120 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 160 }]}
         showsVerticalScrollIndicator={false}
       >
         <SettingSection title="Audio" index={0}>

@@ -211,7 +211,7 @@ const PremiumGlass = ({
         />
       )}
 
-      <View style={{ zIndex: 1 }}>{children}</View>
+      <View style={{ zIndex: 1, flex: 1 }}>{children}</View>
     </View>
   );
 };
@@ -332,7 +332,7 @@ const DownloadButton = ({ downloaded = false, onPress, downloading = false }: an
 };
 
 // ── HORIZONTAL TRACK CARD (FIXED) ──────────────────────────────────────────
-const TrackCard = ({ title, artist, image, onPress, onArtistPress, liked, onLikePress, downloaded, onDownload, variant = 'compact' }: any) => {
+const TrackCard = React.memo(({ title, artist, image, onPress, onArtistPress, liked, onLikePress, downloaded, onDownload, variant = 'compact' }: any) => {
   const [isLiked, setIsLiked] = useState(liked);
   const [isDownloading, setIsDownloading] = useState(false);
   const isCompact = variant === 'compact';
@@ -347,79 +347,110 @@ const TrackCard = ({ title, artist, image, onPress, onArtistPress, liked, onLike
       activeOpacity={0.7}
       style={[s.trackCardContainer, isCompact ? s.trackCardContainerCompact : s.trackCardContainerExpanded]}
     >
-      <PremiumGlass r={16} blur={50} gloss style={[s.trackCardGlass, isCompact ? s.trackCardGlassCompact : s.trackCardGlassExpanded]}>
-        <Image source={{ uri: image }} style={[s.trackCardImage, isCompact ? s.trackCardImageCompact : s.trackCardImageExpanded]} contentFit="cover" />
-        <View style={s.trackCardContent}>
-          <Text style={[s.trackCardTitle, isCompact && s.trackCardTitleCompact]} numberOfLines={2}>
+      <PremiumGlass r={20} blur={40} gloss style={[s.trackCardGlass, isCompact ? s.trackCardGlassCompact : s.trackCardGlassExpanded]}>
+        <View style={[s.trackCardImageContainer, isCompact ? s.trackCardImageContainerCompact : s.trackCardImageContainerExpanded]}>
+          <Image source={{ uri: image }} style={s.trackCardImage} contentFit="cover" transition={200} />
+          <View style={s.trackCardImageOverlay} />
+        </View>
+        <View style={[s.trackCardContent, !isCompact && s.trackCardContentExpanded]}>
+          <Text style={[s.trackCardTitle, isCompact ? s.trackCardTitleCompact : s.trackCardTitleExpanded]} numberOfLines={isCompact ? 1 : 2}>
             {title}
           </Text>
           <TouchableOpacity onPress={(e) => {
             e.stopPropagation();
             onArtistPress?.();
           }}>
-            <Text style={s.trackCardArtist} numberOfLines={isCompact ? 2 : 1}>
+            <Text style={[s.trackCardArtist, !isCompact && s.trackCardArtistExpanded]} numberOfLines={1}>
               {artist}
             </Text>
           </TouchableOpacity>
+          
+          {!isCompact && (
+            <View style={s.trackCardActionsExpandedRow}>
+               <HeartButton
+                liked={isLiked}
+                size={18}
+                onPress={() => {
+                  setIsLiked(!isLiked);
+                  onLikePress?.();
+                }}
+              />
+              <DownloadButton
+                downloaded={downloaded}
+                downloading={isDownloading}
+                onPress={() => {
+                  setIsDownloading(true);
+                  setTimeout(() => setIsDownloading(false), 1500);
+                  onDownload?.();
+                }}
+              />
+            </View>
+          )}
         </View>
-        <View style={[s.trackCardActions, isCompact && s.trackCardActionsCompact]}>
-          <HeartButton
-            liked={isLiked}
-            size={20}
-            onPress={() => {
-              setIsLiked(!isLiked);
-              onLikePress?.();
-            }}
-          />
-          <DownloadButton
-            downloaded={downloaded}
-            downloading={isDownloading}
-            onPress={() => {
-              setIsDownloading(true);
-              setTimeout(() => setIsDownloading(false), 1500);
-              onDownload?.();
-            }}
-          />
-        </View>
+        
+        {isCompact && (
+          <View style={s.trackCardActionsCompact}>
+            <HeartButton
+              liked={isLiked}
+              size={18}
+              onPress={() => {
+                setIsLiked(!isLiked);
+                onLikePress?.();
+              }}
+            />
+            <DownloadButton
+              downloaded={downloaded}
+              downloading={isDownloading}
+              onPress={() => {
+                setIsDownloading(true);
+                setTimeout(() => setIsDownloading(false), 1500);
+                onDownload?.();
+              }}
+            />
+          </View>
+        )}
       </PremiumGlass>
     </TouchableOpacity>
   );
-};
+});
 
 // ── BENTO CARD (LARGE FEATURED) ────────────────────────────────────────────
-const BentoCard = ({
+const BentoCard = React.memo(({
   image,
   title,
   subtitle,
   tag,
   onPress,
+  style
 }: any) => {
   return (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.8}
-      style={s.bentoCard}
+      style={[s.bentoCard, style]}
     >
-      <PremiumGlass r={32} blur={70} gloss gradient style={s.bentoCardGlass}>
-        <Image source={{ uri: image }} style={s.bentoCardImage} contentFit="cover" />
-        <LinearGradient
-          colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.85)']}
-          style={StyleSheet.absoluteFill}
-          pointerEvents="none"
-        />
+      <PremiumGlass r={28} blur={60} gloss gradient style={s.bentoCardGlass}>
+        <View style={s.bentoCardImageContainer}>
+          <Image source={{ uri: image }} style={s.bentoCardImage} contentFit="cover" transition={300} />
+          <LinearGradient
+            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.85)']}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+        </View>
         <View style={s.bentoCardContent}>
           {tag && (
             <View style={s.bentoCardTag}>
               <Text style={s.bentoCardTagText}>{tag}</Text>
             </View>
           )}
-          <Text style={s.bentoCardTitle}>{title}</Text>
-          <Text style={s.bentoCardSubtitle}>{subtitle}</Text>
+          <Text style={s.bentoCardTitle} numberOfLines={2}>{title}</Text>
+          <Text style={s.bentoCardSubtitle} numberOfLines={2}>{subtitle}</Text>
         </View>
       </PremiumGlass>
     </TouchableOpacity>
   );
-};
+});
 
 // ── CIRCULAR ARTIST CARD ───────────────────────────────────────────────────
 const CircleArtistCard = ({ name, image, onPress }: any) => {
@@ -944,122 +975,151 @@ const s = StyleSheet.create({
     marginBottom: 12,
   },
   trackCardContainerCompact: {
-    width: 168,
-    marginRight: 12,
+    width: 160,
+    marginRight: 16,
   },
   trackCardContainerExpanded: {
     width: '100%',
   },
   trackCardGlass: {
     padding: 12,
-    gap: 12,
   },
   trackCardGlassCompact: {
-    minHeight: 176,
+    minHeight: 180,
     justifyContent: 'space-between',
   },
   trackCardGlassExpanded: {
-    minHeight: 104,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 16,
+    paddingVertical: 10,
+  },
+  trackCardImageContainer: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  trackCardImageContainerCompact: {
+    width: '100%',
+    aspectRatio: 1,
+  },
+  trackCardImageContainerExpanded: {
+    width: 64,
+    height: 64,
   },
   trackCardImage: {
-    borderRadius: 12,
-  },
-  trackCardImageCompact: {
     width: '100%',
-    height: 112,
+    height: '100%',
   },
-  trackCardImageExpanded: {
-    width: 80,
-    height: 80,
+  trackCardImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.05)',
   },
   trackCardContent: {
     flex: 1,
     minWidth: 0,
   },
+  trackCardContentExpanded: {
+    justifyContent: 'center',
+  },
   trackCardTitle: {
     color: C.text,
     fontWeight: '700',
     fontSize: 15,
-    marginBottom: 4,
+    letterSpacing: -0.2,
   },
   trackCardTitleCompact: {
-    marginTop: 2,
-    marginBottom: 6,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  trackCardTitleExpanded: {
+    fontSize: 16,
+    marginBottom: 2,
   },
   trackCardArtist: {
     color: C.textSecondary,
     fontSize: 13,
     fontWeight: '500',
+    opacity: 0.7,
   },
-  trackCardActions: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
+  trackCardArtistExpanded: {
+    fontSize: 14,
   },
   trackCardActionsCompact: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 6,
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 2,
+  },
+  trackCardActionsExpandedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginTop: 8,
   },
 
   // Expanded List
   expandedListContainer: {
     paddingHorizontal: PAD,
     gap: 12,
-    marginTop: 16,
+    marginTop: 12,
   },
 
   // Bento Card
   madeForYouSection: {
     paddingHorizontal: PAD,
     marginBottom: 44,
-    gap: 16,
+    gap: 20,
   },
   bentoCard: {
     width: '100%',
-    height: 240,
-    marginBottom: 16,
+    height: 260,
   },
   bentoCardGlass: {
     flex: 1,
   },
-  bentoCardImage: {
+  bentoCardImageContainer: {
     ...StyleSheet.absoluteFillObject,
-    opacity: 0.84,
+    borderRadius: 28,
+    overflow: 'hidden',
+  },
+  bentoCardImage: {
+    width: '100%',
+    height: '100%',
   },
   bentoCardContent: {
     flex: 1,
-    padding: 28,
+    padding: 24,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(5,5,9,0.12)',
   },
   bentoCardTag: {
-    backgroundColor: 'rgba(70, 245, 224, 0.15)',
+    backgroundColor: 'rgba(70, 245, 224, 0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginBottom: 10,
+    alignSelf: 'flex-start',
     borderWidth: 1,
     borderColor: 'rgba(70, 245, 224, 0.3)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    marginBottom: 12,
-    alignSelf: 'flex-start',
   },
   bentoCardTagText: {
     color: C.accent,
     fontSize: 10,
     fontWeight: '900',
-    letterSpacing: 1.5,
+    letterSpacing: 1,
   },
   bentoCardTitle: {
     color: C.text,
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '900',
     letterSpacing: -0.5,
-    marginBottom: 8,
+    lineHeight: 32,
+    marginBottom: 6,
   },
   bentoCardSubtitle: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 14,
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 15,
     fontWeight: '500',
     lineHeight: 20,
   },

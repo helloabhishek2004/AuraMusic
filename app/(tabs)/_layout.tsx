@@ -47,7 +47,6 @@ export default function TabLayout() {
           }}
         />
       </Tabs>
-      <MiniPlayer />
     </>
   );
 }

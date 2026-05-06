@@ -4,7 +4,8 @@ import { ThemeProvider as NavigationThemeProvider, DarkTheme } from '@react-navi
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { MusicProvider, useNowPlayingTrack } from '../src/context/MusicContext';
 import { palette } from '../src/design/tokens';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, BackHandler } from 'react-native';
+import { useRouter, usePathname, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts, Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
@@ -12,9 +13,25 @@ import { Manrope_700Bold } from '@expo-google-fonts/manrope';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { enableFreeze } from 'react-native-screens';
 
+import MiniPlayer from '../src/components/MiniPlayer';
+
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 enableFreeze(true);
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
+
+function GlobalPlayer() {
+  const pathname = usePathname();
+  const segments = useSegments();
+  
+  const isNowPlaying = pathname === '/now_playing';
+  if (isNowPlaying) return null;
+
+  // If we are in a tab, we need to lift the mini player above the tab bar
+  const isTab = segments[0] === '(tabs)';
+  const offset = isTab ? 84 : 0; // 72 (bar) + 12 (padding)
+  
+  return <MiniPlayer offset={offset} />;
+}
 
 export default function RootLayout() {
   const [fontsLoaded, error] = useFonts({
@@ -28,6 +45,25 @@ export default function RootLayout() {
       SplashScreen.hideAsync().catch(() => undefined);
     }
   }, [fontsLoaded, error]);
+
+  const router = useRouter();
+  const segments = useSegments();
+
+  useEffect(() => {
+    const onBackPress = () => {
+      // If we are in a tab but not at the root of that tab, or in a modal/subscreen
+      const isAtRoot = segments.length === 1 && segments[0] === '(tabs)';
+      
+      if (!isAtRoot && router.canGoBack()) {
+        router.back();
+        return true;
+      }
+      return false;
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => backHandler.remove();
+  }, [segments, router]);
 
   const navigationTheme = useMemo(
     () => ({
@@ -104,6 +140,7 @@ export default function RootLayout() {
               <Stack.Screen name="downloads" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="local_library" options={{ animation: 'slide_from_right' }} />
             </Stack>
+            <GlobalPlayer />
           </GestureHandlerRootView>
         </MusicProvider>
       </NavigationThemeProvider>

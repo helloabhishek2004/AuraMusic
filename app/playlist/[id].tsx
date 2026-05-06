@@ -336,7 +336,7 @@ export default function PlaylistScreen() {
               </TouchableOpacity>
             </Animated.View>
 
-            <Text style={styles.navAppTitle}>AuraMusic</Text>
+            <View style={{ flex: 1 }} />
 
             <TouchableOpacity style={styles.moreCircle}>
               <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
@@ -552,57 +552,6 @@ export default function PlaylistScreen() {
         </View>
 
       </Animated.ScrollView>
-
-      {/* ── FLOATING MINI PLAYER ─────────────────────────────────────────────── */}
-      <Materialise delay={100} style={[styles.floatingMiniPlayerOuter, { bottom: insets.bottom + 20 }]}>
-        {/* Ambient glow beneath mini player */}
-        <View style={styles.miniPlayerGlow}>
-          <LinearGradient
-            colors={['transparent', hexToRgba(COLORS.primary, 0.18), 'transparent']}
-            start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
-            style={StyleSheet.absoluteFill}
-          />
-          <LinearGradient
-            colors={[hexToRgba(COLORS.primary, 0.14), 'transparent']}
-            start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </View>
-
-        <GlassPane style={styles.miniPlayerSurface} borderRadius={24} blurIntensity={85}>
-          {/* Progress line — bottom edge */}
-          <View style={styles.miniProgressTrack}>
-            <LinearGradient
-              colors={[COLORS.primary, COLORS.primaryMid]}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-              style={[styles.miniProgressFill, { width: '40%' }]}
-            />
-          </View>
-
-          <View style={styles.miniPlayerContent}>
-            <View style={styles.miniArtWrapper}>
-              <Image source={{ uri: PLAYLIST_DATA.tracks[0].art }} style={styles.miniArt} />
-              {/* active ring */}
-              <View style={styles.miniArtRing} />
-            </View>
-
-            <View style={styles.miniMeta}>
-              <Text style={styles.miniTitle} numberOfLines={1}>{PLAYLIST_DATA.tracks[0].title}</Text>
-              <Text style={styles.miniArtist} numberOfLines={1}>{PLAYLIST_DATA.tracks[0].artist}</Text>
-            </View>
-
-            <View style={styles.miniControls}>
-              <TouchableOpacity style={styles.miniCtrlBtn}>
-                <Ionicons name="play" size={26} color="#FFF" style={{ marginLeft: 3 }} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.miniCtrlBtn}>
-                <Ionicons name="play-skip-forward" size={24} color="rgba(255,255,255,0.75)" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </GlassPane>
-      </Materialise>
-
     </View>
   );
 }

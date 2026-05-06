@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 import { clamp } from '@/src/utils/color';
+import { catalogTracks, CatalogTrack } from '@/src/data/music-catalog';
 
 // --- Safe TrackPlayer Setup ---
 let TrackPlayer: any = null;
@@ -30,23 +31,15 @@ try {
   console.warn('TrackPlayer native module not found. Audio features will be disabled.');
 }
 
-type TrackPlayerTrack = any;
-
-export interface Track {
-  id: string;
+export interface Track extends CatalogTrack {
   url: string;
-  title: string;
-  artist: string;
-  art: string;
-  artwork?: string;
-  durationSec: number;
-  duration?: number;
-  dominantColors: string[];
 }
 
 type PlaybackStateContextType = {
   currentTrack: Track | null;
   isPlaying: boolean;
+  isBuffering: boolean;
+  isLoading: boolean;
   repeatMode: RepeatModeValue;
   isShuffle: boolean;
   isPlayerReady: boolean;
@@ -56,6 +49,7 @@ type MusicProgressContextType = {
   progress: number;
   elapsedSec: number;
   durationSec: number;
+  bufferedSec: number;
 };
 
 type MusicActionsContextType = {
@@ -67,58 +61,32 @@ type MusicActionsContextType = {
   setTrack: (track: Track) => Promise<void>;
   toggleRepeat: () => Promise<void>;
   toggleShuffle: () => Promise<void>;
+  setVolume: (volume: number) => Promise<void>;
 };
 
 export type MusicContextType = PlaybackStateContextType & MusicProgressContextType & MusicActionsContextType;
 type RepeatModeValue = any;
 
-const MOCK_TRACKS: Track[] = [
-  {
-    id: 'nebula',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-    title: 'Nebula Drift',
-    artist: 'Lumina Synthetics',
-    durationSec: 372,
-    art: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBDvPx_cacsyYoMUH_pNgGcRi4uEGEaZclAzYYTxP8ay88S1AGyEJzlo-cwY2a6vZpRxUqjOFJw8VVM6XorKQgOWTk9FbTnPrm8W8zvJtr_cDobTY0PBpm8a2VfZfcWgNzo9pkQ9KXfJUkwnW95tzuNJRV-0kfiHpAbzv1fgRb92yKUgDA_1wbr6etz41zwCt3BIh0_PCA8pdp3keJxQiVlohG_nAlmNZy3lBQc2e6uYRHW9W9sBR3js83IaO9EFfNUAYDjheUgRFE',
-    artwork: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBDvPx_cacsyYoMUH_pNgGcRi4uEGEaZclAzYYTxP8ay88S1AGyEJzlo-cwY2a6vZpRxUqjOFJw8VVM6XorKQgOWTk9FbTnPrm8W8zvJtr_cDobTY0PBpm8a2VfZfcWgNzo9pkQ9KXfJUkwnW95tzuNJRV-0kfiHpAbzv1fgRb92yKUgDA_1wbr6etz41zwCt3BIh0_PCA8pdp3keJxQiVlohG_nAlmNZy3lBQc2e6uYRHW9W9sBR3js83IaO9EFfNUAYDjheUgRFE',
-    dominantColors: ['#bf5af2', '#7b2fbe'],
-  },
-  {
-    id: 'neon',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-    title: 'Neon Nights',
-    artist: 'Synthwave Collective',
-    durationSec: 425,
-    art: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?auto=format&fit=crop&q=80&w=320',
-    artwork: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?auto=format&fit=crop&q=80&w=320',
-    dominantColors: ['#46f5e0', '#005950'],
-  },
-  {
-    id: 'solar',
-    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-    title: 'Solar Flare',
-    artist: 'Cosmic Echo',
-    durationSec: 344,
-    art: 'https://images.unsplash.com/photo-1459749411177-042180ce673c?auto=format&fit=crop&q=80&w=320',
-    artwork: 'https://images.unsplash.com/photo-1459749411177-042180ce673c?auto=format&fit=crop&q=80&w=320',
-    dominantColors: ['#ff7a8a', '#93000a'],
-  },
-];
+const MOCK_TRACKS: Track[] = catalogTracks.map(t => ({
+  ...t,
+  url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' // Default fallback
+}));
 
 const PlaybackStateContext = createContext<PlaybackStateContextType | undefined>(undefined);
 const MusicProgressContext = createContext<MusicProgressContextType | undefined>(undefined);
 const MusicActionsContext = createContext<MusicActionsContextType | undefined>(undefined);
 
-function normalizeTrack(track: TrackPlayerTrack | Track | undefined | null): Track | null {
+function normalizeTrack(track: any): Track | null {
   if (!track) return null;
-  const match = MOCK_TRACKS.find((item) => item.id === track.id);
   return {
-    ...match,
-    ...track,
-    art: (track as Track).art ?? track.artwork ?? match?.art ?? '',
-    artwork: track.artwork ?? (track as Track).art ?? match?.artwork,
-    durationSec: (track as Track).durationSec ?? track.duration ?? match?.durationSec ?? 1,
-    dominantColors: (track as Track).dominantColors ?? match?.dominantColors ?? ['#bf5af2', '#7b2fbe'],
+    id: track.id,
+    title: track.title || 'Unknown Title',
+    artist: track.artist || 'Unknown Artist',
+    artistId: track.artistId || 'unknown',
+    url: track.url || '',
+    art: track.artwork || track.art || '',
+    durationSec: track.durationSec || track.duration || 0,
+    dominantColors: track.dominantColors || ['#bf5af2', '#7b2fbe'],
   } as Track;
 }
 
@@ -126,10 +94,13 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(MOCK_TRACKS[0]);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [repeatMode, setRepeatMode] = useState<RepeatModeValue>(RepeatMode.Off);
   const [isShuffle, setIsShuffle] = useState(false);
 
-  const { position, duration } = useProgress(500);
+  // Faster progress updates for smoothness
+  const { position, duration, buffered } = useProgress(200);
   const activeDuration = duration > 0 ? duration : currentTrack?.durationSec ?? 1;
   const progress = clamp(activeDuration > 0 ? position / activeDuration : 0);
 
@@ -151,13 +122,12 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         if (!isSetup) {
           await TrackPlayer.setupPlayer({
-            minBuffer: 18,
-            maxBuffer: 52,
-            playBuffer: 1.4,
-            backBuffer: 18,
-            maxCacheSize: 1024 * 48,
+            minBuffer: 15,
+            maxBuffer: 50,
+            playBuffer: 2.0,
+            backBuffer: 15,
+            maxCacheSize: 1024 * 64,
             autoHandleInterruptions: true,
-            autoUpdateMetadata: true,
             androidAudioContentType: AndroidAudioContentType.Music,
           });
 
@@ -165,7 +135,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             android: {
               appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
               alwaysPauseOnInterruption: true,
-              stopForegroundGracePeriod: 8,
             },
             capabilities: [
               Capability.Play,
@@ -175,19 +144,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               Capability.SeekTo,
               Capability.Stop,
             ],
-            notificationCapabilities: [
-              Capability.Play,
-              Capability.Pause,
-              Capability.SkipToNext,
-              Capability.SkipToPrevious,
-              Capability.SeekTo,
-            ],
-            compactCapabilities: [
-              Capability.Play,
-              Capability.Pause,
-              Capability.SkipToNext,
-            ],
-            progressUpdateEventInterval: 1,
+            compactCapabilities: [Capability.Play, Capability.Pause, Capability.SkipToNext],
+            progressUpdateEventInterval: 0.2, // Smoother progress bar
           });
 
           await TrackPlayer.add(MOCK_TRACKS);
@@ -197,28 +155,34 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (typeof index === 'number') {
           const track = await TrackPlayer.getTrack(index);
           setCurrentTrack(normalizeTrack(track));
-        } else {
-          setCurrentTrack(MOCK_TRACKS[0]);
         }
 
         setRepeatMode(await TrackPlayer.getRepeatMode());
         setIsPlayerReady(true);
       } catch (error) {
-        console.log('Error setting up player:', error);
-        setCurrentTrack(MOCK_TRACKS[0]);
+        console.error('TrackPlayer setup failed:', error);
       }
     }
 
     setupPlayer();
   }, []);
 
-  useTrackPlayerEvents([Event.PlaybackState, Event.PlaybackActiveTrackChanged], async (event: any) => {
+  useTrackPlayerEvents([Event.PlaybackState, Event.PlaybackActiveTrackChanged, Event.PlaybackError], async (event: any) => {
     if (event.type === Event.PlaybackState) {
-      setIsPlaying(event.state === State.Playing);
+      const state = event.state;
+      setIsPlaying(state === State.Playing);
+      setIsBuffering(state === State.Buffering);
+      setIsLoading(state === State.Loading);
     }
 
     if (event.type === Event.PlaybackActiveTrackChanged) {
-      setCurrentTrack(normalizeTrack(event.track));
+      if (event.track) {
+        setCurrentTrack(normalizeTrack(event.track));
+      }
+    }
+    
+    if (event.type === Event.PlaybackError) {
+      console.warn('Playback error:', event.message);
     }
   });
 
@@ -227,22 +191,22 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (Platform.OS === 'web' || !TrackPlayer) {
         if (track) setCurrentTrack(track);
         setIsPlaying(true);
-        setIsPlayerReady(true);
         return;
       }
 
       if (!isPlayerReady) return;
 
       if (track) {
-        setCurrentTrack(track);
         const queue = await TrackPlayer.getQueue();
         const index = queue.findIndex((item: any) => item.id === track.id);
 
         if (index >= 0) {
           await TrackPlayer.skip(index);
         } else {
-          await TrackPlayer.reset();
-          await TrackPlayer.add([track, ...MOCK_TRACKS.filter((item) => item.id !== track.id)]);
+          // If not in queue, add it after the current track and skip
+          const currentIndex = await TrackPlayer.getActiveTrackIndex() ?? 0;
+          await TrackPlayer.add([track], currentIndex + 1);
+          await TrackPlayer.skip(currentIndex + 1);
         }
       }
 
@@ -256,36 +220,27 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setIsPlaying(false);
       return;
     }
-    if (!isPlayerReady) return;
     await TrackPlayer.pause();
-  }, [isPlayerReady]);
+  }, []);
 
   const next = useCallback(async () => {
-    if (Platform.OS === 'web' || !TrackPlayer) return;
-    if (!isPlayerReady) return;
-
+    if (!TrackPlayer || !isPlayerReady) return;
     try {
-      if (isShuffle) {
-        const queue = await TrackPlayer.getQueue();
-        const activeIndex = await TrackPlayer.getActiveTrackIndex();
-        const nextIndex = queue.length <= 1
-          ? 0
-          : Math.floor(Math.random() * queue.length);
-        await TrackPlayer.skip(nextIndex === activeIndex ? (nextIndex + 1) % queue.length : nextIndex);
-      } else {
-        await TrackPlayer.skipToNext();
-      }
+      await TrackPlayer.skipToNext();
     } catch {
-      await TrackPlayer.skip(0);
+      // If at end of queue and no repeat, maybe stop or loop back
     }
-  }, [isPlayerReady, isShuffle]);
+  }, [isPlayerReady]);
 
   const prev = useCallback(async () => {
-    if (Platform.OS === 'web' || !TrackPlayer) return;
-    if (!isPlayerReady) return;
-
+    if (!TrackPlayer || !isPlayerReady) return;
     try {
-      await TrackPlayer.skipToPrevious();
+      const { position } = await TrackPlayer.getProgress();
+      if (position > 3) {
+        await TrackPlayer.seekTo(0);
+      } else {
+        await TrackPlayer.skipToPrevious();
+      }
     } catch {
       await TrackPlayer.seekTo(0);
     }
@@ -293,15 +248,11 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const seek = useCallback(
     async (requestedProgress: number) => {
-      const safeProgress = clamp(requestedProgress);
-      if (Platform.OS === 'web' || !TrackPlayer) return;
-      if (!isPlayerReady) return;
-
-      const playerProgress = await TrackPlayer.getProgress();
-      const durationSec = playerProgress.duration || currentTrack?.durationSec || 0;
-      await TrackPlayer.seekTo(Math.floor(safeProgress * durationSec));
+      if (!TrackPlayer || !isPlayerReady) return;
+      const { duration } = await TrackPlayer.getProgress();
+      await TrackPlayer.seekTo(requestedProgress * duration);
     },
-    [currentTrack?.durationSec, isPlayerReady]
+    [isPlayerReady]
   );
 
   const setTrack = useCallback(
@@ -312,33 +263,34 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const toggleRepeat = useCallback(async () => {
-    const nextMode =
-      repeatMode === RepeatMode.Off
-        ? RepeatMode.Track
-        : repeatMode === RepeatMode.Track
-          ? RepeatMode.Queue
-          : RepeatMode.Off;
-
+    if (!TrackPlayer || !isPlayerReady) return;
+    const modes = [RepeatMode.Off, RepeatMode.Track, RepeatMode.Queue];
+    const nextMode = modes[(modes.indexOf(repeatMode) + 1) % modes.length];
+    await TrackPlayer.setRepeatMode(nextMode);
     setRepeatMode(nextMode);
-
-    if (Platform.OS !== 'web' && isPlayerReady && TrackPlayer) {
-      await TrackPlayer.setRepeatMode(nextMode);
-    }
   }, [isPlayerReady, repeatMode]);
 
   const toggleShuffle = useCallback(async () => {
-    setIsShuffle((value) => !value);
+    setIsShuffle((v) => !v);
+  }, []);
+
+  const setVolume = useCallback(async (volume: number) => {
+    if (TrackPlayer) {
+      await TrackPlayer.setVolume(clamp(volume, 0, 1));
+    }
   }, []);
 
   const playbackValue = useMemo<PlaybackStateContextType>(
     () => ({
-      currentTrack: currentTrack ?? MOCK_TRACKS[0],
+      currentTrack,
       isPlaying,
+      isBuffering,
+      isLoading,
       repeatMode,
       isShuffle,
       isPlayerReady,
     }),
-    [currentTrack, isPlayerReady, isPlaying, isShuffle, repeatMode]
+    [currentTrack, isPlayerReady, isPlaying, isBuffering, isLoading, isShuffle, repeatMode]
   );
 
   const progressValue = useMemo<MusicProgressContextType>(
@@ -346,8 +298,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       progress,
       elapsedSec: position,
       durationSec: activeDuration,
+      bufferedSec: buffered,
     }),
-    [activeDuration, position, progress]
+    [activeDuration, buffered, position, progress]
   );
 
   const actionsValue = useMemo<MusicActionsContextType>(
@@ -360,8 +313,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setTrack,
       toggleRepeat,
       toggleShuffle,
+      setVolume,
     }),
-    [next, pause, play, prev, seek, setTrack, toggleRepeat, toggleShuffle]
+    [next, pause, play, prev, seek, setTrack, toggleRepeat, toggleShuffle, setVolume]
   );
 
   return (
@@ -404,11 +358,13 @@ export function useMusicControls() {
     () => ({
       ...actions,
       isPlaying: playback.isPlaying,
+      isBuffering: playback.isBuffering,
+      isLoading: playback.isLoading,
       repeatMode: playback.repeatMode,
       isShuffle: playback.isShuffle,
       isPlayerReady: playback.isPlayerReady,
     }),
-    [actions, playback.isPlayerReady, playback.isPlaying, playback.isShuffle, playback.repeatMode]
+    [actions, playback.isPlayerReady, playback.isPlaying, playback.isBuffering, playback.isLoading, playback.isShuffle, playback.repeatMode]
   );
 }
 

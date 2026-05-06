@@ -16,7 +16,11 @@ import { openNowPlaying } from '@/src/navigation/music-navigation';
 
 const NAV_HEIGHT = 72;
 
-function MiniPlayer() {
+interface MiniPlayerProps {
+  offset?: number;
+}
+
+function MiniPlayer({ offset = 0 }: MiniPlayerProps) {
   const track = useNowPlayingTrack();
   const { isPlaying, play, pause, next } = useMusicControls();
   const { progress } = useMusicProgress();
@@ -40,7 +44,12 @@ function MiniPlayer() {
 
   const accent = track?.dominantColors?.[0] ?? palette.primary;
   const accentDeep = track?.dominantColors?.[1] ?? palette.primaryDeep;
-  const bottom = Math.max(insets.bottom + NAV_HEIGHT + 28, 112);
+  
+  // Dynamic bottom based on offset
+  const bottom = offset > 0 
+    ? Math.max(insets.bottom + offset + 12, offset + 24)
+    : Math.max(insets.bottom + 16, 32);
+
   const showProgressRail = metrics.width >= 390;
 
   const handleOpenNowPlaying = useCallback(() => {
