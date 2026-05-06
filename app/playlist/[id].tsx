@@ -16,6 +16,7 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { openArtistByName, openNowPlaying } from '@/src/navigation/music-navigation';
 
 const { width, height } = Dimensions.get('window');
 
@@ -157,8 +158,11 @@ const TrackRow = ({ item, index, router }: any) => {
           activeOpacity={1}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push({ pathname: '/now_playing', params: { trackId: item.id } });
+            openNowPlaying(router, item.id, 'playlist');
           }}
+          onLongPress={() => openArtistByName(router, item.artist, { origin: 'playlist-track' })}
+          accessibilityRole="button"
+          accessibilityLabel={`Play ${item.title} by ${item.artist}`}
         >
           {/* Active row glass tint */}
           {item.active && (

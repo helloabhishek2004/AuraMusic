@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useMusic } from '@/src/context/MusicContext';
 
 // Screen Dimensions
 const { width, height } = Dimensions.get('window');
@@ -112,29 +113,33 @@ export default function LyricsScreen() {
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList>(null);
+  const { currentTrack, elapsedSec, isPlaying, play, pause, next, prev, seek } = useMusic();
 
   const trackId = params.trackId as string || '1';
-  const track = tracks.find(t => t.id === trackId) || tracks[0];
+  const fallbackTrack = tracks.find(t => t.id === trackId) || tracks[0];
+  const track = currentTrack?.id === trackId
+    ? {
+        ...fallbackTrack,
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        art: currentTrack.art,
+        durationSec: currentTrack.durationSec,
+        dominantColors: currentTrack.dominantColors,
+      }
+    : fallbackTrack;
   const lyrics = track.lyrics;
 
-  const [activeIndex, setActiveIndex] = useState(0); 
   const glowAnim = useRef(new Animated.Value(0.5)).current;
+  const lineDuration = Math.max(track.durationSec / Math.max(lyrics.length, 1), 0.01);
+  const activeIndex = Math.min(lyrics.length - 1, Math.max(0, Math.floor(elapsedSec / lineDuration)));
 
-  // Simulation: Move active lyric every 5 seconds for demonstration
   useEffect(() => {
-    const interval = setInterval(() => {
-      setActiveIndex((prev) => (prev + 1) % lyrics.length);
-    }, 5000);
-    
-    // Glowing pulse
     Animated.loop(
       Animated.sequence([
         Animated.timing(glowAnim, { toValue: 1, duration: 1200, useNativeDriver: false }),
         Animated.timing(glowAnim, { toValue: 0.4, duration: 1200, useNativeDriver: false }),
       ])
     ).start();
-
-    return () => clearInterval(interval);
   }, [lyrics.length]);
 
   // Scroll to active index
@@ -165,11 +170,22 @@ export default function LyricsScreen() {
     }
   };
 
+  const handleLyricPress = (index: number) => {
+    const targetProgress = lyrics.length <= 1 ? 0 : index / (lyrics.length - 1);
+    seek(targetProgress);
+  };
+
   const renderLyricItem = ({ item, index }: { item: string, index: number }) => {
     const isActive = index === activeIndex;
     
     return (
-      <View style={styles.lyricItemContainer}>
+      <TouchableOpacity
+        activeOpacity={0.86}
+        style={styles.lyricItemContainer}
+        onPress={() => handleLyricPress(index)}
+        accessibilityRole="button"
+        accessibilityLabel={`Jump to lyric line ${index + 1}`}
+      >
         <Animated.Text style={[
           styles.lyricText,
           isActive ? styles.lyricTextActive : styles.lyricTextInactive,
@@ -196,7 +212,7 @@ export default function LyricsScreen() {
              </Animated.View>
           </View>
         )}
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -279,13 +295,13 @@ export default function LyricsScreen() {
                 </View>
 
                 <View style={styles.miniControls}>
-                  <TouchableOpacity activeOpacity={0.7}>
+                  <TouchableOpacity activeOpacity={0.7} onPress={prev}>
                     <Ionicons name="play-skip-back" size={24} color="white" />
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.miniPlayBtn, { backgroundColor: '#c792ff' }]} activeOpacity={0.9}>
-                    <Ionicons name="pause" size={24} color="black" />
+                  <TouchableOpacity style={[styles.miniPlayBtn, { backgroundColor: '#c792ff' }]} activeOpacity={0.9} onPress={() => (isPlaying ? pause() : play())}>
+                    <Ionicons name={isPlaying ? 'pause' : 'play'} size={24} color="black" />
                   </TouchableOpacity>
-                  <TouchableOpacity activeOpacity={0.7}>
+                  <TouchableOpacity activeOpacity={0.7} onPress={next}>
                     <Ionicons name="play-skip-forward" size={24} color="white" />
                   </TouchableOpacity>
                 </View>

@@ -16,8 +16,9 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { useMusicNavigation } from '@/src/navigation/music-navigation';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const isTablet = SW >= 768;
@@ -168,7 +169,7 @@ const SongRow = ({ song, onPlay, delay = 0 }: any) => {
 };
 
 // ── Artist row ──────────────────────────────────────────────────────────────
-const ArtistRow = ({ artist, delay = 0 }: any) => {
+const ArtistRow = ({ artist, delay = 0, onPress }: any) => {
   const p = useP();
   return (
     <Mat delay={delay}>
@@ -177,7 +178,10 @@ const ArtistRow = ({ artist, delay = 0 }: any) => {
           <TouchableOpacity
             style={s.artistInner}
             onPressIn={p.onIn} onPressOut={p.onOut} activeOpacity={1}
+            onPress={onPress}
             onLongPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${artist.name}`}
           >
             <View style={s.artistAvatarWrap}>
               <Image source={{ uri: artist.art }} style={s.artistAvatar} contentFit="cover" />
@@ -200,13 +204,13 @@ const ArtistRow = ({ artist, delay = 0 }: any) => {
 };
 
 // ── Album card ──────────────────────────────────────────────────────────────
-const AlbumCard = ({ album, delay = 0 }: any) => {
+const AlbumCard = ({ album, delay = 0, onPress }: any) => {
   const p = useP();
   const W = (SW - PAD * 2 - 16) / (isTablet ? 4 : 2);
   return (
     <Mat delay={delay}>
       <Animated.View style={{ transform: [{ scale: p.sc }], width: W }}>
-        <TouchableOpacity onPressIn={p.onIn} onPressOut={p.onOut} activeOpacity={1}>
+        <TouchableOpacity onPressIn={p.onIn} onPressOut={p.onOut} activeOpacity={1} onPress={onPress} accessibilityRole="button" accessibilityLabel={`Open ${album.title}`}>
           <View style={[s.albumArtWrap, { width: W, height: W, borderRadius: 20 }]}>
             <Image source={{ uri: album.art }} style={{ width: W, height: W, borderRadius: 20 }} contentFit="cover" transition={200} />
             <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }} />
@@ -264,7 +268,7 @@ const RecentItem = ({ item, onPlay, onDelete }: any) => {
 // ── MAIN SCREEN ─────────────────────────────────────────────────────────────
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { goNowPlaying, goArtist, goArtistByName, goAlbum } = useMusicNavigation('search');
 
   const { query: initialQuery } = useLocalSearchParams<{ query?: string }>();
   const [query, setQuery] = useState(initialQuery || '');
@@ -299,8 +303,8 @@ export default function SearchScreen() {
 
   const handlePlay = useCallback((id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    router.push({ pathname: '/now_playing', params: { trackId: id } });
-  }, []);
+    goNowPlaying(id);
+  }, [goNowPlaying]);
 
   const handleDeleteRecent = useCallback((id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid);
@@ -417,6 +421,9 @@ export default function SearchScreen() {
                       style={s.topInner}
                       onPressIn={topP.onIn} onPressOut={topP.onOut}
                       onPress={() => handlePlay(TOP_RESULT.id)} activeOpacity={1}
+                      onLongPress={() => goArtistByName(TOP_RESULT.artist)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Play ${TOP_RESULT.title} by ${TOP_RESULT.artist}`}
                     >
                       {/* art */}
                       <View style={s.topArtWrapper}>
@@ -438,7 +445,9 @@ export default function SearchScreen() {
                           </View>
                         </View>
                         <Text style={s.topTitle}>{TOP_RESULT.title}</Text>
-                        <Text style={s.topArtist}>{TOP_RESULT.artist}</Text>
+                        <TouchableOpacity onPress={() => goArtistByName(TOP_RESULT.artist)} activeOpacity={0.75} accessibilityRole="button" accessibilityLabel={`Open ${TOP_RESULT.artist}`}>
+                          <Text style={s.topArtist}>{TOP_RESULT.artist}</Text>
+                        </TouchableOpacity>
 
                         {/* action row */}
                         <View style={s.topActions}>
@@ -504,7 +513,7 @@ export default function SearchScreen() {
             <View style={[s.section, { marginTop: -8 }]}>
               {ALL_ARTISTS.map((artist, idx) => (
                 <View key={artist.id} style={{ marginBottom: 10 }}>
-                  <ArtistRow artist={artist} delay={480 + idx * 50} />
+                  <ArtistRow artist={artist} delay={480 + idx * 50} onPress={() => goArtist(artist.id)} />
                 </View>
               ))}
             </View>
@@ -518,7 +527,7 @@ export default function SearchScreen() {
             <Mat delay={620}>
               <View style={[s.albumGrid, { marginBottom: 40 }]}>
                 {ALL_ALBUMS.map((album, idx) => (
-                  <AlbumCard key={album.id} album={album} delay={640 + idx * 50} />
+                  <AlbumCard key={album.id} album={album} delay={640 + idx * 50} onPress={() => goAlbum(album.id)} />
                 ))}
               </View>
             </Mat>
@@ -565,7 +574,7 @@ export default function SearchScreen() {
                     <View style={[s.section, { marginTop: -8 }]}>
                       {filteredArtists.map((artist, idx) => (
                         <View key={artist.id} style={{ marginBottom: 10 }}>
-                          <ArtistRow artist={artist} delay={100 + idx * 50} />
+                          <ArtistRow artist={artist} delay={100 + idx * 50} onPress={() => goArtist(artist.id)} />
                         </View>
                       ))}
                     </View>
@@ -578,7 +587,7 @@ export default function SearchScreen() {
                     <Mat delay={140}>
                       <View style={[s.albumGrid, { marginBottom: 40 }]}>
                         {filteredAlbums.map((album, idx) => (
-                          <AlbumCard key={album.id} album={album} delay={160 + idx * 50} />
+                          <AlbumCard key={album.id} album={album} delay={160 + idx * 50} onPress={() => goAlbum(album.id)} />
                         ))}
                       </View>
                     </Mat>

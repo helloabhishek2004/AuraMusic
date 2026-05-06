@@ -18,6 +18,7 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { useMusicNavigation } from '@/src/navigation/music-navigation';
 
 // ── Responsive Dimensions ────────────────────────────────────────────────────
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -129,7 +130,7 @@ const usePress = () => {
 // ── Track Row ─────────────────────────────────────────────────────────────────
 const TrackRow = ({ track, delay }: any) => {
   const p = usePress();
-  const router = useRouter();
+  const { goNowPlaying, goArtistByName } = useMusicNavigation('library-track');
   return (
     <Mat delay={delay}>
       <Animated.View style={{ transform: [{ scale: p.sc }] }}>
@@ -139,8 +140,11 @@ const TrackRow = ({ track, delay }: any) => {
           activeOpacity={1}
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            router.push({ pathname: '/now_playing', params: { trackId: track.id } });
+            goNowPlaying(track.id);
           }}
+          onLongPress={() => goArtistByName(track.artist)}
+          accessibilityRole="button"
+          accessibilityLabel={`Play ${track.title} by ${track.artist}`}
         >
           <Glass style={ss.trackCard} radius={16} blur={40}>
             <View style={ss.trackInner}>
@@ -168,7 +172,7 @@ const TrackRow = ({ track, delay }: any) => {
 };
 
 // ── Playlist Grid Cell ────────────────────────────────────────────────────────
-const PlaylistCell = ({ item, delay, router }: any) => {
+const PlaylistCell = ({ item, delay, onOpen }: any) => {
   const p = usePress();
   return (
     <Mat delay={delay}>
@@ -176,7 +180,7 @@ const PlaylistCell = ({ item, delay, router }: any) => {
         <TouchableOpacity
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            router.push({ pathname: '/playlist/[id]', params: { id: item.id } });
+            onOpen(item.id);
           }}
           onPressIn={p.onIn} onPressOut={p.onOut}
           activeOpacity={1}
@@ -227,6 +231,7 @@ const PLAYLISTS = [
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { goPlaylist } = useMusicNavigation('library');
   const [activeTab, setActiveTab] = useState('Playlists');
 
   // Tab pill animation
@@ -408,7 +413,7 @@ export default function LibraryScreen() {
               <TouchableOpacity
                 activeOpacity={1}
                 onPressIn={heroPress.onIn} onPressOut={heroPress.onOut}
-                onPress={() => router.push({ pathname: '/playlist/[id]', params: { id: 'liked-songs' } })}
+                onPress={() => goPlaylist('liked-songs')}
               >
                 <Glass style={[ss.heroCard, { height: HERO_H }]} radius={24} blur={55}>
                   <ImageBackground
@@ -556,7 +561,7 @@ export default function LibraryScreen() {
           {/* Responsive grid — 2 cols on phone, 3 on tablet */}
           <View style={ss.playlistGrid}>
             {PLAYLISTS.slice(0, GRID_COLS * 2).map((item, idx) => (
-              <PlaylistCell key={item.id} item={item} delay={370 + idx * 50} router={router} />
+              <PlaylistCell key={item.id} item={item} delay={370 + idx * 50} onOpen={goPlaylist} />
             ))}
           </View>
 

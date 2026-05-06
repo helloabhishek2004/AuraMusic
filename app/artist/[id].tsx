@@ -18,6 +18,7 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { openAlbum, openArtist, openNowPlaying } from '@/src/navigation/music-navigation';
 
 const { width } = Dimensions.get('window');
 const PAD = 20;
@@ -144,9 +145,10 @@ const Tap = ({ children, onPress, style, h = 'medium' }: any) => {
   return (
     <TouchableOpacity
       activeOpacity={1}
-      onPressIn={() => { haptic(); Animated.spring(sc, { toValue: 0.93, ...MOTION.POP, useNativeDriver: true }).start(); }}
+      delayPressIn={110}
+      onPressIn={() => { Animated.spring(sc, { toValue: 0.96, ...MOTION.POP, useNativeDriver: true }).start(); }}
       onPressOut={() => Animated.spring(sc, { toValue: 1, ...MOTION.POP, useNativeDriver: true }).start()}
-      onPress={onPress}
+      onPress={() => { haptic(); onPress?.(); }}
       style={style}
     >
       <Animated.View style={{ transform: [{ scale: sc }] }}>{children}</Animated.View>
@@ -184,6 +186,7 @@ export default function ArtistProfileScreen() {
   const [followed, setFollowed] = useState(false);
   const [likedSongs, setLikedSongs] = useState<Set<string>>(new Set(['1']));
   const [expandBio, setExpandBio] = useState(false);
+  const [showAllSongs, setShowAllSongs] = useState(false);
   const followSc = useRef(new Animated.Value(1)).current;
 
   // Scroll-driven animations
@@ -293,7 +296,7 @@ export default function ArtistProfileScreen() {
               {/* PLAY — widest */}
               <Tap
                 h="heavy"
-                onPress={() => router.push({ pathname: '/now_playing', params: { trackId: '1' } })}
+                onPress={() => openNowPlaying(router, ARTIST.topSongs[0]?.id ?? '1', 'artist')}
                 style={s.playWrap}
               >
                 <LinearGradient colors={[C.primary, C.primaryDeep]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.playInner}>
@@ -335,15 +338,15 @@ export default function ArtistProfileScreen() {
         <Fade delay={100} style={s.section}>
           <View style={s.secHead}>
             <Text style={s.secTitle}>Top Songs</Text>
-            <Tap onPress={() => { }} h="light"><Text style={s.seeAll}>View all</Text></Tap>
+            <Tap onPress={() => setShowAllSongs((value) => !value)} h="light"><Text style={s.seeAll}>{showAllSongs ? 'Show less' : 'View all'}</Text></Tap>
           </View>
 
           {/* FIX: each song is full-width, no image bleed, artwork clipped, duration visible */}
-          {ARTIST.topSongs.map((song: any, idx: number) => (
+          {ARTIST.topSongs.slice(0, showAllSongs ? ARTIST.topSongs.length : 3).map((song: any, idx: number) => (
             <Fade key={song.id} delay={140 + idx * 55}>
               <Tap
                 h={song.active ? 'heavy' : 'medium'}
-                onPress={() => router.push({ pathname: '/now_playing', params: { trackId: song.id } })}
+                onPress={() => openNowPlaying(router, song.id, 'artist-top-songs')}
                 style={{ marginBottom: 10 }}
               >
                 <GlassPane r={18} blur={song.active ? 55 : 38} accent={song.active} style={s.songRow}>
@@ -400,7 +403,7 @@ export default function ArtistProfileScreen() {
           >
             {ARTIST.albums.map((album: any, idx: number) => (
               <Fade key={album.id} delay={260 + idx * 70}>
-                <Tap h="medium" onPress={() => { }}>
+                <Tap h="medium" onPress={() => openAlbum(router, album.id, 'artist-albums')}>
                   {/* FIX: fixed explicit width so third card is fully visible */}
                   <View style={s.albumCard}>
                     <View style={s.albumArtWrap}>
@@ -492,7 +495,7 @@ export default function ArtistProfileScreen() {
           {/* FIX: similar artists are full-width cards, not narrow rows with cut content */}
           {ARTIST.similar.map((artist: any, idx: number) => (
             <Fade key={artist.id} delay={490 + idx * 60}>
-              <Tap h="medium" onPress={() => router.push({ pathname: '/artist/[id]', params: { id: artist.id } })} style={{ marginBottom: 10 }}>
+              <Tap h="medium" onPress={() => openArtist(router, artist.id, { origin: 'similar-artists' })} style={{ marginBottom: 10 }}>
                 <GlassPane r={18} blur={40} style={s.similarRow}>
                   {/* avatar */}
                   <View style={s.similarAvatarWrap}>
@@ -557,14 +560,15 @@ const s = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 10,
-    // no flexWrap, no overflow — controlled widths
+    rowGap: 12,
   },
-  playWrap: { flex: 2, height: 50, borderRadius: 26, overflow: 'hidden', minWidth: 0 },
+  playWrap: { flexGrow: 1, flexBasis: 148, height: 50, borderRadius: 26, overflow: 'hidden', minWidth: 132 },
   playInner: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   iconBtnWrap: { width: 50, height: 50, borderRadius: 26, overflow: 'hidden', flexShrink: 0 },
   iconBtnInner: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  followWrap: { flex: 1.4, height: 50, borderRadius: 26, overflow: 'hidden', flexShrink: 0, minWidth: 0 },
+  followWrap: { flexGrow: 1, flexBasis: 124, height: 50, borderRadius: 26, overflow: 'hidden', flexShrink: 0, minWidth: 118 },
   followInner: { flex: 1, height: 50, justifyContent: 'center', alignItems: 'center' },
   followingInner: {
     flex: 1, height: 50, flexDirection: 'row', alignItems: 'center',
@@ -664,12 +668,13 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 12,
+    minHeight: 84,
   },
   similarAvatarWrap: { width: 50, height: 50, borderRadius: 25, overflow: 'hidden', flexShrink: 0, backgroundColor: 'rgba(255,255,255,0.05)' },
   similarInfo: { flex: 1, minWidth: 0 },
   similarName: { color: C.text, fontSize: 15, fontWeight: '700', marginBottom: 2 },
   similarListeners: { color: C.textMuted, fontSize: 11, fontWeight: '500' },
-  simFollowWrap: { flexShrink: 0 },
-  simFollowInner: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 8 },
+  simFollowWrap: { flexShrink: 0, minWidth: 88 },
+  simFollowInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, minHeight: 36, paddingHorizontal: 12, paddingVertical: 8 },
   simFollowTxt: { color: C.primary, fontSize: 12, fontWeight: '700' },
 });

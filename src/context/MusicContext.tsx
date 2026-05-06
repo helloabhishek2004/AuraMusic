@@ -47,7 +47,7 @@ export interface Track {
 type PlaybackStateContextType = {
   currentTrack: Track | null;
   isPlaying: boolean;
-  repeatMode: RepeatMode;
+  repeatMode: RepeatModeValue;
   isShuffle: boolean;
   isPlayerReady: boolean;
 };
@@ -70,6 +70,7 @@ type MusicActionsContextType = {
 };
 
 export type MusicContextType = PlaybackStateContextType & MusicProgressContextType & MusicActionsContextType;
+type RepeatModeValue = any;
 
 const MOCK_TRACKS: Track[] = [
   {
@@ -125,7 +126,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isPlayerReady, setIsPlayerReady] = useState(false);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(MOCK_TRACKS[0]);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [repeatMode, setRepeatMode] = useState<RepeatMode>(RepeatMode.Off);
+  const [repeatMode, setRepeatMode] = useState<RepeatModeValue>(RepeatMode.Off);
   const [isShuffle, setIsShuffle] = useState(false);
 
   const { position, duration } = useProgress(500);
@@ -211,7 +212,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setupPlayer();
   }, []);
 
-  useTrackPlayerEvents([Event.PlaybackState, Event.PlaybackActiveTrackChanged], async (event) => {
+  useTrackPlayerEvents([Event.PlaybackState, Event.PlaybackActiveTrackChanged], async (event: any) => {
     if (event.type === Event.PlaybackState) {
       setIsPlaying(event.state === State.Playing);
     }
@@ -235,7 +236,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (track) {
         setCurrentTrack(track);
         const queue = await TrackPlayer.getQueue();
-        const index = queue.findIndex((item) => item.id === track.id);
+        const index = queue.findIndex((item: any) => item.id === track.id);
 
         if (index >= 0) {
           await TrackPlayer.skip(index);

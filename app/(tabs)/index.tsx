@@ -12,18 +12,15 @@ import {
   Share,
   ActivityIndicator,
   FlatList,
-  PanResponder,
-  GestureResponderEvent,
-  PanResponderGestureState,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useMusic } from '@/src/context/MusicContext';
+import { useMusicNavigation } from '@/src/navigation/music-navigation';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const PAD = 24;
@@ -335,9 +332,10 @@ const DownloadButton = ({ downloaded = false, onPress, downloading = false }: an
 };
 
 // ── HORIZONTAL TRACK CARD (FIXED) ──────────────────────────────────────────
-const TrackCard = ({ title, artist, image, onPress, liked, onLikePress, downloaded, onDownload }: any) => {
+const TrackCard = ({ title, artist, image, onPress, onArtistPress, liked, onLikePress, downloaded, onDownload, variant = 'compact' }: any) => {
   const [isLiked, setIsLiked] = useState(liked);
   const [isDownloading, setIsDownloading] = useState(false);
+  const isCompact = variant === 'compact';
 
   const handleCardPress = useCallback(() => {
     onPress?.();
@@ -347,24 +345,24 @@ const TrackCard = ({ title, artist, image, onPress, liked, onLikePress, download
     <TouchableOpacity
       onPress={handleCardPress}
       activeOpacity={0.7}
-      style={s.trackCardContainer}
+      style={[s.trackCardContainer, isCompact ? s.trackCardContainerCompact : s.trackCardContainerExpanded]}
     >
-      <PremiumGlass r={16} blur={50} gloss style={s.trackCardGlass}>
-        <Image source={{ uri: image }} style={s.trackCardImage} contentFit="cover" />
+      <PremiumGlass r={16} blur={50} gloss style={[s.trackCardGlass, isCompact ? s.trackCardGlassCompact : s.trackCardGlassExpanded]}>
+        <Image source={{ uri: image }} style={[s.trackCardImage, isCompact ? s.trackCardImageCompact : s.trackCardImageExpanded]} contentFit="cover" />
         <View style={s.trackCardContent}>
-          <Text style={s.trackCardTitle} numberOfLines={1}>
+          <Text style={[s.trackCardTitle, isCompact && s.trackCardTitleCompact]} numberOfLines={2}>
             {title}
           </Text>
           <TouchableOpacity onPress={(e) => {
             e.stopPropagation();
             onArtistPress?.();
           }}>
-            <Text style={s.trackCardArtist} numberOfLines={1}>
+            <Text style={s.trackCardArtist} numberOfLines={isCompact ? 2 : 1}>
               {artist}
             </Text>
           </TouchableOpacity>
         </View>
-        <View style={s.trackCardActions}>
+        <View style={[s.trackCardActions, isCompact && s.trackCardActionsCompact]}>
           <HeartButton
             liked={isLiked}
             size={20}
@@ -444,77 +442,75 @@ const CircleArtistCard = ({ name, image, onPress }: any) => {
 // ── SWIPEABLE HERO CARD ────────────────────────────────────────────────────
 const SwipeableHeroCard = ({ albums, onPlay }: any) => {
   const [currentIndex, setCurrentIndex] = useState(0);
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => false,
-      onPanResponderRelease: (_, { dx }) => {
-        if (dx < -50 && currentIndex < albums.length - 1) {
-          setCurrentIndex(currentIndex + 1);
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        } else if (dx > 50 && currentIndex > 0) {
-          setCurrentIndex(currentIndex - 1);
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        }
-      },
-    })
-  ).current;
-
-  const currentAlbum = albums[currentIndex];
+  const cardWidth = SW - PAD * 2;
 
   return (
-    <TouchableOpacity
-      activeOpacity={1}
-      style={s.heroCard}
-      {...panResponder.panHandlers}
-    >
-      <Image source={{ uri: currentAlbum.image }} style={s.heroImage} contentFit="cover" />
-      <LinearGradient
-        colors={['rgba(0,0,0,0.2)', 'rgba(0,0,0,0.8)']}
-        style={StyleSheet.absoluteFill}
-        pointerEvents="none"
-      />
-
-      <View style={s.heroBottom}>
-        <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-        <View style={s.heroInfo}>
-          <Text style={s.heroTitle}>{currentAlbum.title}</Text>
-          <Text style={s.heroSubtitle}>{currentAlbum.artist}</Text>
-        </View>
-
-        <View style={s.heroControls}>
-          <View style={s.pagination}>
-            {albums.map((_: any, i: number) => (
-              <View
-                key={i}
-                style={[
-                  s.paginationDot,
-                  currentIndex === i && s.paginationDotActive,
-                ]}
-              />
-            ))}
-          </View>
-
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-              onPlay?.(currentAlbum);
-            }}
-            activeOpacity={0.8}
-            style={s.heroPlayButton}
-          >
+    <View style={s.heroCard}>
+      <ScrollView
+        horizontal
+        pagingEnabled
+        decelerationRate="fast"
+        showsHorizontalScrollIndicator={false}
+        snapToInterval={cardWidth}
+        onMomentumScrollEnd={(event) => {
+          const index = Math.round(event.nativeEvent.contentOffset.x / cardWidth);
+          if (index !== currentIndex) {
+            setCurrentIndex(index);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          }
+        }}
+      >
+        {albums.map((album: any) => (
+          <View key={album.id} style={[s.heroSlide, { width: cardWidth }]}>
+            <Image source={{ uri: album.image }} style={s.heroImage} contentFit="cover" contentPosition="center" />
             <LinearGradient
-              colors={[h2r('#BF5AF2', 0.9), h2r('#9B38DA', 1)]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+              colors={['rgba(0,0,0,0.12)', 'rgba(0,0,0,0.28)', 'rgba(0,0,0,0.82)']}
+              locations={[0, 0.45, 1]}
               style={StyleSheet.absoluteFill}
+              pointerEvents="none"
             />
-            <Ionicons name="play" size={32} color={C.text} style={{ marginLeft: 3 }} />
-          </TouchableOpacity>
-        </View>
-      </View>
-    </TouchableOpacity>
+            <View style={s.heroBottom}>
+              <BlurView intensity={65} tint="dark" style={StyleSheet.absoluteFill} />
+              <View style={s.heroInfo}>
+                <Text style={s.heroTitle}>{album.title}</Text>
+                <Text style={s.heroSubtitle}>{album.artist}</Text>
+              </View>
+
+              <View style={s.heroControls}>
+                <View style={s.pagination}>
+                  {albums.map((_: any, i: number) => (
+                    <View
+                      key={i}
+                      style={[
+                        s.paginationDot,
+                        currentIndex === i && s.paginationDotActive,
+                      ]}
+                    />
+                  ))}
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    onPlay?.(album);
+                  }}
+                  activeOpacity={0.8}
+                  style={s.heroPlayButton}
+                >
+                  <LinearGradient
+                    colors={[h2r('#BF5AF2', 0.9), h2r('#9B38DA', 1)]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFill}
+                  />
+                  <Ionicons name="play" size={32} color={C.text} style={{ marginLeft: 3 }} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
   );
 };
 
@@ -533,7 +529,7 @@ const SectionHeader = ({ title, onSeeAll }: any) => (
 // ── MAIN HOME SCREEN ───────────────────────────────────────────────────────
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const { goNowPlaying, goArtist, goPlaylist, goAlbum } = useMusicNavigation('home');
   const [likedSongs, setLikedSongs] = useState<Set<string>>(new Set());
   const [downloadedSongs, setDownloadedSongs] = useState<Set<string>>(new Set());
   const [expandedContinueListening, setExpandedContinueListening] = useState(false);
@@ -553,19 +549,19 @@ export default function HomeScreen() {
 
   const albums = [
     {
-      id: '1',
+      id: 'neon-echoes',
       title: 'Neon Dreams',
       artist: 'The Midnight Syndicate • New Release',
       image: 'https://picsum.photos/400/400?random=7',
     },
     {
-      id: '2',
+      id: 'a3',
       title: 'Echoes of Silence',
       artist: 'Lumina Flux • 2024',
       image: 'https://picsum.photos/400/400?random=8',
     },
     {
-      id: '3',
+      id: 'solaris',
       title: 'Urban Jungle',
       artist: 'Concrete Beats • Trending',
       image: 'https://picsum.photos/400/400?random=9',
@@ -631,11 +627,8 @@ export default function HomeScreen() {
       durationSec: 240,
       dominantColors: ['#bf5af2', '#1a0033'],
     });
-    router.push({
-      pathname: '/now_playing',
-      params: { trackId: track.id },
-    });
-  }, [router, setTrack]);
+    goNowPlaying(track.id);
+  }, [goNowPlaying, setTrack]);
 
   const displayedTracks = expandedContinueListening ? tracks : tracks.slice(0, 2);
 
@@ -687,13 +680,11 @@ export default function HomeScreen() {
                 title={track.title}
                 artist={track.artist}
                 image={track.image}
+                variant="compact"
                 onPress={() => handlePlayPress(track)}
                 onArtistPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  router.push({
-                    pathname: '/artist/[id]',
-                    params: { id: track.artistId || 'elara' },
-                  });
+                  goArtist(track.artistId || 'elara');
                 }}
                 liked={likedSongs.has(track.id)}
                 onLikePress={() => {
@@ -725,13 +716,11 @@ export default function HomeScreen() {
                   title={track.title}
                   artist={track.artist}
                   image={track.image}
+                  variant="row"
                   onPress={() => handlePlayPress(track)}
                   onArtistPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    router.push({
-                      pathname: '/artist/[id]',
-                      params: { id: track.artistId || 'elara' },
-                    });
+                    goArtist(track.artistId || 'elara');
                   }}
                   liked={likedSongs.has(track.id)}
                   onLikePress={() => {
@@ -769,10 +758,7 @@ export default function HomeScreen() {
                 subtitle={playlist.subtitle}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  router.push({
-                    pathname: '/playlist/[id]',
-                    params: { id: playlist.id },
-                  });
+                  goPlaylist(playlist.id);
                 }}
               />
             ))}
@@ -790,10 +776,7 @@ export default function HomeScreen() {
                 image={artist.image}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  router.push({
-                    pathname: '/artist/[id]',
-                    params: { id: artist.id },
-                  });
+                  goArtist(artist.id);
                 }}
               />
             ))}
@@ -810,7 +793,7 @@ export default function HomeScreen() {
                   image={album.image}
                   title={album.title}
                   subtitle={album.artist}
-                  onPress={() => handlePlayPress(album)}
+                  onPress={() => goAlbum(album.id)}
                 />
               </View>
             ))}
@@ -855,12 +838,15 @@ const s = StyleSheet.create({
 
   // Hero Card
   heroCard: {
-    height: 380,
+    height: 360,
     marginHorizontal: PAD,
     borderRadius: 36,
     overflow: 'hidden',
     marginBottom: 44,
     backgroundColor: C.surface,
+  },
+  heroSlide: {
+    height: '100%',
   },
   heroImage: {
     width: '100%',
@@ -871,7 +857,7 @@ const s = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 130,
+    height: 138,
     paddingHorizontal: 28,
     paddingVertical: 20,
     flexDirection: 'row',
@@ -955,28 +941,52 @@ const s = StyleSheet.create({
 
   // Track Card
   trackCardContainer: {
-    marginRight: 12,
     marginBottom: 12,
   },
+  trackCardContainerCompact: {
+    width: 168,
+    marginRight: 12,
+  },
+  trackCardContainerExpanded: {
+    width: '100%',
+  },
   trackCardGlass: {
-    flexDirection: 'row',
-    alignItems: 'center',
     padding: 12,
     gap: 12,
   },
+  trackCardGlassCompact: {
+    minHeight: 176,
+    justifyContent: 'space-between',
+  },
+  trackCardGlassExpanded: {
+    minHeight: 104,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   trackCardImage: {
+    borderRadius: 12,
+  },
+  trackCardImageCompact: {
+    width: '100%',
+    height: 112,
+  },
+  trackCardImageExpanded: {
     width: 80,
     height: 80,
-    borderRadius: 12,
   },
   trackCardContent: {
     flex: 1,
+    minWidth: 0,
   },
   trackCardTitle: {
     color: C.text,
     fontWeight: '700',
     fontSize: 15,
     marginBottom: 4,
+  },
+  trackCardTitleCompact: {
+    marginTop: 2,
+    marginBottom: 6,
   },
   trackCardArtist: {
     color: C.textSecondary,
@@ -987,6 +997,10 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     alignItems: 'center',
+  },
+  trackCardActionsCompact: {
+    justifyContent: 'space-between',
+    marginTop: 6,
   },
 
   // Expanded List
@@ -1012,12 +1026,13 @@ const s = StyleSheet.create({
   },
   bentoCardImage: {
     ...StyleSheet.absoluteFillObject,
-    opacity: 0.6,
+    opacity: 0.84,
   },
   bentoCardContent: {
     flex: 1,
     padding: 28,
     justifyContent: 'flex-end',
+    backgroundColor: 'rgba(5,5,9,0.12)',
   },
   bentoCardTag: {
     backgroundColor: 'rgba(70, 245, 224, 0.15)',
@@ -1051,7 +1066,7 @@ const s = StyleSheet.create({
 
   // Circle Artist
   circleArtistContainer: {
-    marginRight: 24,
+    marginRight: 20,
     alignItems: 'center',
   },
   circleArtistGlass: {

@@ -73,12 +73,36 @@ export default function RootLayout() {
                 }}
               />
               <Stack.Screen
+                name="artist/[id]"
+                options={{
+                  animation: 'slide_from_right',
+                  animationDuration: 200,
+                }}
+              />
+              <Stack.Screen
+                name="album/[id]"
+                options={{
+                  animation: 'slide_from_right',
+                  animationDuration: 200,
+                }}
+              />
+              <Stack.Screen
+                name="playlist/[id]"
+                options={{
+                  animation: 'slide_from_right',
+                  animationDuration: 200,
+                }}
+              />
+              <Stack.Screen
                 name="lyrics"
                 options={{
                   presentation: 'modal',
                   animation: 'slide_from_bottom',
                 }}
               />
+              <Stack.Screen name="create_playlist" options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="downloads" options={{ animation: 'slide_from_right' }} />
+              <Stack.Screen name="local_library" options={{ animation: 'slide_from_right' }} />
             </Stack>
           </GestureHandlerRootView>
         </MusicProvider>

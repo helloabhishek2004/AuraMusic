@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useMusic } from '@/src/context/MusicContext';
+import { openArtistByName } from '@/src/navigation/music-navigation';
 
 // --- Safe RepeatMode fallback ---
 let RepeatMode: any = { Off: 0, Track: 1, Queue: 2 };
@@ -183,6 +184,7 @@ export default function NowPlayingScreen() {
   const [volumeWidth, setVolumeWidth] = useState(0);
   const scrubberWidthRef = useRef(0);
   const volumeWidthRef = useRef(0);
+  const pendingScrubProgressRef = useRef(globalProgress);
   const [currentVolume, setCurrentVolume] = useState(0.65);
   const scrubberStepRef = useRef(0);
   const volumeStepRef = useRef(0);
@@ -192,9 +194,10 @@ export default function NowPlayingScreen() {
   const progress = globalProgress;
   const elapsedSec = globalElapsed;
   const isPlaying = globalIsPlaying;
+  const displayProgress = isScrubbing ? pendingScrubProgressRef.current : progress;
+  const displayElapsedSec = Math.max(0, Math.round(displayProgress * currentTrack.durationSec));
 
   // ── Animated values ─────────────────────────────────────────────────────────
-  const scrubberAnim = useRef(new Animated.Value(progress)).current;
   const volumeAnim = useRef(new Animated.Value(0.65)).current;
   const artScaleAnim = useRef(new Animated.Value(0.93)).current;
   const artTranslateX = useRef(new Animated.Value(0)).current;
@@ -206,7 +209,6 @@ export default function NowPlayingScreen() {
   const pageEntrance = useRef(new Animated.Value(0)).current;
   const pageScale = useRef(new Animated.Value(0.93)).current;
   const artBreathScale = useRef(new Animated.Value(1.0)).current;
-  const progressBarAnim = useRef(new Animated.Value(progress)).current;
   const thumbGlowPulse = useRef(new Animated.Value(0.6)).current;
   const scrubberThumbScale = useRef(new Animated.Value(1)).current;
 
@@ -288,27 +290,24 @@ export default function NowPlayingScreen() {
   const scrubberResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 4,
       onPanResponderGrant: (evt, gestureState) => {
         setIsScrubbing(true);
-        Animated.spring(scrubberThumbScale, { toValue: 1.5, ...MOTION.POP, useNativeDriver: true }).start();
+        Animated.spring(scrubberThumbScale, { toValue: 1.28, ...MOTION.POP, useNativeDriver: true }).start();
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-        // Use relative location for jump-on-press
         const w = scrubberWidthRef.current;
         if (w > 0) {
           const relativeX = evt.nativeEvent.locationX;
           const progressVal = Math.max(0, Math.min(1, relativeX / w));
-          progressBarAnim.setValue(progressVal);
-          seek(progressVal);
+          pendingScrubProgressRef.current = progressVal;
         }
       },
       onPanResponderMove: (evt, gestureState) => {
         const w = scrubberWidthRef.current;
         if (w <= 0) return;
 
-        const padding = 28; // The mainCanvas padding
-        const relativeX = gestureState.moveX - padding;
+        const relativeX = evt.nativeEvent.locationX;
         const progressVal = Math.max(0, Math.min(1, relativeX / w));
 
         // Premium tactile notch feel
@@ -318,13 +317,17 @@ export default function NowPlayingScreen() {
           Haptics.selectionAsync();
         }
 
-        progressBarAnim.setValue(progressVal);
-        seek(progressVal);
+        pendingScrubProgressRef.current = progressVal;
       },
       onPanResponderRelease: () => {
         setIsScrubbing(false);
         Animated.spring(scrubberThumbScale, { toValue: 1, ...MOTION.POP, useNativeDriver: true }).start();
+        seek(pendingScrubProgressRef.current);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      },
+      onPanResponderTerminate: () => {
+        setIsScrubbing(false);
+        Animated.spring(scrubberThumbScale, { toValue: 1, ...MOTION.POP, useNativeDriver: true }).start();
       },
     })
   ).current;
@@ -333,7 +336,7 @@ export default function NowPlayingScreen() {
   const volumeResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 4,
       onPanResponderGrant: (evt, gestureState) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         const w = volumeWidthRef.current;
@@ -344,21 +347,18 @@ export default function NowPlayingScreen() {
           volumeAnim.setValue(volVal);
         }
       },
-      onPanResponderMove: (_, gestureState) => {
+      onPanResponderMove: (evt, gestureState) => {
         const w = volumeWidthRef.current;
         if (w <= 0) return;
 
-        const offset = 28 + 18 + 14;
-        const relativeX = gestureState.moveX - offset;
+        const relativeX = evt.nativeEvent.locationX;
         const volVal = Math.max(0, Math.min(1, relativeX / w));
 
         // Maximum Intensity Continuous Haptic Experience (Entire Range)
         const step = Math.floor(volVal * 100);
         if (step !== volumeStepRef.current) {
           volumeStepRef.current = step;
-          // Maximum intensity impact
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          // Secondary rigid feedback for extra texture
+          Haptics.selectionAsync();
         }
 
         setCurrentVolume(volVal);
@@ -385,17 +385,6 @@ export default function NowPlayingScreen() {
       artBreathScale.setValue(1.0);
     }
   }, [isPlaying]);
-
-  // ── Progress bar auto-advance (removed, handled by global context) ──────────────────
-  useEffect(() => {
-    if (!isScrubbing) {
-      Animated.timing(progressBarAnim, {
-        toValue: progress,
-        duration: 980,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [progress, isScrubbing]);
 
   const onNext = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid);
@@ -436,11 +425,12 @@ export default function NowPlayingScreen() {
 
   // ── Derived animated progress bar width ──────────────────────────────────────
   // ── Derived animated progress bar positions (Native Driver Optimized) ──────────────────
-  const barTranslateX = progressBarAnim.interpolate({ inputRange: [0, 1], outputRange: [-width, 0] });
-  const thumbTranslateX = progressBarAnim.interpolate({ inputRange: [0, 1], outputRange: [0, width - 60] }); // Roughly 60px padding/margin
-  
-  const volumeTranslateX = volumeAnim.interpolate({ inputRange: [0, 1], outputRange: [-240, 0] }); // Assuming volume bar width around 240
-  const volThumbTranslateX = volumeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 240] });
+  const scrubberRailWidth = Math.max(scrubberWidth, 1);
+  const volumeRailWidth = Math.max(volumeWidth, 1);
+  const scrubberFillWidth = Math.max(0, Math.min(scrubberRailWidth, displayProgress * scrubberRailWidth));
+  const scrubberThumbOffset = Math.max(0, Math.min(scrubberRailWidth - 20, displayProgress * scrubberRailWidth - 10));
+  const volumeTranslateX = volumeAnim.interpolate({ inputRange: [0, 1], outputRange: [-volumeRailWidth, 0] });
+  const volThumbTranslateX = volumeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, Math.max(volumeRailWidth - 14, 0)] });
 
   const c0 = currentTrack.dominantColors[0];
   const c1 = currentTrack.dominantColors[1];
@@ -589,10 +579,7 @@ export default function NowPlayingScreen() {
             <Text allowFontScaling maxFontSizeMultiplier={1.2} style={styles.trackTitle} numberOfLines={1}>{currentTrack.title}</Text>
             <TouchableOpacity onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              router.push({
-                pathname: '/artist/[id]',
-                params: { id: currentTrack.artistId || 'elara' },
-              });
+              openArtistByName(router, currentTrack.artist, { origin: 'now-playing' });
             }}>
               <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.artistName} numberOfLines={1}>{currentTrack.artist}</Text>
             </TouchableOpacity>
@@ -625,7 +612,7 @@ export default function NowPlayingScreen() {
               accessible
               accessibilityRole="adjustable"
               accessibilityLabel="Playback position"
-              accessibilityValue={{ min: 0, max: Math.round(currentTrack.durationSec), now: Math.round(elapsedSec) }}
+              accessibilityValue={{ min: 0, max: Math.round(currentTrack.durationSec), now: displayElapsedSec }}
               style={styles.scrubberOuter}
               onLayout={(e) => {
               const w = e.nativeEvent.layout.width;
@@ -633,10 +620,7 @@ export default function NowPlayingScreen() {
               scrubberWidthRef.current = w;
             }}>
               {/* Filled track (Optimized for 120Hz) */}
-              <Animated.View style={[
-                styles.scrubberInnerWrapper, 
-                { width: '100%', transform: [{ translateX: barTranslateX }] }
-              ]}>
+              <View style={[styles.scrubberInnerWrapper, { width: scrubberFillWidth }]}>
                 <LinearGradient
                   colors={[c0, c1] as [string, string]}
                   start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
@@ -648,11 +632,11 @@ export default function NowPlayingScreen() {
                   start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
                   style={StyleSheet.absoluteFill}
                 />
-              </Animated.View>
+              </View>
 
               <Animated.View style={[
                 styles.scrubberThumbWrapper,
-                { transform: [{ translateX: thumbTranslateX }] },
+                { left: scrubberThumbOffset, transform: [{ scale: scrubberThumbScale }] },
               ]}>
                 {/* Glow ring */}
                 <Animated.View style={[
@@ -672,7 +656,6 @@ export default function NowPlayingScreen() {
                   styles.scrubberThumb,
                   {
                     shadowColor: c0,
-                    transform: [{ scale: scrubberThumbScale }],
                   }
                 ]} />
               </Animated.View>
@@ -681,8 +664,8 @@ export default function NowPlayingScreen() {
 
           {/* Time labels */}
           <View style={styles.timeLabels}>
-            <Text style={styles.timeLabel}>{formatTime(elapsedSec)}</Text>
-            <Text style={styles.timeLabel}>-{formatTime(currentTrack.durationSec - elapsedSec)}</Text>
+            <Text style={styles.timeLabel}>{formatTime(displayElapsedSec)}</Text>
+            <Text style={styles.timeLabel}>-{formatTime(Math.max(currentTrack.durationSec - displayElapsedSec, 0))}</Text>
           </View>
         </View>
 
@@ -984,12 +967,12 @@ const styles = StyleSheet.create({
   },
   mainCanvas: {
     flex: 1,
-    paddingHorizontal: 28,
-    paddingBottom: 32,
+    paddingHorizontal: width < 380 ? 18 : 28,
+    paddingBottom: height < 760 ? 18 : 32,
   },
 
   // Drag handle
-  dragHandleContainer: { alignItems: 'center', marginBottom: 16 },
+  dragHandleContainer: { alignItems: 'center', marginBottom: height < 760 ? 8 : 16 },
   dragHandle: { width: 36, height: 5, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 3 },
 
   // Header
@@ -997,7 +980,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: height < 760 ? 10 : 24,
   },
   headerCenter: { flex: 1, alignItems: 'center' },
   nowPlayingLabel: {
@@ -1010,22 +993,22 @@ const styles = StyleSheet.create({
 
   // Album art
   albumArtSection: {
-    flex: 1.2, // give slightly more priority
+    flex: height < 760 ? 0.82 : 1.2,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: height < 760 ? 14 : 32,
   },
   artOuterGlow: {
     position: 'absolute',
-    width: width * 0.68,
-    height: width * 0.68,
+    width: Math.min(width * 0.68, height * 0.32),
+    height: Math.min(width * 0.68, height * 0.32),
     borderRadius: 24,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.7,
     shadowRadius: 50,
   },
   artGlassContainer: {
-    width: width * 0.74,
+    width: Math.min(width * 0.74, height < 760 ? height * 0.34 : height * 0.39),
     aspectRatio: 1,
     borderRadius: 24,
     overflow: 'hidden',
@@ -1055,12 +1038,13 @@ const styles = StyleSheet.create({
   songInfoSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
+    alignItems: 'flex-end',
+    marginBottom: height < 760 ? 16 : 28,
     paddingRight: 4,
+    gap: 12,
   },
   trackTitle: {
-    fontSize: 24,
+    fontSize: width < 380 ? 21 : 24,
     fontWeight: '800',
     color: '#FFF',
     letterSpacing: -0.5,
@@ -1079,8 +1063,8 @@ const styles = StyleSheet.create({
 
   // Scrubber hit area
   scrubberSection: {
-    marginBottom: 28,
-    paddingVertical: 12,
+    marginBottom: height < 760 ? 14 : 28,
+    paddingVertical: height < 760 ? 8 : 12,
   },
   scrubberCard: { marginBottom: 6 },
   scrubberOuter: {
@@ -1099,10 +1083,9 @@ const styles = StyleSheet.create({
   scrubberThumbWrapper: {
     position: 'absolute',
     top: '50%',
-    width: 24,
-    height: 24,
-    marginLeft: -12,
-    marginTop: -12,
+    width: 20,
+    height: 20,
+    marginTop: -10,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 10,
@@ -1144,7 +1127,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 8,
-    marginBottom: 32,
+    marginBottom: height < 760 ? 18 : 32,
   },
   skipBtn: {
     width: 52,
@@ -1153,30 +1136,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   playButtonWrapper: {
-    width: 84,
-    height: 84,
+    width: height < 760 ? 74 : 84,
+    height: height < 760 ? 74 : 84,
     alignItems: 'center',
     justifyContent: 'center',
   },
   playButtonGlow: {
     position: 'absolute',
-    width: 84,
-    height: 84,
-    borderRadius: 42,
+    width: height < 760 ? 74 : 84,
+    height: height < 760 ? 74 : 84,
+    borderRadius: height < 760 ? 37 : 42,
     zIndex: 0,
   },
   playButtonGlowOuter: {
     position: 'absolute',
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: height < 760 ? 84 : 96,
+    height: height < 760 ? 84 : 96,
+    borderRadius: height < 760 ? 42 : 48,
     borderWidth: 1.5,
     zIndex: 0,
   },
   playButtonShell: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
+    width: height < 760 ? 68 : 78,
+    height: height < 760 ? 68 : 78,
+    borderRadius: height < 760 ? 34 : 39,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
@@ -1206,8 +1189,8 @@ const styles = StyleSheet.create({
   secondaryControls: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 48,
-    marginBottom: 24,
+    paddingHorizontal: width < 380 ? 34 : 48,
+    marginBottom: height < 760 ? 14 : 24,
   },
 
   // Additional icon row
@@ -1215,10 +1198,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 28,
-    paddingHorizontal: 4,
+    marginBottom: height < 760 ? 14 : 28,
+    paddingHorizontal: 0,
   },
-  iconButtonContainer: { alignItems: 'center', width: 52 },
+  iconButtonContainer: { alignItems: 'center', flex: 1, minWidth: 0 },
   iconButton: {
     width: 44,
     height: 44,
@@ -1227,11 +1210,11 @@ const styles = StyleSheet.create({
   },
   iconLabel: {
     color: 'rgba(255,255,255,0.30)',
-    fontSize: 8.5,
+    fontSize: 8,
     fontWeight: '700',
     marginTop: 2,
     textAlign: 'center',
-    letterSpacing: 0.5,
+    letterSpacing: 0.2,
   },
 
   // Volume hit area
@@ -1239,12 +1222,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 4,
-    paddingVertical: 16, // big hit area
+    paddingVertical: height < 760 ? 10 : 16,
+    gap: 8,
   },
   volumeCardTrack: {
     flex: 1,
     height: 6,
-    marginHorizontal: 14,
+    marginHorizontal: 6,
   },
   volumeTrackInner: {
     flex: 1,

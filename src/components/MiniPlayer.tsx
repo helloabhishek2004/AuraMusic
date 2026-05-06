@@ -12,6 +12,7 @@ import { minimumHitSlop, useResponsiveMetrics } from '@/src/hooks/use-responsive
 import { useMusicControls, useMusicProgress, useNowPlayingTrack } from '@/src/context/MusicContext';
 import { clamp } from '@/src/utils/color';
 import { impact } from '@/src/utils/haptics';
+import { openNowPlaying } from '@/src/navigation/music-navigation';
 
 const NAV_HEIGHT = 72;
 
@@ -45,10 +46,7 @@ function MiniPlayer() {
   const handleOpenNowPlaying = useCallback(() => {
     if (!track) return;
     impact(Haptics.ImpactFeedbackStyle.Light);
-    router.push({
-      pathname: '/now_playing',
-      params: { trackId: track.id },
-    });
+    openNowPlaying(router, track.id, 'mini-player');
   }, [router, track]);
 
   const handlePlayPause = useCallback(
