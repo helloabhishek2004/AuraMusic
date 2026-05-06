@@ -20,7 +20,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useMusic } from '@/src/context/MusicContext';
-import { RepeatMode } from 'react-native-track-player';
+
+// --- Safe RepeatMode fallback ---
+let RepeatMode: any = { Off: 0, Track: 1, Queue: 2 };
+try {
+  if (Platform.OS !== 'web') {
+    RepeatMode = require('react-native-track-player').RepeatMode || RepeatMode;
+  }
+} catch (e) {}
 
 const { width, height } = Dimensions.get('window');
 
@@ -580,7 +587,15 @@ export default function NowPlayingScreen() {
         <View style={styles.songInfoSection}>
           <View style={{ flex: 1 }}>
             <Text allowFontScaling maxFontSizeMultiplier={1.2} style={styles.trackTitle} numberOfLines={1}>{currentTrack.title}</Text>
-            <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.artistName} numberOfLines={1}>{currentTrack.artist}</Text>
+            <TouchableOpacity onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              router.push({
+                pathname: '/artist/[id]',
+                params: { id: currentTrack.artistId || 'elara' },
+              });
+            }}>
+              <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.artistName} numberOfLines={1}>{currentTrack.artist}</Text>
+            </TouchableOpacity>
           </View>
           <Animated.View style={{ transform: [{ scale: likeBtnScale }] }}>
             <TouchableOpacity

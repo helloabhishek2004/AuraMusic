@@ -280,11 +280,11 @@ export default function LibraryScreen() {
 
     Animated.parallel([
       Animated.sequence([
-        Animated.timing(tabPillScale, { toValue: 0.88, duration: 80, useNativeDriver: true }),
-        Animated.spring(tabPillScale, { toValue: 1, ...MOTION.POP, useNativeDriver: true }),
+        Animated.timing(tabPillScale, { toValue: 0.88, duration: 80, useNativeDriver: false }),
+        Animated.spring(tabPillScale, { toValue: 1, ...MOTION.POP, useNativeDriver: false }),
       ]),
-      Animated.spring(tabSlide, { toValue: layout.x + 6, ...MOTION.SLIDE, useNativeDriver: true }),
-      Animated.spring(tabWidth, { toValue: layout.width - 12, ...MOTION.SLIDE, useNativeDriver: false }), // Width cannot be native
+      Animated.spring(tabSlide, { toValue: layout.x + 6, ...MOTION.SLIDE, useNativeDriver: false }),
+      Animated.spring(tabWidth, { toValue: layout.width - 12, ...MOTION.SLIDE, useNativeDriver: false }),
     ]).start();
   }, [layouts]);
 
@@ -346,7 +346,58 @@ export default function LibraryScreen() {
           </View>
         </Mat>
 
+        {/* ── TAB BAR ────────────────────────────────────────────────────────── */}
+        <View style={ss.tabBarOuter}>
+          <View style={ss.tabBarTopEdge} />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={ss.tabScroll}
+          >
+            {/* Animated background pill */}
+            <Animated.View
+              style={[
+                ss.tabActivePill,
+                {
+                  width: tabWidth,
+                  transform: [{ translateX: tabSlide }, { scale: tabPillScale }],
+                },
+              ]}
+            >
+              <LinearGradient
+                colors={[C.primary, C.primaryMid]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFill}
+              />
+              <View style={ss.pillSpecTop} />
+              <View style={ss.pillSpecLeft} />
+            </Animated.View>
 
+            {['Playlists', 'Artists', 'Albums', 'Songs', 'Genres'].map((tab, idx) => (
+              <TouchableOpacity
+                key={tab}
+                onLayout={(e) => handleTabLayout(idx, e)}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  selectTab(tab, idx);
+                }}
+                style={[ss.tabItem, { paddingHorizontal: isTablet ? 28 : 20 }]}
+                activeOpacity={1}
+              >
+                <Text
+                  style={[
+                    ss.tabText,
+                    activeTab === tab && ss.tabTextActive,
+                  ]}
+                >
+                  {tab.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <View style={ss.tabBarBottomEdge} />
+        </View>
 
         {/* ── PAGE CONTENT ──────────────────────────────────────────────────── */}
         <View style={ss.content}>
@@ -445,6 +496,26 @@ export default function LibraryScreen() {
               </Glass>
 
             </View>
+          </Mat>
+
+          {/* ── LOCAL LIBRARY MODULE ─────────────────────────────────────────── */}
+          <Mat delay={130}>
+            <Glass style={{ marginBottom: 24 }} radius={22} blur={60} glow glowColor={C.primary}>
+              <TouchableOpacity
+                style={{ padding: isSmall ? 14 : 18, flexDirection: 'row', alignItems: 'center', gap: 16 }}
+                onPress={() => router.push('/local_library')}
+                activeOpacity={0.85}
+              >
+                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: hex2rgba(C.primary, 0.15), justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: hex2rgba(C.primary, 0.3) }}>
+                  <Ionicons name="folder" size={24} color={C.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: isTablet ? 20 : 17, fontWeight: '700', color: C.text }}>Local Library</Text>
+                  <Text style={{ fontSize: 13, color: C.textMuted, marginTop: 2 }}>Browse on-device files</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={C.textMuted} />
+              </TouchableOpacity>
+            </Glass>
           </Mat>
 
           {/* ── RECENT DOWNLOADS SECTION ─────────────────────────────────────── */}

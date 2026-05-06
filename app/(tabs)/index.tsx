@@ -355,9 +355,14 @@ const TrackCard = ({ title, artist, image, onPress, liked, onLikePress, download
           <Text style={s.trackCardTitle} numberOfLines={1}>
             {title}
           </Text>
-          <Text style={s.trackCardArtist} numberOfLines={1}>
-            {artist}
-          </Text>
+          <TouchableOpacity onPress={(e) => {
+            e.stopPropagation();
+            onArtistPress?.();
+          }}>
+            <Text style={s.trackCardArtist} numberOfLines={1}>
+              {artist}
+            </Text>
+          </TouchableOpacity>
         </View>
         <View style={s.trackCardActions}>
           <HeartButton
@@ -568,11 +573,11 @@ export default function HomeScreen() {
   ];
 
   const tracks = [
-    { id: 'nebula', title: 'Echoes of Silence', artist: 'Lumina Flux', image: 'https://picsum.photos/300/300?random=1' },
-    { id: 'neon', title: 'Urban Jungle', artist: 'Concrete Beats', image: 'https://picsum.photos/300/300?random=2' },
-    { id: 'solar', title: 'Neon Dreams', artist: 'The Midnight Syndicate', image: 'https://picsum.photos/300/300?random=3' },
-    { id: 'cosmic', title: 'Cosmic Wave', artist: 'Digital Echo', image: 'https://picsum.photos/300/300?random=10' },
-    { id: 'midnight', title: 'Midnight Flow', artist: 'Luna Ray', image: 'https://picsum.photos/300/300?random=11' },
+    { id: 'nebula', title: 'Echoes of Silence', artist: 'Lumina Flux', artistId: '1', image: 'https://picsum.photos/300/300?random=1' },
+    { id: 'neon', title: 'Urban Jungle', artist: 'Concrete Beats', artistId: 'elara', image: 'https://picsum.photos/300/300?random=2' },
+    { id: 'solar', title: 'Neon Dreams', artist: 'The Midnight Syndicate', artistId: 'elara', image: 'https://picsum.photos/300/300?random=3' },
+    { id: 'cosmic', title: 'Cosmic Wave', artist: 'Digital Echo', artistId: '2', image: 'https://picsum.photos/300/300?random=10' },
+    { id: 'midnight', title: 'Midnight Flow', artist: 'Luna Ray', artistId: '2', image: 'https://picsum.photos/300/300?random=11' },
   ];
   const trackUrls: Record<string, string> = {
     nebula: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
@@ -588,7 +593,7 @@ export default function HomeScreen() {
   const artists = [
     { id: '1', name: 'Solstice', image: 'https://picsum.photos/300/300?random=4' },
     { id: '2', name: 'Luna Ray', image: 'https://picsum.photos/300/300?random=5' },
-    { id: '3', name: 'Divergent', image: 'https://picsum.photos/300/300?random=6' },
+    { id: 'elara', name: 'Elara Vance', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCVPNWk1tlfHYyyWTBZhwh81Z6py-WVfUuxGVj51H72sBRafC8YphQ6KN32w47mVX4Vc_Gilgd9z97W25tKGqRujSEIq2yStVYqau9IUi6SHp1oWk4cXmYzmyTW3FjDYeBq6PdVhXaO0tAWivGBf42atMriqBRDwDtZarzZFB8CXSe6nZ2p5F-dWmhBrdH-IMd3mhHX3Thcn_9L_5R7nIJdFSM0Rglel2NhCZiTz9FL4EQBpTBZwwMZTDDbA8vKdPQ3ErzWfZi8Lqw' },
   ];
 
   const playlistsData = [
@@ -683,6 +688,13 @@ export default function HomeScreen() {
                 artist={track.artist}
                 image={track.image}
                 onPress={() => handlePlayPress(track)}
+                onArtistPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  router.push({
+                    pathname: '/artist/[id]',
+                    params: { id: track.artistId || 'elara' },
+                  });
+                }}
                 liked={likedSongs.has(track.id)}
                 onLikePress={() => {
                   const newLiked = new Set(likedSongs);
@@ -714,6 +726,13 @@ export default function HomeScreen() {
                   artist={track.artist}
                   image={track.image}
                   onPress={() => handlePlayPress(track)}
+                  onArtistPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    router.push({
+                      pathname: '/artist/[id]',
+                      params: { id: track.artistId || 'elara' },
+                    });
+                  }}
                   liked={likedSongs.has(track.id)}
                   onLikePress={() => {
                     const newLiked = new Set(likedSongs);
@@ -772,8 +791,8 @@ export default function HomeScreen() {
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   router.push({
-                    pathname: '/(tabs)/search',
-                    params: { query: artist.name },
+                    pathname: '/artist/[id]',
+                    params: { id: artist.id },
                   });
                 }}
               />

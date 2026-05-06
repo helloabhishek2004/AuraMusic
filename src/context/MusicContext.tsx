@@ -1,17 +1,36 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
-import TrackPlayer, {
-  AndroidAudioContentType,
-  AppKilledPlaybackBehavior,
-  Capability,
-  Event,
-  RepeatMode,
-  State,
-  Track as TrackPlayerTrack,
-  useProgress,
-  useTrackPlayerEvents,
-} from 'react-native-track-player';
 import { clamp } from '@/src/utils/color';
+
+// --- Safe TrackPlayer Setup ---
+let TrackPlayer: any = null;
+let Capability: any = {};
+let Event: any = {};
+let RepeatMode: any = { Off: 0, Track: 1, Queue: 2 };
+let State: any = { None: 'none', Ready: 'ready', Playing: 'playing', Paused: 'paused', Stopped: 'stopped', Buffering: 'buffering', Loading: 'loading' };
+let AppKilledPlaybackBehavior: any = {};
+let AndroidAudioContentType: any = {};
+let useProgress: any = () => ({ position: 0, duration: 0, buffered: 0 });
+let useTrackPlayerEvents: any = () => {};
+
+try {
+  if (Platform.OS !== 'web') {
+    const TP = require('react-native-track-player');
+    TrackPlayer = TP.default;
+    Capability = TP.Capability || {};
+    Event = TP.Event || {};
+    RepeatMode = TP.RepeatMode || RepeatMode;
+    State = TP.State || State;
+    AppKilledPlaybackBehavior = TP.AppKilledPlaybackBehavior || {};
+    AndroidAudioContentType = TP.AndroidAudioContentType || {};
+    useProgress = TP.useProgress;
+    useTrackPlayerEvents = TP.useTrackPlayerEvents;
+  }
+} catch (e) {
+  console.warn('TrackPlayer native module not found. Audio features will be disabled.');
+}
+
+type TrackPlayerTrack = any;
 
 export interface Track {
   id: string;
@@ -116,7 +135,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     async function setupPlayer() {
       try {
-        if (Platform.OS === 'web') {
+        if (Platform.OS === 'web' || !TrackPlayer) {
           setIsPlayerReady(true);
           return;
         }
@@ -204,7 +223,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const play = useCallback(
     async (track?: Track) => {
-      if (Platform.OS === 'web') {
+      if (Platform.OS === 'web' || !TrackPlayer) {
         if (track) setCurrentTrack(track);
         setIsPlaying(true);
         setIsPlayerReady(true);
@@ -232,7 +251,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const pause = useCallback(async () => {
-    if (Platform.OS === 'web') {
+    if (Platform.OS === 'web' || !TrackPlayer) {
       setIsPlaying(false);
       return;
     }
@@ -241,7 +260,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [isPlayerReady]);
 
   const next = useCallback(async () => {
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web' || !TrackPlayer) return;
     if (!isPlayerReady) return;
 
     try {
@@ -261,7 +280,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [isPlayerReady, isShuffle]);
 
   const prev = useCallback(async () => {
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web' || !TrackPlayer) return;
     if (!isPlayerReady) return;
 
     try {
@@ -274,7 +293,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const seek = useCallback(
     async (requestedProgress: number) => {
       const safeProgress = clamp(requestedProgress);
-      if (Platform.OS === 'web') return;
+      if (Platform.OS === 'web' || !TrackPlayer) return;
       if (!isPlayerReady) return;
 
       const playerProgress = await TrackPlayer.getProgress();
@@ -301,7 +320,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setRepeatMode(nextMode);
 
-    if (Platform.OS !== 'web' && isPlayerReady) {
+    if (Platform.OS !== 'web' && isPlayerReady && TrackPlayer) {
       await TrackPlayer.setRepeatMode(nextMode);
     }
   }, [isPlayerReady, repeatMode]);

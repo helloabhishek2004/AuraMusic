@@ -1,6 +1,18 @@
-import TrackPlayer, { Event } from 'react-native-track-player';
+import { Platform } from 'react-native';
+
+let TrackPlayer;
+let Event = {};
+
+try {
+    if (Platform.OS !== 'web') {
+        const TP = require('react-native-track-player');
+        TrackPlayer = TP.default;
+        Event = TP.Event || {};
+    }
+} catch (e) {}
 
 export const PlaybackService = async function() {
+    if (!TrackPlayer || !Event) return;
     TrackPlayer.addEventListener(Event.RemotePlay, () => TrackPlayer.play());
     TrackPlayer.addEventListener(Event.RemotePause, () => TrackPlayer.pause());
     TrackPlayer.addEventListener(Event.RemoteNext, () => TrackPlayer.skipToNext());
