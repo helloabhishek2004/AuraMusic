@@ -431,7 +431,12 @@ const BentoCard = React.memo(({
     >
       <PremiumGlass r={28} blur={60} gloss gradient style={s.bentoCardGlass}>
         <View style={s.bentoCardImageContainer}>
-          <Image source={{ uri: image }} style={s.bentoCardImage} contentFit="cover" transition={300} />
+          <Image 
+            source={{ uri: image }} 
+            style={[s.bentoCardImage, { borderRadius: 28 }]} 
+            contentFit="cover" 
+            transition={300} 
+          />
           <LinearGradient
             colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.85)']}
             style={StyleSheet.absoluteFill}
@@ -655,7 +660,7 @@ export default function HomeScreen() {
       title: track.title,
       artist: track.artist,
       art: track.image,
-      durationSec: 240,
+      duration: 240,
       dominantColors: ['#bf5af2', '#1a0033'],
     });
     goNowPlaying(track.id);
@@ -703,6 +708,7 @@ export default function HomeScreen() {
             contentInsetAdjustmentBehavior="automatic"
             showsHorizontalScrollIndicator={false}
             style={s.hzScroll}
+            contentContainerStyle={s.hzScrollContent}
             scrollEnabled={!expandedContinueListening}
           >
             {displayedTracks.map((track) => (
@@ -799,7 +805,13 @@ export default function HomeScreen() {
         {/* Recently Played Artists */}
         <MaterialEntrance delay={400}>
           <SectionHeader title="Recently Played" />
-          <ScrollView horizontal contentInsetAdjustmentBehavior="automatic" showsHorizontalScrollIndicator={false} style={s.artistScroll}>
+          <ScrollView 
+            horizontal 
+            contentInsetAdjustmentBehavior="automatic" 
+            showsHorizontalScrollIndicator={false} 
+            style={s.artistScroll}
+            contentContainerStyle={s.artistScrollContent}
+          >
             {artists.map((artist) => (
               <CircleArtistCard
                 key={artist.id}
@@ -817,7 +829,13 @@ export default function HomeScreen() {
         {/* Trending Section */}
         <MaterialEntrance delay={500}>
           <SectionHeader title="Trending Now" />
-          <ScrollView horizontal contentInsetAdjustmentBehavior="automatic" showsHorizontalScrollIndicator={false} style={s.hzScroll}>
+          <ScrollView 
+            horizontal 
+            contentInsetAdjustmentBehavior="automatic" 
+            showsHorizontalScrollIndicator={false} 
+            style={s.hzScroll}
+            contentContainerStyle={s.hzScrollContent}
+          >
             {albums.map((album) => (
               <View key={album.id} style={{ marginRight: 16 }}>
                 <BentoCard
@@ -965,9 +983,10 @@ const s = StyleSheet.create({
 
   // Horizontal Scroll
   hzScroll: {
-    paddingHorizontal: PAD,
-    gap: 16,
     marginBottom: 8,
+  },
+  hzScrollContent: {
+    paddingHorizontal: PAD,
   },
 
   // Track Card
@@ -1151,7 +1170,9 @@ const s = StyleSheet.create({
 
   // Artist Scroll
   artistScroll: {
-    paddingHorizontal: PAD,
     marginBottom: 44,
+  },
+  artistScrollContent: {
+    paddingHorizontal: PAD,
   },
 });

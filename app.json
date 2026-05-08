@@ -7,9 +7,11 @@
     "icon": "./assets/images/icon.png",
     "scheme": "auramusic",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,8 +20,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": true,
+      "usesCleartextTraffic": true,
       "package": "com.anonymous.AuraMusic",
       "permissions": [
         "android.permission.FOREGROUND_SERVICE",
@@ -36,10 +38,7 @@
               "scheme": "auramusic"
             }
           ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
+          "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
     },

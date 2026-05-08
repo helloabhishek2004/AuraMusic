@@ -1,7 +1,7 @@
-# AURA MUSIC — gemini CODE MASTER CONTEXT
+# AURA MUSIC — CLAUDE CODE MASTER CONTEXT
 
 > MACHINE-ORIENTED ENGINEERING SPECIFICATION
-> TARGET: gemini Code / Autonomous Coding Agents / AI Pair Programming
+> TARGET: Claude Code / Autonomous Coding Agents / AI Pair Programming
 > PRIORITY: CONSISTENCY > STABILITY > PERFORMANCE > VISUAL EXCELLENCE
 
 ---
@@ -81,7 +81,7 @@ Never perform destructive rewrites unless explicitly requested.
 
 ## 1.4 Autonomous Engineering Expectations
 
-gemini Code should:
+Claude Code should:
 
 * audit before editing
 * understand surrounding architecture before changes
@@ -519,7 +519,7 @@ DO NOT break existing routes while adding new screens.
 
 ---
 
-# 12. FILE EDITING RULES FOR gemini CODE
+# 12. FILE EDITING RULES FOR CLAUDE CODE
 
 When editing:
 
@@ -536,7 +536,7 @@ When editing:
 
 ---
 
-# 13. RESPONSE FORMAT FOR gemini CODE
+# 13. RESPONSE FORMAT FOR CLAUDE CODE
 
 Preferred response structure:
 
@@ -570,7 +570,7 @@ Be implementation-focused.
 
 Before introducing UI:
 
-gemini Code MUST verify:
+Claude Code MUST verify:
 
 * spacing consistency
 * radius consistency
@@ -618,7 +618,7 @@ NEVER:
 | Library     | Local scan not integrated      |
 | Performance | Frame drops during transitions |
 
-gemini Code should prioritize fixing root causes instead of cosmetic patches.
+Claude Code should prioritize fixing root causes instead of cosmetic patches.
 
 ---
 
@@ -641,7 +641,7 @@ NOT bolted on afterward.
 
 # 18. EXECUTION MINDSET
 
-gemini Code should think like:
+Claude Code should think like:
 
 * senior mobile architect
 * animation engineer

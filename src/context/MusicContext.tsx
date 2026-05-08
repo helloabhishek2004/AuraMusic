@@ -1,46 +1,15 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Platform } from 'react-native';
-import { clamp } from '@/src/utils/color';
-import { catalogTracks, CatalogTrack } from '@/src/data/music-catalog';
+import React, { createContext, useCallback, useContext, useMemo } from 'react';
+import { usePlayerStore } from '../features/player/store/player.store';
+import { PlayerTrack } from '../features/player/types/player';
 
-// --- Safe TrackPlayer Setup ---
-let TrackPlayer: any = null;
-let Capability: any = {};
-let Event: any = {};
-let RepeatMode: any = { Off: 0, Track: 1, Queue: 2 };
-let State: any = { None: 'none', Ready: 'ready', Playing: 'playing', Paused: 'paused', Stopped: 'stopped', Buffering: 'buffering', Loading: 'loading' };
-let AppKilledPlaybackBehavior: any = {};
-let AndroidAudioContentType: any = {};
-let useProgress: any = () => ({ position: 0, duration: 0, buffered: 0 });
-let useTrackPlayerEvents: any = () => {};
-
-try {
-  if (Platform.OS !== 'web') {
-    const TP = require('react-native-track-player');
-    TrackPlayer = TP.default;
-    Capability = TP.Capability || {};
-    Event = TP.Event || {};
-    RepeatMode = TP.RepeatMode || RepeatMode;
-    State = TP.State || State;
-    AppKilledPlaybackBehavior = TP.AppKilledPlaybackBehavior || {};
-    AndroidAudioContentType = TP.AndroidAudioContentType || {};
-    useProgress = TP.useProgress;
-    useTrackPlayerEvents = TP.useTrackPlayerEvents;
-  }
-} catch (e) {
-  console.warn('TrackPlayer native module not found. Audio features will be disabled.');
-}
-
-export interface Track extends CatalogTrack {
-  url: string;
-}
+export type Track = PlayerTrack;
 
 type PlaybackStateContextType = {
   currentTrack: Track | null;
   isPlaying: boolean;
   isBuffering: boolean;
   isLoading: boolean;
-  repeatMode: RepeatModeValue;
+  repeatMode: 0 | 1 | 2; // 0: off, 1: track, 2: queue
   isShuffle: boolean;
   isPlayerReady: boolean;
 };
@@ -65,265 +34,96 @@ type MusicActionsContextType = {
 };
 
 export type MusicContextType = PlaybackStateContextType & MusicProgressContextType & MusicActionsContextType;
-type RepeatModeValue = any;
-
-const MOCK_TRACKS: Track[] = catalogTracks.map(t => ({
-  ...t,
-  url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3' // Default fallback
-}));
 
 const PlaybackStateContext = createContext<PlaybackStateContextType | undefined>(undefined);
 const MusicProgressContext = createContext<MusicProgressContextType | undefined>(undefined);
 const MusicActionsContext = createContext<MusicActionsContextType | undefined>(undefined);
 
-function normalizeTrack(track: any): Track | null {
-  if (!track) return null;
-  return {
-    id: track.id,
-    title: track.title || 'Unknown Title',
-    artist: track.artist || 'Unknown Artist',
-    artistId: track.artistId || 'unknown',
-    url: track.url || '',
-    art: track.artwork || track.art || '',
-    durationSec: track.durationSec || track.duration || 0,
-    dominantColors: track.dominantColors || ['#bf5af2', '#7b2fbe'],
-  } as Track;
-}
-
 export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isPlayerReady, setIsPlayerReady] = useState(false);
-  const [currentTrack, setCurrentTrack] = useState<Track | null>(MOCK_TRACKS[0]);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isBuffering, setIsBuffering] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [repeatMode, setRepeatMode] = useState<RepeatModeValue>(RepeatMode.Off);
-  const [isShuffle, setIsShuffle] = useState(false);
+  // Use selective selectors to avoid re-rendering the provider on every progress update
+  const currentTrack = usePlayerStore(s => s.currentTrack);
+  const isPlaying = usePlayerStore(s => s.isPlaying);
+  const isBuffering = usePlayerStore(s => s.isBuffering);
+  const status = usePlayerStore(s => s.status);
+  const repeatMode = usePlayerStore(s => s.repeatMode);
+  const isShuffle = usePlayerStore(s => s.isShuffle);
 
-  // Faster progress updates for smoothness
-  const { position, duration, buffered } = useProgress(200);
-  const activeDuration = duration > 0 ? duration : currentTrack?.durationSec ?? 1;
-  const progress = clamp(activeDuration > 0 ? position / activeDuration : 0);
+  // Actions
+  const setTrackStore = usePlayerStore(s => s.setTrack);
+  const playStore = usePlayerStore(s => s.play);
+  const pauseStore = usePlayerStore(s => s.pause);
+  const nextStore = usePlayerStore(s => s.next);
+  const previousStore = usePlayerStore(s => s.previous);
+  const seekStore = usePlayerStore(s => s.seek);
+  const setRepeatModeStore = usePlayerStore(s => s.setRepeatMode);
+  const toggleShuffleStore = usePlayerStore(s => s.toggleShuffle);
+  const setVolumeStore = usePlayerStore(s => s.setVolume);
 
-  useEffect(() => {
-    async function setupPlayer() {
-      try {
-        if (Platform.OS === 'web' || !TrackPlayer) {
-          setIsPlayerReady(true);
-          return;
-        }
+  const repeatModeMap: Record<string, 0 | 1 | 2> = {
+    off: 0,
+    track: 1,
+    queue: 2,
+  };
 
-        let isSetup = false;
-        try {
-          const state = await TrackPlayer.getPlaybackState();
-          isSetup = state.state !== State.None;
-        } catch {
-          isSetup = false;
-        }
-
-        if (!isSetup) {
-          await TrackPlayer.setupPlayer({
-            minBuffer: 15,
-            maxBuffer: 50,
-            playBuffer: 2.0,
-            backBuffer: 15,
-            maxCacheSize: 1024 * 64,
-            autoHandleInterruptions: true,
-            androidAudioContentType: AndroidAudioContentType.Music,
-          });
-
-          await TrackPlayer.updateOptions({
-            android: {
-              appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
-              alwaysPauseOnInterruption: true,
-            },
-            capabilities: [
-              Capability.Play,
-              Capability.Pause,
-              Capability.SkipToNext,
-              Capability.SkipToPrevious,
-              Capability.SeekTo,
-              Capability.Stop,
-            ],
-            compactCapabilities: [Capability.Play, Capability.Pause, Capability.SkipToNext],
-            progressUpdateEventInterval: 0.2, // Smoother progress bar
-          });
-
-          await TrackPlayer.add(MOCK_TRACKS);
-        }
-
-        const index = await TrackPlayer.getActiveTrackIndex();
-        if (typeof index === 'number') {
-          const track = await TrackPlayer.getTrack(index);
-          setCurrentTrack(normalizeTrack(track));
-        }
-
-        setRepeatMode(await TrackPlayer.getRepeatMode());
-        setIsPlayerReady(true);
-      } catch (error) {
-        console.error('TrackPlayer setup failed:', error);
-      }
-    }
-
-    setupPlayer();
-  }, []);
-
-  useTrackPlayerEvents([Event.PlaybackState, Event.PlaybackActiveTrackChanged, Event.PlaybackError], async (event: any) => {
-    if (event.type === Event.PlaybackState) {
-      const state = event.state;
-      setIsPlaying(state === State.Playing);
-      setIsBuffering(state === State.Buffering);
-      setIsLoading(state === State.Loading);
-    }
-
-    if (event.type === Event.PlaybackActiveTrackChanged) {
-      if (event.track) {
-        setCurrentTrack(normalizeTrack(event.track));
-      }
-    }
-    
-    if (event.type === Event.PlaybackError) {
-      console.warn('Playback error:', event.message);
-    }
-  });
-
-  const play = useCallback(
-    async (track?: Track) => {
-      if (Platform.OS === 'web' || !TrackPlayer) {
-        if (track) setCurrentTrack(track);
-        setIsPlaying(true);
-        return;
-      }
-
-      if (!isPlayerReady) return;
-
-      if (track) {
-        const queue = await TrackPlayer.getQueue();
-        const index = queue.findIndex((item: any) => item.id === track.id);
-
-        if (index >= 0) {
-          await TrackPlayer.skip(index);
-        } else {
-          // If not in queue, add it after the current track and skip
-          const currentIndex = await TrackPlayer.getActiveTrackIndex() ?? 0;
-          await TrackPlayer.add([track], currentIndex + 1);
-          await TrackPlayer.skip(currentIndex + 1);
-        }
-      }
-
-      await TrackPlayer.play();
-    },
-    [isPlayerReady]
-  );
-
-  const pause = useCallback(async () => {
-    if (Platform.OS === 'web' || !TrackPlayer) {
-      setIsPlaying(false);
-      return;
-    }
-    await TrackPlayer.pause();
-  }, []);
-
-  const next = useCallback(async () => {
-    if (!TrackPlayer || !isPlayerReady) return;
-    try {
-      await TrackPlayer.skipToNext();
-    } catch {
-      // If at end of queue and no repeat, maybe stop or loop back
-    }
-  }, [isPlayerReady]);
-
-  const prev = useCallback(async () => {
-    if (!TrackPlayer || !isPlayerReady) return;
-    try {
-      const { position } = await TrackPlayer.getProgress();
-      if (position > 3) {
-        await TrackPlayer.seekTo(0);
-      } else {
-        await TrackPlayer.skipToPrevious();
-      }
-    } catch {
-      await TrackPlayer.seekTo(0);
-    }
-  }, [isPlayerReady]);
-
-  const seek = useCallback(
-    async (requestedProgress: number) => {
-      if (!TrackPlayer || !isPlayerReady) return;
-      const { duration } = await TrackPlayer.getProgress();
-      await TrackPlayer.seekTo(requestedProgress * duration);
-    },
-    [isPlayerReady]
-  );
-
-  const setTrack = useCallback(
-    async (track: Track) => {
-      await play(track);
-    },
-    [play]
-  );
-
-  const toggleRepeat = useCallback(async () => {
-    if (!TrackPlayer || !isPlayerReady) return;
-    const modes = [RepeatMode.Off, RepeatMode.Track, RepeatMode.Queue];
-    const nextMode = modes[(modes.indexOf(repeatMode) + 1) % modes.length];
-    await TrackPlayer.setRepeatMode(nextMode);
-    setRepeatMode(nextMode);
-  }, [isPlayerReady, repeatMode]);
-
-  const toggleShuffle = useCallback(async () => {
-    setIsShuffle((v) => !v);
-  }, []);
-
-  const setVolume = useCallback(async (volume: number) => {
-    if (TrackPlayer) {
-      await TrackPlayer.setVolume(clamp(volume, 0, 1));
-    }
-  }, []);
+  const reverseRepeatModeMap: Record<number, 'off' | 'track' | 'queue'> = {
+    0: 'off',
+    1: 'track',
+    2: 'queue',
+  };
 
   const playbackValue = useMemo<PlaybackStateContextType>(
     () => ({
-      currentTrack,
+      currentTrack: currentTrack ? {
+        ...currentTrack,
+        dominantColors: currentTrack.dominantColors || ['#bf5af2', '#7b2fbe'],
+      } : null,
       isPlaying,
       isBuffering,
-      isLoading,
-      repeatMode,
+      isLoading: status === 'loading',
+      repeatMode: repeatModeMap[repeatMode] as 0 | 1 | 2,
       isShuffle,
-      isPlayerReady,
+      isPlayerReady: true,
     }),
-    [currentTrack, isPlayerReady, isPlaying, isBuffering, isLoading, isShuffle, repeatMode]
+    [currentTrack, isPlaying, isBuffering, status, repeatMode, isShuffle]
   );
 
-  const progressValue = useMemo<MusicProgressContextType>(
-    () => ({
-      progress,
-      elapsedSec: position,
-      durationSec: activeDuration,
-      bufferedSec: buffered,
-    }),
-    [activeDuration, buffered, position, progress]
-  );
+  const play = useCallback(async (track?: Track) => {
+    if (track) {
+      await setTrackStore(track);
+    } else {
+      await playStore();
+    }
+  }, [setTrackStore, playStore]);
+
+  const toggleRepeat = useCallback(async () => {
+    const modes: (0 | 1 | 2)[] = [0, 1, 2];
+    const currentMode = repeatModeMap[repeatMode];
+    const nextMode = modes[(modes.indexOf(currentMode) + 1) % modes.length];
+    setRepeatModeStore(reverseRepeatModeMap[nextMode]);
+  }, [repeatMode, setRepeatModeStore]);
 
   const actionsValue = useMemo<MusicActionsContextType>(
     () => ({
       play,
-      pause,
-      next,
-      prev,
-      seek,
-      setTrack,
+      pause: pauseStore,
+      next: nextStore,
+      prev: previousStore,
+      seek: async (p: number) => { 
+        const duration = usePlayerStore.getState().duration;
+        await seekStore(p * duration); 
+      },
+      setTrack: setTrackStore,
       toggleRepeat,
-      toggleShuffle,
-      setVolume,
+      toggleShuffle: async () => { toggleShuffleStore(); },
+      setVolume: setVolumeStore,
     }),
-    [next, pause, play, prev, seek, setTrack, toggleRepeat, toggleShuffle, setVolume]
+    [play, pauseStore, nextStore, previousStore, seekStore, setTrackStore, toggleRepeat, toggleShuffleStore, setVolumeStore]
   );
 
   return (
     <PlaybackStateContext.Provider value={playbackValue}>
       <MusicActionsContext.Provider value={actionsValue}>
-        <MusicProgressContext.Provider value={progressValue}>
-          {children}
-        </MusicProgressContext.Provider>
+        {children}
       </MusicActionsContext.Provider>
     </PlaybackStateContext.Provider>
   );
@@ -335,10 +135,19 @@ export function usePlaybackState() {
   return context;
 }
 
-export function useMusicProgress() {
-  const context = useContext(MusicProgressContext);
-  if (!context) throw new Error('useMusicProgress must be used within MusicProvider');
-  return context;
+export function useMusicProgress(): MusicProgressContextType {
+  // Subscribe directly to the store for high-frequency updates
+  // This prevents the main Provider from re-rendering the entire app
+  const position = usePlayerStore(s => s.position);
+  const duration = usePlayerStore(s => s.duration);
+  const bufferedPosition = usePlayerStore(s => s.bufferedPosition);
+
+  return useMemo(() => ({
+    progress: duration > 0 ? position / duration : 0,
+    elapsedSec: position / 1000,
+    durationSec: duration / 1000,
+    bufferedSec: bufferedPosition / 1000,
+  }), [position, duration, bufferedPosition]);
 }
 
 export function useMusicActions() {
@@ -375,3 +184,5 @@ export function useMusic(): MusicContextType {
     ...useMusicActions(),
   };
 }
+
+

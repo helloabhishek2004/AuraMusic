@@ -54,8 +54,7 @@ export default function AlbumScreen() {
         title: track.title,
         artist: track.artist,
         art: track.art,
-        artwork: track.art,
-        durationSec: track.durationSec ?? 240,
+        duration: track.durationSec ?? 240,
         dominantColors: track.dominantColors,
       });
     },

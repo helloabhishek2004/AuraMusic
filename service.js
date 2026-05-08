@@ -1,34 +1,58 @@
-import { Platform } from 'react-native';
+import TrackPlayer, { Event } from "@rntp/player";
+import { Platform } from "react-native";
 
-let TrackPlayer;
-let Event = {};
+/**
+ * V5 Migration: Background task service for remote playback control.
+ * This service registers event listeners that persist when the app is backgrounded.
+ */
+export const PlaybackService = async function () {
+  if (Platform.OS === "web") return;
 
-try {
-    if (Platform.OS !== 'web') {
-        const TP = require('react-native-track-player');
-        TrackPlayer = TP.default;
-        Event = TP.Event || {};
+  console.log("[Player] Registering background playback listeners...");
+
+  TrackPlayer.addEventListener(Event.RemotePlay, () => {
+    console.log("[Service] Remote play");
+    TrackPlayer.play();
+  });
+
+  TrackPlayer.addEventListener(Event.RemotePause, () => {
+    console.log("[Service] Remote pause");
+    TrackPlayer.pause();
+  });
+
+  TrackPlayer.addEventListener(Event.RemoteNext, () => {
+    console.log("[Service] Remote next");
+    TrackPlayer.skipToNext();
+  });
+
+  TrackPlayer.addEventListener(Event.RemotePrevious, () => {
+    console.log("[Service] Remote previous");
+    TrackPlayer.skipToPrevious();
+  });
+
+  TrackPlayer.addEventListener(Event.RemoteStop, () => {
+    console.log("[Service] Remote stop");
+    TrackPlayer.stop();
+  });
+
+  TrackPlayer.addEventListener(Event.RemoteSeek, (event) => {
+    console.log("[Service] Remote seek to", event.position);
+    TrackPlayer.seekTo(event.position);
+  });
+
+  TrackPlayer.addEventListener("remote-duck", async (event) => {
+    console.log("[Service] Remote duck", event);
+    if (event.permanent) {
+      await TrackPlayer.stop();
+      return;
     }
-} catch (e) {}
 
-export const PlaybackService = async function() {
-    if (!TrackPlayer || !Event) return;
-    TrackPlayer.addEventListener(Event.RemotePlay, () => TrackPlayer.play());
-    TrackPlayer.addEventListener(Event.RemotePause, () => TrackPlayer.pause());
-    TrackPlayer.addEventListener(Event.RemoteNext, () => TrackPlayer.skipToNext());
-    TrackPlayer.addEventListener(Event.RemotePrevious, () => TrackPlayer.skipToPrevious());
-    TrackPlayer.addEventListener(Event.RemoteStop, () => TrackPlayer.reset());
-    TrackPlayer.addEventListener(Event.RemoteSeek, (event) => TrackPlayer.seekTo(event.position));
-    TrackPlayer.addEventListener(Event.RemoteDuck, async (event) => {
-        if (event.permanent) {
-            await TrackPlayer.stop();
-            return;
-        }
+    if (event.paused) {
+      await TrackPlayer.pause();
+    } else {
+      await TrackPlayer.play();
+    }
+  });
 
-        if (event.paused) {
-            await TrackPlayer.pause();
-        } else {
-            await TrackPlayer.play();
-        }
-    });
+  console.log("[Player] Background playback listeners registered.");
 };

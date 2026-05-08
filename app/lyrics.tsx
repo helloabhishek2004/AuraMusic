@@ -123,14 +123,14 @@ export default function LyricsScreen() {
         title: currentTrack.title,
         artist: currentTrack.artist,
         art: currentTrack.art,
-        durationSec: currentTrack.durationSec,
-        dominantColors: currentTrack.dominantColors,
+        durationSec: currentTrack.duration ?? 240,
+        dominantColors: currentTrack.dominantColors || fallbackTrack.dominantColors,
       }
     : fallbackTrack;
   const lyrics = track.lyrics;
 
   const glowAnim = useRef(new Animated.Value(0.5)).current;
-  const lineDuration = Math.max(track.durationSec / Math.max(lyrics.length, 1), 0.01);
+  const lineDuration = Math.max((track.durationSec || 240) / Math.max(lyrics.length, 1), 0.01);
   const activeIndex = Math.min(lyrics.length - 1, Math.max(0, Math.floor(elapsedSec / lineDuration)));
 
   useEffect(() => {
@@ -177,6 +177,7 @@ export default function LyricsScreen() {
 
   const renderLyricItem = ({ item, index }: { item: string, index: number }) => {
     const isActive = index === activeIndex;
+    const accent = track.dominantColors?.[0] || '#BF5AF2';
     
     return (
       <TouchableOpacity
@@ -190,7 +191,7 @@ export default function LyricsScreen() {
           styles.lyricText,
           isActive ? styles.lyricTextActive : styles.lyricTextInactive,
           isActive && { 
-            textShadowColor: track.dominantColors[0],
+            textShadowColor: accent,
             textShadowRadius: glowRadius,
             opacity: glowOpacity,
           }
@@ -204,7 +205,7 @@ export default function LyricsScreen() {
                { opacity: glowOpacity, transform: [{ scaleX: glowAnim }] }
              ]}>
                <LinearGradient
-                 colors={[track.dominantColors[0], 'transparent']}
+                 colors={[accent, 'transparent']}
                  start={{ x: 0, y: 0.5 }}
                  end={{ x: 1, y: 0.5 }}
                  style={styles.activeUnderline}
@@ -216,6 +217,8 @@ export default function LyricsScreen() {
     );
   };
 
+  const accent = track.dominantColors?.[0] || '#BF5AF2';
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -224,11 +227,11 @@ export default function LyricsScreen() {
       <View style={StyleSheet.absoluteFill}>
         <View style={[StyleSheet.absoluteFill, { backgroundColor: '#131318' }]} />
         <LinearGradient
-          colors={[`${track.dominantColors[0]}15`, '#131318']}
+          colors={[`${accent}15`, '#131318']}
           style={StyleSheet.absoluteFill}
         />
         {/* Subtle glow spots */}
-        <View style={[styles.glowSpot, { top: '20%', left: '-10%', backgroundColor: track.dominantColors[0] }]} />
+        <View style={[styles.glowSpot, { top: '20%', left: '-10%', backgroundColor: accent }]} />
       </View>
 
       <View style={[styles.main, { paddingTop: insets.top }]}>
@@ -284,7 +287,7 @@ export default function LyricsScreen() {
            <BlurView intensity={30} tint="dark" style={styles.miniPlayerGlass}>
               {/* Progress Line */}
               <View style={styles.miniProgressContainer}>
-                 <View style={[styles.miniProgressFill, { width: '40%', backgroundColor: track.dominantColors[0] }]} />
+                 <View style={[styles.miniProgressFill, { width: '40%', backgroundColor: accent }]} />
               </View>
 
               <View style={styles.miniPlayerContent}>

@@ -3,5 +3,15 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
-  }
+  },
+  "workbench.list.smoothScrolling": true,
+  "workbench.list.scrollByPage": true,
+  "editor.formatOnSave": true,
+  "files.autoSave": "afterDelay",
+  "editor.mouseWheelZoom": true,
+  "editor.formatOnPaste": true,
+  "editor.inertialScroll": true,
+  "editor.smoothScrolling": true,
+  "java.compile.nullAnalysis.mode": "automatic",
+  "java.configuration.updateBuildConfiguration": "automatic"
 }

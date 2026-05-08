@@ -1,58 +1,91 @@
-import { registerRootComponent } from 'expo';
-import { ExpoRoot } from 'expo-router';
-import { Platform, NativeModules } from 'react-native';
+const ReactNative = require("react-native");
+const { NativeModules, Platform } = ReactNative;
 
 // --- Safe Mock for TrackPlayer Native Module ---
-if (Platform.OS !== 'web' && !NativeModules.TrackPlayerModule) {
-  NativeModules.TrackPlayerModule = {
-    setupPlayer: async () => {},
-    updateOptions: async () => {},
-    add: async () => {},
-    remove: async () => {},
-    skip: async () => {},
-    skipToNext: async () => {},
-    skipToPrevious: async () => {},
-    reset: async () => {},
-    play: async () => {},
-    pause: async () => {},
-    stop: async () => {},
-    seekTo: async () => {},
-    setVolume: async () => {},
-    getVolume: async () => 1,
-    getDuration: async () => 0,
-    getPosition: async () => 0,
-    getBufferedPosition: async () => 0,
-    getState: async () => 0,
-    getQueue: async () => [],
-    getActiveTrackIndex: async () => null,
-    getTrack: async () => null,
-    setRepeatMode: async () => {},
-    getRepeatMode: async () => 0,
-    // Add missing constants to prevent 'Cannot read property of null'
-    CAPABILITY_PLAY: 1,
-    CAPABILITY_PAUSE: 2,
-    CAPABILITY_STOP: 4,
-    CAPABILITY_SKIP_TO_NEXT: 16,
-    CAPABILITY_SKIP_TO_PREVIOUS: 32,
-    CAPABILITY_SEEK_TO: 256,
-  };
+// V5 Note: @rntp/player requires new architecture (TurboModules/JSI).
+// This mock provides fallback behavior for dev environments.
+if (Platform.OS !== "web") {
+  if (!NativeModules.RNTPPlayer || NativeModules.RNTPPlayer === null) {
+    const mock = {
+      setupPlayer: async () => {},
+      setMediaItems: async () => {},
+      setMediaPlaybackOptions: async () => {},
+      reset: async () => {},
+      play: async () => {},
+      pause: async () => {},
+      stop: async () => {},
+      seekTo: async () => {},
+      setVolume: async () => {},
+      getVolume: async () => 1,
+      getDuration: () => 0,
+      getPosition: () => 0,
+      getBufferedPosition: () => 0,
+      getPlaybackState: () => "idle",
+      getQueue: () => [],
+      getActiveMediaItem: () => null,
+      getProgress: () => ({ position: 0, duration: 0, buffered: 0 }),
+      setRepeatMode: async () => {},
+      getRepeatMode: () => "off",
+      skipToNext: async () => {},
+      skipToPrevious: async () => {},
+      // Capabilities
+      Capability: {
+        PLAY: 0x00000001,
+        PAUSE: 0x00000002,
+        STOP: 0x00000004,
+        SKIP_TO_NEXT: 0x00000010,
+        SKIP_TO_PREVIOUS: 0x00000020,
+        SEEK_TO: 0x00000100,
+      },
+      AppKilledPlaybackBehavior: {
+        StopPlaybackAndRemoveNotification: 0,
+      },
+    };
+
+    // Inject into NativeModules
+    try {
+      Object.defineProperty(NativeModules, "RNTPPlayer", {
+        value: mock,
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      });
+    } catch (e) {
+      // Fallback to direct assignment
+      NativeModules.RNTPPlayer = mock;
+    }
+  }
 }
+
+const Constants = require("expo-constants").default;
+const { registerRootComponent } = require("expo");
+const { ExpoRoot } = require("expo-router");
+
+console.log("[AuraMusic] Startup environment", {
+  expoSdkVersion:
+    Constants.expoConfig?.sdkVersion || Constants.manifest?.sdkVersion,
+  reactNativeVersion: require("react-native/package.json").version,
+  trackPlayerVersion: require("./package.json").dependencies["@rntp/player"],
+  platform: Platform.OS,
+  hasRNTPPlayerNative: !!NativeModules.RNTPPlayer,
+});
 
 // Safely import TrackPlayer and PlaybackService
 let TrackPlayer;
 let PlaybackService;
 
 try {
-  if (Platform.OS !== 'web') {
-    TrackPlayer = require('react-native-track-player').default;
-    PlaybackService = require('./service').PlaybackService;
+  if (Platform.OS !== "web") {
+    // V5: Core methods are on the default export
+    TrackPlayer = require("@rntp/player").default;
+    PlaybackService = require("./service").PlaybackService;
   }
 } catch (e) {
-  console.warn('TrackPlayer could not be initialized:', e.message);
+  console.warn("[AuraMusic] TrackPlayer could not be initialized:", e.message);
 }
 
 export function App() {
-  const ctx = require.context('./app');
+  const ctx = require.context("./app");
   return <ExpoRoot context={ctx} />;
 }
 
@@ -61,8 +94,9 @@ registerRootComponent(App);
 // Only register service if TrackPlayer is available
 if (TrackPlayer && PlaybackService) {
   try {
-    TrackPlayer.registerPlaybackService(() => PlaybackService);
+    // V5: registerPlaybackService is replaced by registerBackgroundEventHandler
+    TrackPlayer.registerBackgroundEventHandler(() => PlaybackService);
   } catch (e) {
-    console.error('Failed to register PlaybackService:', e);
+    console.error("Failed to register PlaybackService:", e);
   }
 }

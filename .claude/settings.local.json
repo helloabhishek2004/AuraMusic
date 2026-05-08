@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx expo *)",
+      "Bash(adb devices *)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}

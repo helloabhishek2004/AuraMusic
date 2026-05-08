@@ -14,6 +14,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { enableFreeze } from 'react-native-screens';
 
 import MiniPlayer from '../src/components/MiniPlayer';
+import { PlaybackService } from '../src/features/player/services/playback.service';
+import { PlaybackController } from '../src/features/player/services/playback.controller';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 enableFreeze(true);
@@ -34,6 +36,12 @@ function GlobalPlayer() {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    // Initialize audio engine and bridge
+    PlaybackService.setupPlayer();
+    PlaybackController.initialize();
+  }, []);
+
   const [fontsLoaded, error] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -51,8 +59,11 @@ export default function RootLayout() {
 
   useEffect(() => {
     const onBackPress = () => {
-      // If we are in a tab but not at the root of that tab, or in a modal/subscreen
-      const isAtRoot = segments.length === 1 && segments[0] === '(tabs)';
+      // Use type cast to bypass overly restrictive segment types from typed routes
+      const s = segments as string[];
+      const isAtRoot = 
+        s.length === 0 || 
+        (s[0] === '(tabs)' && (s.length === 1 || s[1] === 'index' || s[1] === '(index)'));
       
       if (!isAtRoot && router.canGoBack()) {
         router.back();
