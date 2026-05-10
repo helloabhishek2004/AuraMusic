@@ -1,316 +1,221 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { usePlayerStore } from "@/src/features/player/store/player.store";
+import { FlashList } from "@shopify/flash-list";
+import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import * as Haptics from "expo-haptics";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  FlatList,
-  TouchableOpacity,
-  Platform,
-  Share,
-  StatusBar,
-  Animated,
-} from 'react-native';
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useMusic } from '@/src/context/MusicContext';
+    ActivityIndicator,
+    Dimensions,
+    FlatList,
+    Platform,
+    Share,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    Animated as RNAnimated
+} from "react-native";
+import Animated, {
+    useAnimatedScrollHandler,
+    useSharedValue,
+    withSpring,
+    withTiming,
+    runOnJS
+} from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-// Screen Dimensions
-const { width, height } = Dimensions.get('window');
+const { width, height } = Dimensions.get("window");
 
-// Track data (Centralized or copied for now)
-const tracks = [
-  {
-    id: '1',
-    title: 'Midnight City',
-    artist: 'M83',
-    durationSec: 243,
-    art: 'https://picsum.photos/seed/m83/800',
-    dominantColors: ['#46f5e0', '#003731'],
-    lyrics: [
-      "Lost in the echo of a neon dream",
-      "Dancing through the Purple Nebula",
-      "Where the silence speaks in melodies",
-      "And the stars are breathing frequency",
-      "I can feel the rhythm taking hold",
-      "In a world where time is made of gold",
-      "Let the pulsar guide us through the night",
-      "Into the canvas of eternal light",
-      "Fading out into the cosmic sea",
-      "Where the only one I see is me",
-    ]
-  },
-  {
-    id: '2',
-    title: 'Starboy',
-    artist: 'The Weeknd',
-    durationSec: 230,
-    art: 'https://picsum.photos/seed/starboy/800',
-    dominantColors: ['#ff4d4d', '#330000'],
-    lyrics: [
-      "Neon lights flashing in the night",
-      "Everything is gonna be alright",
-      "Ride the wave of binary code",
-      "In the digital street, take the road",
-      "Synthesizer pulse in my chest",
-      "Putting our hearts to the test",
-      "Glowing circuits, electric heart",
-      "Never gonna fall apart",
-    ]
-  },
-  {
-    id: '3',
-    title: 'Nightcall',
-    artist: 'Kavinsky',
-    durationSec: 258,
-    art: 'https://picsum.photos/seed/kavinsky/800',
-    dominantColors: ['#BF5AF2', '#1a0033'],
-    lyrics: [
-      "I'm giving you a nightcall to tell you how I feel",
-      "I want to drive you through the night, down the hills",
-      "I'm gonna tell you something you don't want to hear",
-      "I'm gonna show you where it's dark, but have no fear",
-      "There's something inside you, it's hard to explain",
-      "They're talking about you, boy, but you're still the same",
-    ]
-  },
-  {
-    id: '4',
-    title: 'After Hours',
-    artist: 'The Weeknd',
-    durationSec: 362,
-    art: 'https://picsum.photos/seed/afterhours/800',
-    dominantColors: ['#ffb4ab', '#93000a'],
-    lyrics: [
-      "Thought I almost died in my dream again",
-      "Fighting for my life, I couldn't breathe again",
-      "I'm falling into a deep state",
-      "My heart is cold, it's getting late",
-    ]
-  },
-  {
-    id: '5',
-    title: 'Resonance',
-    artist: 'HOME',
-    durationSec: 212,
-    art: 'https://picsum.photos/seed/resonance/800',
-    dominantColors: ['#46f5e0', '#003731'],
-    lyrics: [
-      "(Instrumental Harmony)",
-      "Vibrations in the aether",
-      "Frequencies of time",
-      "Resonating through the soul",
-    ]
-  },
-];
+// ── Components ───────────────────────────────────────────────────────────────
+
+const LyricRow = memo(({ 
+  text, 
+  isActive, 
+  isSynced, 
+  onPress, 
+  accent 
+}: { 
+  text: string, 
+  isActive: boolean, 
+  isSynced: boolean, 
+  onPress: () => void,
+  accent: string 
+}) => {
+  return (
+    <TouchableOpacity
+      activeOpacity={isSynced ? 0.7 : 1}
+      onPress={onPress}
+      style={styles.lyricItemContainer}
+      disabled={!isSynced}
+    >
+      <Text style={[
+        styles.lyricText,
+        isActive ? [styles.lyricTextActive, { textShadowColor: accent }] : styles.lyricTextInactive
+      ]}>
+        {text}
+      </Text>
+    </TouchableOpacity>
+  );
+});
 
 export default function LyricsScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
-  const flatListRef = useRef<FlatList>(null);
-  const { currentTrack, elapsedSec, isPlaying, play, pause, next, prev, seek } = useMusic();
+  
+  // Store Data
+  const currentTrack = usePlayerStore(s => s.currentTrack);
+  const lyricsData = usePlayerStore(s => s.lyrics);
+  const isLoading = usePlayerStore(s => s.isLyricsLoading);
+  const seek = usePlayerStore(s => s.seek);
+  const elapsedSec = usePlayerStore(s => s.position / 1000);
+  const durationSec = usePlayerStore(s => s.duration / 1000);
 
-  const trackId = params.trackId as string || '1';
-  const fallbackTrack = tracks.find(t => t.id === trackId) || tracks[0];
-  const track = currentTrack?.id === trackId
-    ? {
-        ...fallbackTrack,
-        title: currentTrack.title,
-        artist: currentTrack.artist,
-        art: currentTrack.art,
-        durationSec: currentTrack.duration ?? 240,
-        dominantColors: currentTrack.dominantColors || fallbackTrack.dominantColors,
+  const flashListRef = useRef<any>(null);
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const scrollTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const accent = currentTrack?.dominantColors?.[0] || "#BF5AF2";
+
+  // Lyrics derived state
+  const lyrics = useMemo(() => lyricsData?.lyrics || [], [lyricsData]);
+  const isSynced = useMemo(() => lyricsData?.synced || false, [lyricsData]);
+
+  // Find active lyric index
+  const activeIndex = useMemo(() => {
+    if (!isSynced || !lyrics.length) return -1;
+    // Find the latest line that has time <= current progress
+    const currentMs = elapsedSec * 1000;
+    let index = -1;
+    for (let i = 0; i < lyrics.length; i++) {
+      if (lyrics[i].time <= currentMs) {
+        index = i;
+      } else {
+        break;
       }
-    : fallbackTrack;
-  const lyrics = track.lyrics;
+    }
+    return index;
+  }, [lyrics, elapsedSec, isSynced]);
 
-  const glowAnim = useRef(new Animated.Value(0.5)).current;
-  const lineDuration = Math.max((track.durationSec || 240) / Math.max(lyrics.length, 1), 0.01);
-  const activeIndex = Math.min(lyrics.length - 1, Math.max(0, Math.floor(elapsedSec / lineDuration)));
-
+  // Auto-scroll to active index
   useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowAnim, { toValue: 1, duration: 1200, useNativeDriver: false }),
-        Animated.timing(glowAnim, { toValue: 0.4, duration: 1200, useNativeDriver: false }),
-      ])
-    ).start();
-  }, [lyrics.length]);
+    if (isSynced && activeIndex !== -1 && !isUserScrolling) {
+      flashListRef.current?.scrollToIndex({
+        index: activeIndex,
+        animated: true,
+        viewPosition: 0.3, // Keep active line slightly above center
+      });
+    }
+  }, [activeIndex, isSynced, isUserScrolling]);
 
-  // Scroll to active index
-  useEffect(() => {
-    flatListRef.current?.scrollToIndex({
-      index: activeIndex,
-      animated: true,
-      viewPosition: 0.5, // Center it
-    });
-  }, [activeIndex]);
+  const handleScrollBegin = () => {
+    setIsUserScrolling(true);
+    if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
+  };
 
-  const glowRadius = glowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [10, 30],
-  });
-  const glowOpacity = glowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.6, 1],
-  });
+  const handleScrollEnd = () => {
+    // Resume auto-follow after 3 seconds of inactivity
+    if (scrollTimeout.current) clearTimeout(scrollTimeout.current);
+    scrollTimeout.current = setTimeout(() => {
+      setIsUserScrolling(false);
+    }, 3000);
+  };
+
+  const handleLyricPress = useCallback((item: any) => {
+    if (isSynced && item.time >= 0) {
+      // Store's seek action expects milliseconds
+      usePlayerStore.getState().seek(item.time);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setIsUserScrolling(false);
+    }
+  }, [isSynced]);
 
   const onShare = async () => {
+    if (!currentTrack) return;
     try {
       await Share.share({
-        message: `Check out these lyrics from ${track.title}!`,
+        message: `Check out the lyrics for "${currentTrack.title}" by ${currentTrack.artist} on AuraMusic!`,
       });
     } catch (error) {
-      console.error('Sharing failed:', error);
+      console.error("Sharing failed:", error);
     }
   };
 
-  const handleLyricPress = (index: number) => {
-    const targetProgress = lyrics.length <= 1 ? 0 : index / (lyrics.length - 1);
-    seek(targetProgress);
-  };
-
-  const renderLyricItem = ({ item, index }: { item: string, index: number }) => {
-    const isActive = index === activeIndex;
-    const accent = track.dominantColors?.[0] || '#BF5AF2';
-    
-    return (
-      <TouchableOpacity
-        activeOpacity={0.86}
-        style={styles.lyricItemContainer}
-        onPress={() => handleLyricPress(index)}
-        accessibilityRole="button"
-        accessibilityLabel={`Jump to lyric line ${index + 1}`}
-      >
-        <Animated.Text style={[
-          styles.lyricText,
-          isActive ? styles.lyricTextActive : styles.lyricTextInactive,
-          isActive && { 
-            textShadowColor: accent,
-            textShadowRadius: glowRadius,
-            opacity: glowOpacity,
-          }
-        ]}>
-          {item}
-        </Animated.Text>
-        {isActive && (
-          <View style={styles.activeIndicatorContainer}>
-             <Animated.View style={[
-               styles.activeUnderlineWrapper,
-               { opacity: glowOpacity, transform: [{ scaleX: glowAnim }] }
-             ]}>
-               <LinearGradient
-                 colors={[accent, 'transparent']}
-                 start={{ x: 0, y: 0.5 }}
-                 end={{ x: 1, y: 0.5 }}
-                 style={styles.activeUnderline}
-               />
-             </Animated.View>
-          </View>
-        )}
-      </TouchableOpacity>
-    );
-  };
-
-  const accent = track.dominantColors?.[0] || '#BF5AF2';
+  if (!currentTrack) return null;
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" translucent />
       
-      {/* Background with subtle gradient */}
+      {/* Immersive Background */}
       <View style={StyleSheet.absoluteFill}>
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#131318' }]} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: "#0c0c10" }]} />
         <LinearGradient
-          colors={[`${accent}15`, '#131318']}
+          colors={[`${accent}25`, "transparent", "#0c0c10"]}
           style={StyleSheet.absoluteFill}
         />
-        {/* Subtle glow spots */}
-        <View style={[styles.glowSpot, { top: '20%', left: '-10%', backgroundColor: accent }]} />
+        <View style={[styles.glowSpot, { top: "10%", left: "-20%", backgroundColor: accent }]} />
+        <View style={[styles.glowSpot, { bottom: "5%", right: "-20%", backgroundColor: accent, opacity: 0.1 }]} />
       </View>
 
       <View style={[styles.main, { paddingTop: insets.top }]}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} activeOpacity={0.7} style={styles.headerIcon}>
-            <Ionicons name="chevron-down-outline" size={30} color="white" />
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerIcon}>
+            <Ionicons name="chevron-down-outline" size={32} color="white" />
           </TouchableOpacity>
           
-          <View style={styles.titleContainer}>
-            <Text style={styles.headerTitle}>Lyrics</Text>
-            <View style={styles.toggleContainer}>
-              <TouchableOpacity style={[styles.toggleBtn, styles.toggleBtnActive]}>
-                <Text style={styles.toggleTextActive}>EN</Text>
-              </TouchableOpacity>
-              <View style={styles.toggleDivider} />
-              <TouchableOpacity style={styles.toggleBtn}>
-                <Text style={styles.toggleText}>ORIGINAL</Text>
-              </TouchableOpacity>
-            </View>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle} numberOfLines={1}>{currentTrack.title}</Text>
+            <Text style={styles.headerArtist} numberOfLines={1}>{currentTrack.artist}</Text>
           </View>
 
-          <TouchableOpacity onPress={onShare} activeOpacity={0.7} style={styles.headerIcon}>
+          <TouchableOpacity onPress={onShare} style={styles.headerIcon}>
             <Ionicons name="share-outline" size={26} color="white" />
           </TouchableOpacity>
         </View>
 
-        {/* Lyrics List */}
-        <FlatList
-          ref={flatListRef}
-          data={lyrics}
-          keyExtractor={(_, index) => index.toString()}
-          renderItem={renderLyricItem}
-          contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          snapToInterval={120} // Match item height for snappy scrolling
-          decelerationRate="fast"
-          initialNumToRender={8}
-          maxToRenderPerBatch={8}
-          windowSize={7}
-          updateCellsBatchingPeriod={32}
-          removeClippedSubviews
-          getItemLayout={(_, index) => ({
-            length: 120,
-            offset: 120 * index,
-            index,
-          })}
-        />
-
-        {/* Mini Player at bottom */}
-        <View style={[styles.miniPlayerContainer, { marginBottom: insets.bottom + 16 }]}>
-           <BlurView intensity={30} tint="dark" style={styles.miniPlayerGlass}>
-              {/* Progress Line */}
-              <View style={styles.miniProgressContainer}>
-                 <View style={[styles.miniProgressFill, { width: '40%', backgroundColor: accent }]} />
-              </View>
-
-              <View style={styles.miniPlayerContent}>
-                <Image source={{ uri: track.art }} style={styles.miniArt} />
-                <View style={styles.miniInfo}>
-                  <Text style={styles.miniTitle} numberOfLines={1}>{track.title}</Text>
-                  <Text style={styles.miniArtist} numberOfLines={1}>{track.artist}</Text>
-                </View>
-
-                <View style={styles.miniControls}>
-                  <TouchableOpacity activeOpacity={0.7} onPress={prev}>
-                    <Ionicons name="play-skip-back" size={24} color="white" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.miniPlayBtn, { backgroundColor: '#c792ff' }]} activeOpacity={0.9} onPress={() => (isPlaying ? pause() : play())}>
-                    <Ionicons name={isPlaying ? 'pause' : 'play'} size={24} color="black" />
-                  </TouchableOpacity>
-                  <TouchableOpacity activeOpacity={0.7} onPress={next}>
-                    <Ionicons name="play-skip-forward" size={24} color="white" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-           </BlurView>
+        {/* Content Section */}
+        <View style={{ flex: 1 }}>
+          {isLoading ? (
+            <View style={styles.centered}>
+              <ActivityIndicator size="large" color={accent} />
+              <Text style={styles.statusText}>Searching for lyrics...</Text>
+            </View>
+          ) : lyrics.length === 0 ? (
+            <View style={styles.centered}>
+              <Ionicons name="musical-notes-outline" size={64} color="rgba(255,255,255,0.1)" />
+              <Text style={styles.statusText}>No lyrics available for this track</Text>
+            </View>
+          ) : (
+            <FlashList
+              ref={flashListRef}
+              data={lyrics}
+              // @ts-ignore - estimatedItemSize is required but falsely reported missing by current TS config
+              estimatedItemSize={80}
+              keyExtractor={(item: any, index: number) => index.toString()}
+              renderItem={({ item, index }: any) => (
+                <LyricRow 
+                  text={item.text} 
+                  isActive={index === activeIndex} 
+                  isSynced={isSynced}
+                  accent={accent}
+                  onPress={() => handleLyricPress(item)}
+                />
+              )}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              onScrollBeginDrag={handleScrollBegin}
+              onScrollEndDrag={handleScrollEnd}
+              onMomentumScrollEnd={handleScrollEnd}
+            />
+          )}
         </View>
+
       </View>
     </View>
   );
@@ -319,165 +224,123 @@ export default function LyricsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#131318',
+    backgroundColor: "#0c0c10",
   },
   main: {
     flex: 1,
   },
+  glowSpot: {
+    position: "absolute",
+    width: width * 1.2,
+    height: width * 1.2,
+    borderRadius: width * 0.6,
+    opacity: 0.15,
+  },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 20,
-    height: 80,
+    height: 70,
   },
   headerIcon: {
     width: 44,
     height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
-  titleContainer: {
-    alignItems: 'center',
+  headerCenter: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 10,
   },
   headerTitle: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'Inter',
+    color: "white",
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: 0.5,
   },
-  toggleContainer: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 20,
-    marginTop: 8,
-    padding: 4,
-    alignItems: 'center',
+  headerArtist: {
+    color: "rgba(255,255,255,0.5)",
+    fontSize: 12,
+    marginTop: 2,
   },
-  toggleBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 2,
-    borderRadius: 15,
+  centered: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 40,
   },
-  toggleBtnActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-  },
-  toggleText: {
-    color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  toggleTextActive: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  toggleDivider: {
-    width: 1,
-    height: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    marginHorizontal: 2,
+  statusText: {
+    color: "rgba(255,255,255,0.4)",
+    fontSize: 16,
+    marginTop: 20,
+    textAlign: "center",
   },
   listContent: {
-    paddingTop: height * 0.2, // Start with space
-    paddingBottom: height * 0.4, // End with space
-    paddingHorizontal: 30,
+    paddingTop: height * 0.15,
+    paddingBottom: height * 0.4,
+    paddingHorizontal: 32,
   },
   lyricItemContainer: {
-    height: 120,
-    justifyContent: 'center',
+    minHeight: 80,
+    justifyContent: "center",
+    paddingVertical: 10,
   },
   lyricText: {
-    fontSize: 28,
-    fontWeight: '700',
+    fontSize: 26,
+    fontWeight: "800",
     lineHeight: 38,
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'Manrope',
+    fontFamily: Platform.OS === "ios" ? "System" : "Manrope",
   },
   lyricTextActive: {
-    color: 'white',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 20,
+    color: "white",
+    textShadowRadius: 25,
   },
   lyricTextInactive: {
-    color: 'rgba(170, 170, 185, 0.35)',
+    color: "rgba(255,255,255,0.15)",
   },
-  activeIndicatorContainer: {
-    height: 4,
-    marginTop: 12,
-  },
-  activeUnderlineWrapper: {
-    width: 120,
-    height: 4,
-  },
-  activeUnderline: {
-    width: 120,
-    height: 4,
-    borderRadius: 2,
-  },
-  glowSpot: {
-    position: 'absolute',
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-    opacity: 0.15,
-  },
-  miniPlayerContainer: {
-    position: 'absolute',
+  footer: {
+    position: "absolute",
     bottom: 0,
-    left: 20,
-    right: 20,
-    borderRadius: 40,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  miniPlayerGlass: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  miniProgressContainer: {
-    position: 'absolute',
-    top: 0,
     left: 0,
     right: 0,
-    height: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: "center",
   },
-  miniProgressFill: {
-    height: '100%',
-  },
-  miniPlayerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  miniControlBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: width - 40,
+    padding: 10,
+    borderRadius: 24,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
   miniArt: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 12,
   },
   miniInfo: {
     flex: 1,
     marginLeft: 12,
   },
   miniTitle: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: '700',
+    color: "white",
+    fontSize: 14,
+    fontWeight: "700",
   },
-  miniArtist: {
-    color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 12,
+  miniActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
-  miniControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  miniPlayBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
+  playBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: "center",
+    alignItems: "center",
   }
 });

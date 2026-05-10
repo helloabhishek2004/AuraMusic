@@ -9,7 +9,7 @@ type PlaybackStateContextType = {
   isPlaying: boolean;
   isBuffering: boolean;
   isLoading: boolean;
-  repeatMode: 0 | 1 | 2; // 0: off, 1: track, 2: queue
+  repeatMode: 0 | 1; // 0: off, 1: track
   isShuffle: boolean;
   isPlayerReady: boolean;
 };
@@ -28,6 +28,7 @@ type MusicActionsContextType = {
   prev: () => Promise<void>;
   seek: (progress: number) => Promise<void>;
   setTrack: (track: Track) => Promise<void>;
+  setQueue: (tracks: Track[], startIndex?: number) => Promise<void>;
   toggleRepeat: () => Promise<void>;
   toggleShuffle: () => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
@@ -40,7 +41,7 @@ const MusicProgressContext = createContext<MusicProgressContextType | undefined>
 const MusicActionsContext = createContext<MusicActionsContextType | undefined>(undefined);
 
 export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Use selective selectors to avoid re-rendering the provider on every progress update
+  // Use granular selectors to avoid re-rendering the provider when progress updates
   const currentTrack = usePlayerStore(s => s.currentTrack);
   const isPlaying = usePlayerStore(s => s.isPlaying);
   const isBuffering = usePlayerStore(s => s.isBuffering);
@@ -48,8 +49,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const repeatMode = usePlayerStore(s => s.repeatMode);
   const isShuffle = usePlayerStore(s => s.isShuffle);
 
-  // Actions
+  // Actions - individual stable selectors to avoid object-literal rerender loop
   const setTrackStore = usePlayerStore(s => s.setTrack);
+  const setQueueStore = usePlayerStore(s => s.setQueue);
   const playStore = usePlayerStore(s => s.play);
   const pauseStore = usePlayerStore(s => s.pause);
   const nextStore = usePlayerStore(s => s.next);
@@ -59,16 +61,14 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const toggleShuffleStore = usePlayerStore(s => s.toggleShuffle);
   const setVolumeStore = usePlayerStore(s => s.setVolume);
 
-  const repeatModeMap: Record<string, 0 | 1 | 2> = {
+  const repeatModeMap: Record<string, 0 | 1> = {
     off: 0,
     track: 1,
-    queue: 2,
   };
 
-  const reverseRepeatModeMap: Record<number, 'off' | 'track' | 'queue'> = {
+  const reverseRepeatModeMap: Record<number, 'off' | 'track'> = {
     0: 'off',
     1: 'track',
-    2: 'queue',
   };
 
   const playbackValue = useMemo<PlaybackStateContextType>(
@@ -80,31 +80,21 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       isPlaying,
       isBuffering,
       isLoading: status === 'loading',
-      repeatMode: repeatModeMap[repeatMode] as 0 | 1 | 2,
+      repeatMode: repeatModeMap[repeatMode] as 0 | 1,
       isShuffle,
       isPlayerReady: true,
     }),
     [currentTrack, isPlaying, isBuffering, status, repeatMode, isShuffle]
   );
 
-  const play = useCallback(async (track?: Track) => {
-    if (track) {
-      await setTrackStore(track);
-    } else {
-      await playStore();
-    }
-  }, [setTrackStore, playStore]);
-
   const toggleRepeat = useCallback(async () => {
-    const modes: (0 | 1 | 2)[] = [0, 1, 2];
-    const currentMode = repeatModeMap[repeatMode];
-    const nextMode = modes[(modes.indexOf(currentMode) + 1) % modes.length];
-    setRepeatModeStore(reverseRepeatModeMap[nextMode]);
+    const nextMode = repeatMode === 'off' ? 'track' : 'off';
+    setRepeatModeStore(nextMode);
   }, [repeatMode, setRepeatModeStore]);
 
   const actionsValue = useMemo<MusicActionsContextType>(
     () => ({
-      play,
+      play: async (track?: Track) => track ? setTrackStore(track) : playStore(),
       pause: pauseStore,
       next: nextStore,
       prev: previousStore,
@@ -113,11 +103,12 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await seekStore(p * duration); 
       },
       setTrack: setTrackStore,
+      setQueue: setQueueStore,
       toggleRepeat,
       toggleShuffle: async () => { toggleShuffleStore(); },
       setVolume: setVolumeStore,
     }),
-    [play, pauseStore, nextStore, previousStore, seekStore, setTrackStore, toggleRepeat, toggleShuffleStore, setVolumeStore]
+    [setTrackStore, playStore, pauseStore, nextStore, previousStore, seekStore, setQueueStore, toggleRepeat, toggleShuffleStore, setVolumeStore]
   );
 
   return (
@@ -184,5 +175,3 @@ export function useMusic(): MusicContextType {
     ...useMusicActions(),
   };
 }
-
-

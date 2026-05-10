@@ -1,172 +1,217 @@
-import TrackPlayer, { Event } from "@rntp/player";
+import TrackPlayer, { Event, PlaybackState } from "@rntp/player";
 import { usePlayerStore } from "../store/player.store";
+import { PlayerTrack } from "../types/player";
 
 /**
- * PlaybackController - The bridge between the audio engine and the state management.
- * This is the ONLY place where TrackPlayer events are converted into Store actions.
- *
- * V5 Migration: Event listeners are registered directly on TrackPlayer.
- * State values are now string enums (e.g., 'playing', 'paused', 'idle').
+ * PlaybackController - The authoritative bridge between native RNTP and Zustand store.
+ * Implemented as a singleton to ensure event listeners are registered exactly once.
  */
-export const PlaybackController = {
-  initialize: () => {
-    console.log("[Player] PlaybackController initializing...");
+export class PlaybackController {
+  private static isInitialized = false;
+  private static pollInterval: NodeJS.Timeout | null = null;
+  private static lastState: PlaybackState | null = null;
 
-    // Diagnostic Helper - V5 uses synchronous getters via JSI
-    const logNativeState = (context: string) => {
-      try {
-        const state = TrackPlayer.getPlaybackState();
-        const activeTrack = TrackPlayer.getActiveMediaItem();
-        const queue = TrackPlayer.getQueue();
-        const progress = TrackPlayer.getProgress();
+  static initialize() {
+    if (this.isInitialized) {
+      console.log("[Player] PlaybackController already initialized, skipping.");
+      return;
+    }
 
-        console.log(`[Playback Diagnostics] @ ${context}:`, {
-          state,
-          activeTrack: activeTrack?.title ?? "None",
-          queueSize: queue.length,
-          position: progress.position,
-          duration: progress.duration,
-        });
-      } catch (e) {
-        console.warn("[Player] Diagnostic read failed:", e);
-      }
-    };
+    console.log("[Player] PlaybackController initializing (Singleton)...");
 
-    // Playback state changed
+    // 1. Playback State Changed
     TrackPlayer.addEventListener(Event.PlaybackStateChanged, (data) => {
       const store = usePlayerStore.getState();
-      const newState = typeof data === 'string' ? data : data.state;
+      const newState = data.state;
       
-      console.log("[Player] Playback state event:", newState, "(Raw:", data, ")");
-      logNativeState("StateChange");
+      if (this.lastState === newState) return; // Deduplicate
+      this.lastState = newState;
+
+      console.log("[Player] Playback state:", newState);
 
       switch (newState) {
-        case "playing":
-          store.setStatus("playing");
-          startManualPolling();
+        case PlaybackState.Ready:
+          if (TrackPlayer.isPlaying()) {
+            store.setStatus("playing");
+            this.startManualPolling();
+          } else {
+            store.setStatus("paused");
+            this.stopManualPolling();
+          }
           break;
-        case "paused":
-          store.setStatus("paused");
-          stopManualPolling();
-          break;
-        case "buffering":
-        case "loading":
+        case PlaybackState.Buffering:
           store.setStatus("buffering");
           break;
-        case "idle":
-        case "stopped":
-          store.setStatus("idle");
-          stopManualPolling();
-          // Reset progress on stop
+        case PlaybackState.Ended:
+          if (store.isTransitioning) {
+            console.log("[Player] Ignoring Ended event during active transition.");
+            return;
+          }
+          console.log("[Player] Track ended naturally.");
           store.updateProgress(0, store.duration, 0);
+          this.stopManualPolling();
+          
+          // Use store.next() to handle the transition safely
+          store.next();
           break;
-        case "error":
+        case PlaybackState.Idle:
+          store.setStatus("idle");
+          this.stopManualPolling();
+          break;
+        case PlaybackState.Error:
           store.setStatus("error");
-          stopManualPolling();
+          this.stopManualPolling();
           break;
       }
     });
 
-    // Is playing changed (More reliable in some v5 scenarios)
+    // 2. Is Playing Changed (Atomic toggle sync)
     TrackPlayer.addEventListener(Event.IsPlayingChanged, (data) => {
       const store = usePlayerStore.getState();
-      const playing = typeof data === 'boolean' ? data : data.playing;
-      console.log("[Player] IsPlaying event:", playing);
+      const playing = data.playing;
       
-      if (playing) {
-        store.setStatus("playing");
-        startManualPolling();
-      } else {
-        // Only set to paused if we were actually playing or buffering
-        // This avoids overriding 'loading' state when a track is first initialized
-        if (store.status === "playing" || store.status === "buffering") {
-          store.setStatus("paused");
-        }
-        stopManualPolling();
-      }
-    });
-
-    // Progress updated (Native event)
-    TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, (data) => {
-      const store = usePlayerStore.getState();
-      store.updateProgress(
-        data.position * 1000,
-        data.duration * 1000,
-        data.buffered * 1000,
-      );
-    });
-
-    // Manual Polling Mechanism for v5
-    let pollInterval: NodeJS.Timeout | null = null;
-
-    const startManualPolling = () => {
-      if (pollInterval) return;
-      console.log("[Player] Starting manual progress polling...");
-      pollInterval = setInterval(() => {
-        try {
-          const progress = TrackPlayer.getProgress();
-          const store = usePlayerStore.getState();
-          store.updateProgress(
-            progress.position * 1000,
-            progress.duration * 1000,
-            progress.buffered * 1000
-          );
-        } catch (e) {
-          // Ignore polling errors
-        }
-      }, 500);
-    };
-
-    const stopManualPolling = () => {
-      if (pollInterval) {
-        console.log("[Player] Stopping manual progress polling...");
-        clearInterval(pollInterval);
-        pollInterval = null;
-      }
-    };
-
-    // Media item transition (Queue handling)
-    TrackPlayer.addEventListener(Event.MediaItemTransition, (data) => {
-      console.log("[Player] Media item transition:", data);
-      const store = usePlayerStore.getState();
-      
-      if (!data.item) {
-        // Queue ended or item is null
-        if (store.repeatMode === "queue") {
-          store.next();
+      // Only update if there is a divergence to prevent event storms
+      if (store.isPlaying !== playing) {
+        console.log("[Player] IsPlaying sync:", playing);
+        store.setStatus(playing ? "playing" : "paused");
+        
+        if (playing) {
+          this.startManualPolling();
         } else {
-          store.setStatus("idle");
+          this.stopManualPolling();
         }
       }
     });
 
-    // Remote control events
+    // 3. Media Item Transition (Sync currentIndex)
+    TrackPlayer.addEventListener(Event.MediaItemTransition, (data) => {
+      const store = usePlayerStore.getState();
+      if (!data.item) return;
+
+      const newIndex = store.queue.findIndex((t: PlayerTrack) => t.id === data.item?.mediaId);
+      if (newIndex !== -1 && newIndex !== store.currentIndex) {
+        console.log(`[Player] Native transition sync: ${newIndex}`);
+        
+        const nextTrack = store.queue[newIndex];
+        const preloaded = store.preloadedTrack;
+
+        usePlayerStore.setState({ 
+          currentIndex: newIndex, 
+          currentTrack: (preloaded && preloaded.id === nextTrack.id) ? preloaded : nextTrack,
+          preloadedTrack: null
+        });
+
+        store.preloadNext();
+      }
+    });
+
+    // 4. Remote Control Events (Deduplicated - No logic in service.js)
     TrackPlayer.addEventListener(Event.RemotePlay, () => {
-      console.log("[Player] RemotePlay received");
+      console.log("[Player] Remote Play");
       TrackPlayer.play();
     });
 
     TrackPlayer.addEventListener(Event.RemotePause, () => {
-      console.log("[Player] RemotePause received");
+      console.log("[Player] Remote Pause");
       TrackPlayer.pause();
     });
 
     TrackPlayer.addEventListener(Event.RemoteNext, () => {
-      console.log("[Player] RemoteNext received");
+      console.log("[Player] Remote Next");
       usePlayerStore.getState().next();
     });
 
     TrackPlayer.addEventListener(Event.RemotePrevious, () => {
-      console.log("[Player] RemotePrevious received");
+      console.log("[Player] Remote Previous");
       usePlayerStore.getState().previous();
     });
 
+    TrackPlayer.addEventListener(Event.RemoteRepeat, () => {
+      console.log("[Player] Remote Repeat Toggle (2-State)");
+      const store = usePlayerStore.getState();
+      const currentMode = store.repeatMode;
+      const nextMode = currentMode === "off" ? "track" : "off";
+      store.setRepeatMode(nextMode);
+    });
+
+    TrackPlayer.addEventListener(Event.RemoteLike, () => {
+      console.log("[Player] Remote Like (Placeholder)");
+      // TODO: Implement like logic in store
+    });
+
+    TrackPlayer.addEventListener(Event.RemoteDislike, () => {
+      console.log("[Player] Remote Dislike (Placeholder)");
+      // TODO: Implement dislike logic in store
+    });
+
     TrackPlayer.addEventListener(Event.RemoteSeek, (event) => {
-      console.log("[Player] RemoteSeek received", event);
+
+
       TrackPlayer.seekTo(event.position);
     });
 
-    // Initial state log
-    logNativeState("InitialLoad");
-  },
-};
+    TrackPlayer.addEventListener(Event.RemoteSkipForward, (event) => {
+      const pos = TrackPlayer.getProgress().position;
+      TrackPlayer.seekTo(pos + event.interval);
+    });
+
+    TrackPlayer.addEventListener(Event.RemoteSkipBackward, (event) => {
+      const pos = TrackPlayer.getProgress().position;
+      TrackPlayer.seekTo(Math.max(0, pos - event.interval));
+    });
+
+    this.isInitialized = true;
+    console.log("[Player] PlaybackController initialized successfully.");
+  }
+
+  private static startManualPolling() {
+    if (this.pollInterval) return;
+    
+    this.pollInterval = setInterval(async () => {
+      try {
+        const store = usePlayerStore.getState();
+        const progress = TrackPlayer.getProgress();
+        
+        const posMs = progress.position * 1000;
+        const durMs = progress.duration * 1000;
+        const bufMs = progress.buffered * 1000;
+        
+        // Use shallow checks to reduce store updates
+        if (Math.abs(store.position - posMs) > 300 || Math.abs(store.duration - durMs) > 1000) {
+          store.updateProgress(posMs, durMs, bufMs);
+        }
+
+        // Sync Volume with threshold
+        const nativeVolume = await TrackPlayer.getVolume();
+        if (Math.abs(store.volume - nativeVolume) > 0.05) {
+           usePlayerStore.setState({ volume: nativeVolume });
+        }
+      } catch (e) {
+        // Silent catch for JSI read failures during transitions
+      }
+    }, 500);
+  }
+
+  private static stopManualPolling() {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
+  }
+
+  static logNativeState(context: string) {
+    try {
+      const state = TrackPlayer.getPlaybackState();
+      const activeTrack = TrackPlayer.getActiveMediaItem();
+      const progress = TrackPlayer.getProgress();
+
+      console.log(`[Playback Diagnostics] @ ${context}:`, {
+        state,
+        track: activeTrack?.title ?? "None",
+        pos: progress.position.toFixed(1),
+        dur: progress.duration.toFixed(1),
+      });
+    } catch (e) {}
+  }
+}
+

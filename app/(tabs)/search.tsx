@@ -584,7 +584,7 @@ export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const { goNowPlaying, goArtist, goArtistByName, goAlbum } =
     useMusicNavigation("search");
-  const { play } = useMusic();
+  const { setQueue } = useMusic();
 
   const { query: initialQuery } = useLocalSearchParams<{ query?: string }>();
   const { query, setQuery, results, isLoading, error } = useSearch(
@@ -639,27 +639,17 @@ export default function SearchScreen() {
   const topP = useP();
   const playBtnP = useP();
 
-  const createPlayerTrack = (track: MusicTrack): PlayerTrack => {
+  const createPlayerTrack = (track: any): PlayerTrack => {
     const url =
       track.url ??
       TRACK_URLS[track.id] ??
       "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
 
-    if (!track.title || !track.artist || !track.art || !track.url) {
-      console.warn("[Player] Search track contains incomplete metadata:", {
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        art: track.art,
-        url: track.url,
-      });
-    }
-
     return {
       id: track.id,
       title: track.title ?? "",
       artist: track.artist ?? "",
-      art: track.art ?? "",
+      art: track.art || track.thumbnail || "",
       url,
       duration: 240,
       dominantColors: [C.primary, C.primaryMid],
@@ -669,26 +659,29 @@ export default function SearchScreen() {
   const handlePlay = useCallback(
     async (track: MusicTrack) => {
       if (!track?.id) return;
+      
+      // OPTIMISTIC NAVIGATION: Go to Now Playing instantly
+      goNowPlaying(track.id);
+      
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
-      const playerTrack = createPlayerTrack(track);
+      const trackList = results.length > 0 ? results : [track];
+      const playerTracks = trackList.map((t) => createPlayerTrack(t));
+      const startIndex = playerTracks.findIndex((t) => t.id === track.id);
+
       console.log(
-        "[Player] Search selected track:",
-        playerTrack.id,
-        playerTrack.title,
-        playerTrack.artist,
-        playerTrack.art,
-        playerTrack.url,
+        "[Player] Search selected track from list (Instant Nav):",
+        track.id,
+        "Index:",
+        startIndex
       );
 
-      try {
-        await play(playerTrack);
-      } catch (error) {
-        console.error("[Player] Search play failed:", error);
-      }
-      goNowPlaying(track.id);
+      // Start queue resolution in background
+      setQueue(playerTracks, startIndex !== -1 ? startIndex : 0).catch(err => {
+        console.error("[Player] Background setQueue failed:", err);
+      });
     },
-    [goNowPlaying, play],
+    [goNowPlaying, setQueue, results],
   );
 
   const handleDeleteRecent = useCallback((id: string) => {
@@ -1227,7 +1220,7 @@ export default function SearchScreen() {
                     </Mat>
                     <View style={[s.section, { marginTop: -8 }]}>
                       {results.map((song: MusicTrack, idx: number) => (
-                        <View key={song.id} style={{ marginBottom: 10 }}>
+                        <View key={`${song.id}-${idx}`} style={{ marginBottom: 10 }}>
                           <SongRow
                             song={song}
                             onPlay={handlePlay}

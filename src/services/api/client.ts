@@ -7,11 +7,11 @@ import Constants from 'expo-constants';
  * For Android Emulator: 10.0.2.2
  * For iOS Simulator: 127.0.0.1
  */
-const BASE_URL = 'http://192.168.1.74:8000'; // Change this to your local machine IP
+const BASE_URL = 'http://192.168.1.73:8000'; // Change this to your local machine IP
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
-  timeout: 10000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },

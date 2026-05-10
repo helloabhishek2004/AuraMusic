@@ -34,12 +34,21 @@ export class PlaybackService {
           PlayerCommand.Previous,
           PlayerCommand.Stop,
           PlayerCommand.Seek,
+          PlayerCommand.SkipForward,
+          PlayerCommand.SkipBackward,
+          PlayerCommand.Repeat,
+          PlayerCommand.Like,
+          PlayerCommand.Dislike,
         ],
+
+        forwardInterval: 30,
+        backwardInterval: 15,
       });
 
       this.isSetup = true;
       console.log("[Player] TrackPlayer initialized successfully.");
     } catch (error) {
+
       if (
         error instanceof Error &&
         error.message.includes("already")
@@ -53,35 +62,30 @@ export class PlaybackService {
     }
   }
 
+  /**
+   * Loads a track and starts playback.
+   * videoId is resolved to a real stream URL in the store before calling this.
+   */
   static loadTrack(track: PlayerTrack): void {
     this.setupPlayer();
     if (Platform.OS === "web") return;
 
     if (!track.url) {
-      const message = `[Player] Track URL is required for playback. Track metadata: ${JSON.stringify({
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        art: track.art,
-      })}`;
-      console.error(message);
-      throw new Error(message);
+      console.error("[Player] Track URL is missing during loadTrack.");
+      return;
     }
 
-    console.log("[Player] Loading track:", {
+    console.log("[Player] Loading real stream:", {
       id: track.id,
       title: track.title,
       artist: track.artist,
-      url: track.url,
-      art: track.art,
+      isResolved: track.url.includes("googlevideo.com") || track.url.includes("manifest"),
     });
 
     try {
       // clear() replaces reset() in v5 — clears queue
-      console.log("[Player] Clearing queue...");
       TrackPlayer.clear();
 
-      console.log("[Player] Setting media item...");
       // MediaItem in v5 uses mediaId (optional) and artworkUrl (not artwork)
       TrackPlayer.setMediaItem({
         mediaId: track.id,
@@ -91,9 +95,7 @@ export class PlaybackService {
         artworkUrl: track.art,
       });
 
-      console.log("[Player] Starting playback...");
       TrackPlayer.play();
-      console.log("[Player] Playback command sent.");
     } catch (error) {
       console.error("[Player] Failed to load track:", error);
       throw error;
@@ -129,5 +131,12 @@ export class PlaybackService {
     if (Platform.OS === "web") return;
     console.log("[Player] PlaybackService.setVolume(", volume, ")");
     TrackPlayer.setVolume(volume);
+  }
+
+  static setRepeatMode(mode: string): void {
+    if (Platform.OS === "web") return;
+    console.log("[Player] PlaybackService.setRepeatMode(", mode, ")");
+    // v5 setRepeatMode takes 'off', 'track', or 'queue'
+    TrackPlayer.setRepeatMode(mode as any);
   }
 }

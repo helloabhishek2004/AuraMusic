@@ -26,7 +26,9 @@ function GlobalPlayer() {
   const segments = useSegments();
   
   const isNowPlaying = pathname === '/now_playing';
-  if (isNowPlaying) return null;
+  const isLyrics = pathname === '/lyrics';
+  
+  if (isNowPlaying || isLyrics) return null;
 
   // If we are in a tab, we need to lift the mini player above the tab bar
   const isTab = segments[0] === '(tabs)';
@@ -34,6 +36,7 @@ function GlobalPlayer() {
   
   return <MiniPlayer offset={offset} />;
 }
+
 
 export default function RootLayout() {
   useEffect(() => {

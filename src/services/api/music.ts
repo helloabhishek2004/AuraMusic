@@ -26,10 +26,42 @@ export const musicService = {
         artist: item.artist,
         art: item.thumbnail,
         url: item.url,
-        time: "--:--", // YTMusic search for songs doesn't always provide duration in basic search result
+        time: item.duration || "--:--",
       }));
     } catch (error) {
       console.error("Error searching songs:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Resolves a videoId to a playable stream URL.
+   */
+  resolveStream: async (videoId: string): Promise<{ streamUrl: string; duration?: number }> => {
+    try {
+      const response = await apiClient.get(`/resolve/${videoId}`);
+      return response.data;
+    } catch (error) {
+      console.error("Error resolving stream:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Resolves lyrics for a track.
+   */
+  resolveLyrics: async (track: { id: string; title: string; artist: string; duration?: number }) => {
+    try {
+      const response = await apiClient.get(`/lyrics/${track.id}`, {
+        params: {
+          title: track.title,
+          artist: track.artist,
+          duration: track.duration,
+        },
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error resolving lyrics:", error);
       throw error;
     }
   },

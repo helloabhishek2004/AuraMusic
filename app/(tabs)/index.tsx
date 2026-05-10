@@ -837,7 +837,7 @@ export default function HomeScreen() {
             contentContainerStyle={s.hzScrollContent}
           >
             {albums.map((album) => (
-              <View key={album.id} style={{ marginRight: 16 }}>
+              <View key={album.id} style={{ width: 280, marginRight: 20 }}>
                 <BentoCard
                   image={album.image}
                   title={album.title}
@@ -848,6 +848,7 @@ export default function HomeScreen() {
             ))}
           </ScrollView>
         </MaterialEntrance>
+
       </ScrollView>
     </View>
   );

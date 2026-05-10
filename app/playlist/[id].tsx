@@ -17,6 +17,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { openArtistByName, openNowPlaying } from '@/src/navigation/music-navigation';
+import { useMusic } from '@/src/context/MusicContext';
+import { PlayerTrack } from '@/src/features/player/types/player';
 
 const { width, height } = Dimensions.get('window');
 
@@ -146,7 +148,7 @@ const usePressScale = (target = 0.94) => {
 };
 
 // ── Track Row ─────────────────────────────────────────────────────────────────
-const TrackRow = ({ item, index, router }: any) => {
+const TrackRow = ({ item, index, router, onPlay }: any) => {
   const press = usePressScale();
   return (
     <Materialise delay={220 + index * 45}>
@@ -156,10 +158,7 @@ const TrackRow = ({ item, index, router }: any) => {
           onPressIn={press.onIn}
           onPressOut={press.onOut}
           activeOpacity={1}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            openNowPlaying(router, item.id, 'playlist');
-          }}
+          onPress={() => onPlay(item)}
           onLongPress={() => openArtistByName(router, item.artist, { origin: 'playlist-track' })}
           accessibilityRole="button"
           accessibilityLabel={`Play ${item.title} by ${item.artist}`}
@@ -217,6 +216,7 @@ export default function PlaylistScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id }  = useLocalSearchParams();
+  const { setQueue, toggleShuffle, isShuffle } = useMusic();
 
   const [downloadStatus, setDownloadStatus] = useState<'none' | 'checking' | 'updated'>('none');
   const downloadSpin  = useRef(new Animated.Value(0)).current;
@@ -267,6 +267,45 @@ export default function PlaylistScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }, 2500);
     }
+  };
+
+  const handlePlayAll = async (shuffle = false) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    
+    const playerTracks: PlayerTrack[] = PLAYLIST_DATA.tracks.map(t => ({
+      id: t.id,
+      title: t.title,
+      artist: t.artist,
+      art: t.art,
+      url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+      duration: 240,
+      dominantColors: [COLORS.primary, COLORS.primaryDeep],
+    }));
+
+    if (shuffle && !isShuffle) {
+      await toggleShuffle();
+    }
+
+    await setQueue(playerTracks, 0);
+    openNowPlaying(router, playerTracks[0].id, 'playlist');
+  };
+
+  const handlePlayTrack = async (track: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    const playerTracks: PlayerTrack[] = PLAYLIST_DATA.tracks.map(t => ({
+      id: t.id,
+      title: t.title,
+      artist: t.artist,
+      art: t.art,
+      url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+      duration: 240,
+      dominantColors: [COLORS.primary, COLORS.primaryDeep],
+    }));
+
+    const idx = playerTracks.findIndex(t => t.id === track.id);
+    await setQueue(playerTracks, idx !== -1 ? idx : 0);
+    openNowPlaying(router, track.id, 'playlist');
   };
 
   return (
@@ -431,7 +470,7 @@ export default function PlaylistScreen() {
             {/* Shuffle — full liquid glass gradient pill */}
             <Animated.View style={[styles.shuffleBtnOuter, { transform: [{ scale: shufflePress.scale }] }]}>
               <TouchableOpacity
-                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)}
+                onPress={() => handlePlayAll(true)}
                 onPressIn={shufflePress.onIn} onPressOut={shufflePress.onOut}
                 activeOpacity={1}
                 style={{ flex: 1 }}
@@ -476,10 +515,7 @@ export default function PlaylistScreen() {
                 <TouchableOpacity
                   activeOpacity={1}
                   onPressIn={playPress.onIn} onPressOut={playPress.onOut}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                    router.push({ pathname: '/now_playing', params: { trackId: PLAYLIST_DATA.tracks[0].id } });
-                  }}
+                  onPress={() => handlePlayAll(false)}
                   style={styles.playBtnShell}
                 >
                   <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
@@ -504,7 +540,7 @@ export default function PlaylistScreen() {
         {/* ── TRACK LIST ───────────────────────────────────────────────────── */}
         <View style={styles.trackListSection}>
           {PLAYLIST_DATA.tracks.map((item, index) => (
-            <TrackRow key={item.id} item={item} index={index} router={router} />
+            <TrackRow key={item.id} item={item} index={index} router={router} onPlay={handlePlayTrack} />
           ))}
         </View>
 

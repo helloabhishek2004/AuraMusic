@@ -10,6 +10,7 @@ import { PressScale } from '@/src/components/ui/press-scale';
 import { glass, palette, radius } from '@/src/design/tokens';
 import { minimumHitSlop, useResponsiveMetrics } from '@/src/hooks/use-responsive-metrics';
 import { useMusicControls, useMusicProgress, useNowPlayingTrack } from '@/src/context/MusicContext';
+import { usePlayerStore } from '../features/player/store/player.store';
 import { clamp } from '@/src/utils/color';
 import { impact } from '@/src/utils/haptics';
 import { openNowPlaying } from '@/src/navigation/music-navigation';
@@ -23,6 +24,7 @@ interface MiniPlayerProps {
 function MiniPlayer({ offset = 0 }: MiniPlayerProps) {
   const track = useNowPlayingTrack();
   const { isPlaying, play, pause, next } = useMusicControls();
+  const status = usePlayerStore(s => s.status);
   const { progress } = useMusicProgress();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -115,6 +117,11 @@ function MiniPlayer({ offset = 0 }: MiniPlayerProps) {
             transition={180}
             accessibilityLabel={`${track.title} artwork`}
           />
+          {status === 'error' && (
+            <View style={[StyleSheet.absoluteFill, styles.errorOverlay]}>
+              <Ionicons name="alert-circle" size={20} color="#FFF" />
+            </View>
+          )}
         </View>
 
         <View style={styles.meta}>
@@ -213,6 +220,11 @@ const styles = StyleSheet.create({
   art: {
     width: '100%',
     height: '100%',
+  },
+  errorOverlay: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   meta: {
     flex: 1,

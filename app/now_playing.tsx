@@ -1,13 +1,14 @@
-import { useMusic } from "@/src/context/MusicContext";
+import { useMusic, useMusicActions } from "@/src/context/MusicContext";
 import { getTrackById } from "@/src/data/music-catalog";
 import { openArtistByName } from "@/src/navigation/music-navigation";
+import { LyricsSheet } from "@/src/features/lyrics/components/LyricsSheet";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, memo } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -33,6 +34,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePlayerStore } from "@/src/features/player/store/player.store";
 
 const { width, height } = Dimensions.get("window");
 
@@ -45,13 +47,6 @@ const formatTime = (sec: number) => {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-};
-
-const TRACK_URLS: Record<string, string> = {
-  nebula: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-  neon: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
-  solar: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
-  nightcall: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
 };
 
 // ── Liquid Glass Card shell ───────────────────────────────────────────────────
@@ -107,26 +102,23 @@ export default function NowPlayingScreen() {
   const insets = useSafeAreaInsets();
 
   const {
-    currentTrack,
-    isPlaying,
-    isBuffering,
-    isLoading,
-    progress: globalProgress,
-    elapsedSec: globalElapsed,
-    durationSec,
     play,
     pause,
     next,
     prev,
-    seek,
     toggleRepeat,
     toggleShuffle,
-    repeatMode,
-    isShuffle,
-    setVolume,
-  } = useMusic();
+  } = useMusicActions();
 
-  const [isLiked, setIsLiked] = useState(true);
+  // Low-frequency subscriptions (Metadata and Status)
+  const currentTrack = usePlayerStore(s => s.currentTrack);
+  const isPlaying = usePlayerStore(s => s.isPlaying);
+  const isBuffering = usePlayerStore(s => s.isBuffering);
+  const status = usePlayerStore(s => s.status);
+  const repeatMode = usePlayerStore(s => s.repeatMode === "track" ? 1 : 0);
+  const isShuffle = usePlayerStore(s => s.isShuffle);
+
+  const [isLiked, setIsLiked] = useState(false);
   const [isInfoVisible, setIsInfoVisible] = useState(false);
   const [isImageLoading, setIsImageLoading] = useState(true);
 
@@ -135,49 +127,21 @@ export default function NowPlayingScreen() {
     setIsImageLoading(true);
   }, [currentTrack?.id]);
 
-  useEffect(() => {
-    const trackId = params.trackId;
-    if (!trackId || typeof trackId !== "string") return;
-    if (currentTrack?.id === trackId) return;
-
-    const catalogTrack = getTrackById(trackId);
-    const playerTrack = {
-      id: catalogTrack.id,
-      title: catalogTrack.title,
-      artist: catalogTrack.artist,
-      art: catalogTrack.art,
-      url:
-        TRACK_URLS[catalogTrack.id] ??
-        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-      duration: catalogTrack.durationSec ?? 240,
-      dominantColors: catalogTrack.dominantColors,
-    };
-
-    console.log("[Player] NowPlaying route load:", playerTrack.id);
-    play(playerTrack).catch((error) => {
-      console.error("[Player] NowPlaying failed to load track:", error);
-    });
-  }, [currentTrack?.id, params.trackId, play]);
-
   // ── Reanimated Shared Values ────────────────────────────────────────────────
-  const scrubberX = useSharedValue(0);
-  const scrubberWidth = useSharedValue(0);
-  const isScrubbing = useSharedValue(false);
-
-  const volumeX = useSharedValue(0.65);
-  const volumeWidth = useSharedValue(0);
-
   const artScale = useSharedValue(0.9);
+  const artTranslateX = useSharedValue(0);
+  const artOpacity = useSharedValue(1);
+
   const pageOpacity = useSharedValue(0);
   const pageScale = useSharedValue(0.95);
-  const thumbScale = useSharedValue(1);
 
-  // Sync reanimated scrubber with global progress when not scrubbing
+  // Reset art visually when track changes
   useEffect(() => {
-    if (!isScrubbing.value && scrubberWidth.value > 0) {
-      scrubberX.value = globalProgress * scrubberWidth.value;
-    }
-  }, [globalProgress, scrubberWidth.value]);
+    artTranslateX.value = 0;
+    artOpacity.value = 0;
+    artOpacity.value = withTiming(1, { duration: 400 });
+    artScale.value = withSpring(1.05, SPRING_CONFIG);
+  }, [currentTrack?.id]);
 
   useEffect(() => {
     pageOpacity.value = withTiming(1, { duration: 400 });
@@ -189,81 +153,41 @@ export default function NowPlayingScreen() {
   }, [isPlaying]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  const scrubberGesture = Gesture.Pan()
-    .onStart((event) => {
-      isScrubbing.value = true;
-      thumbScale.value = withSpring(1.4, SPRING_CONFIG);
-      scrubberX.value = Math.max(0, Math.min(event.x, scrubberWidth.value));
-      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
-    })
+  const artGesture = Gesture.Pan()
     .onUpdate((event) => {
-      scrubberX.value = Math.max(0, Math.min(event.x, scrubberWidth.value));
-      runOnJS(Haptics.selectionAsync)();
+      artTranslateX.value = event.translationX;
+      artScale.value = 1.05 - Math.abs(event.translationX / width) * 0.2;
+      artOpacity.value = 1 - Math.abs(event.translationX / width) * 0.5;
     })
-    .onEnd(() => {
-      isScrubbing.value = false;
-      thumbScale.value = withSpring(1, SPRING_CONFIG);
-      const newProgress = scrubberX.value / scrubberWidth.value;
-      runOnJS(seek)(newProgress);
-      runOnJS(Haptics.notificationAsync)(
-        Haptics.NotificationFeedbackType.Success,
-      );
+    .onEnd((event) => {
+      const threshold = width * 0.25;
+      if (event.translationX < -threshold) {
+        artTranslateX.value = withTiming(-width, { duration: 200 }, () => {
+          runOnJS(next)();
+        });
+      } else if (event.translationX > threshold) {
+        artTranslateX.value = withTiming(width, { duration: 200 }, () => {
+          runOnJS(prev)();
+        });
+      } else {
+        artTranslateX.value = withSpring(0, SPRING_CONFIG);
+        artScale.value = withSpring(isPlaying ? 1.05 : 0.94, SPRING_CONFIG);
+        artOpacity.value = withSpring(1, SPRING_CONFIG);
+      }
     });
-
-  const volumeGesture = Gesture.Pan()
-    .onStart((event) => {
-      const vol = Math.max(0, Math.min(event.x / volumeWidth.value, 1));
-      volumeX.value = vol;
-      runOnJS(setVolume)(vol);
-      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
-    })
-    .onUpdate((event) => {
-      const vol = Math.max(0, Math.min(event.x / volumeWidth.value, 1));
-      volumeX.value = vol;
-      runOnJS(setVolume)(vol);
-      runOnJS(Haptics.selectionAsync)();
-    });
-
-  // ── Animated Styles ────────────────────────────────────────────────────────
-  const scrubberFillStyle = useAnimatedStyle(() => ({
-    width: scrubberX.value,
-  }));
-
-  const scrubberThumbStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: scrubberX.value - 10 },
-      { scale: thumbScale.value },
-    ],
-  }));
-
-  const volumeFillStyle = useAnimatedStyle(() => ({
-    width: volumeX.value * volumeWidth.value,
-  }));
-
-  const volumeThumbStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: volumeX.value * volumeWidth.value - 7 }],
-  }));
 
   const artStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: artScale.value }],
+    transform: [
+      { scale: artScale.value },
+      { translateX: artTranslateX.value }
+    ],
+    opacity: artOpacity.value,
   }));
 
   const containerStyle = useAnimatedStyle(() => ({
     opacity: pageOpacity.value,
     transform: [{ scale: pageScale.value }],
   }));
-
-  const displayElapsed = useDerivedValue(() => {
-    if (isScrubbing.value) {
-      return Math.round((scrubberX.value / scrubberWidth.value) * durationSec);
-    }
-    return globalElapsed;
-  });
-
-  const elapsedText = useDerivedValue(() => formatTime(displayElapsed.value));
-  const remainingText = useDerivedValue(
-    () => `-${formatTime(Math.max(0, durationSec - displayElapsed.value))}`,
-  );
 
   if (!currentTrack) {
     return (
@@ -279,7 +203,7 @@ export default function NowPlayingScreen() {
       >
         <ActivityIndicator size="large" color="#BF5AF2" />
         <Text style={{ color: "rgba(255,255,255,0.6)", marginTop: 16 }}>
-          Loading track...
+          Ready to play
         </Text>
       </View>
     );
@@ -345,23 +269,35 @@ export default function NowPlayingScreen() {
           </View>
 
           {/* Album Art */}
-          <View style={styles.albumArtSection}>
-            <Animated.View style={[styles.artOuterGlow, { shadowColor: c0 }]} />
-            <Animated.View style={[styles.artGlassContainer, artStyle]}>
-              <Image
-                source={{ uri: currentTrack.art }}
-                style={styles.albumImage}
-                contentFit="cover"
-                transition={300}
-                onLoad={() => setIsImageLoading(false)}
-              />
-              {(isBuffering || isLoading || isImageLoading) && (
-                <View style={[StyleSheet.absoluteFill, styles.loadingOverlay]}>
-                  <ActivityIndicator size="large" color="#FFF" />
-                </View>
-              )}
-            </Animated.View>
-          </View>
+          <GestureDetector gesture={artGesture}>
+            <View style={styles.albumArtSection}>
+              <Animated.View style={[styles.artOuterGlow, { shadowColor: c0 }]} />
+              <Animated.View style={[styles.artGlassContainer, artStyle]}>
+                <Image
+                  source={{ uri: currentTrack.art }}
+                  style={styles.albumImage}
+                  contentFit="cover"
+                  transition={300}
+                  onLoad={() => setIsImageLoading(false)}
+                />
+                
+                {/* Error Overlay */}
+                {status === 'error' && (
+                  <View style={[StyleSheet.absoluteFill, styles.errorOverlay]}>
+                    <Ionicons name="alert-circle-outline" size={48} color="rgba(255,255,255,0.8)" />
+                    <Text style={styles.errorText}>sorry we couldn't fetch the music</Text>
+                  </View>
+                )}
+
+                {/* Loading Overlay */}
+                {isBuffering && (
+                   <View style={[StyleSheet.absoluteFill, styles.loadingOverlay]}>
+                     <ActivityIndicator size="large" color={c0} />
+                   </View>
+                )}
+              </Animated.View>
+            </View>
+          </GestureDetector>
 
           {/* Song Info */}
           <View style={styles.songInfoSection}>
@@ -392,40 +328,8 @@ export default function NowPlayingScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Scrubber */}
-          <View style={styles.scrubberSection}>
-            <GestureDetector gesture={scrubberGesture}>
-              <Animated.View style={styles.scrubberContainer}>
-                <GlassCard
-                  style={styles.scrubberCard}
-                  borderRadius={8}
-                  blurIntensity={20}
-                >
-                  <View
-                    style={styles.scrubberOuter}
-                    onLayout={(e) => {
-                      scrubberWidth.value = e.nativeEvent.layout.width;
-                    }}
-                  >
-                    <Animated.View
-                      style={[
-                        styles.scrubberInner,
-                        scrubberFillStyle,
-                        { backgroundColor: c0 },
-                      ]}
-                    />
-                    <Animated.View
-                      style={[styles.scrubberThumb, scrubberThumbStyle]}
-                    />
-                  </View>
-                </GlassCard>
-              </Animated.View>
-            </GestureDetector>
-            <View style={styles.timeLabels}>
-              <AnimatedTimeLabel text={elapsedText} />
-              <AnimatedTimeLabel text={remainingText} />
-            </View>
-          </View>
+          {/* Optimized Scrubber Section */}
+          <PlaybackScrubber accentColor={c0} />
 
           {/* Playback Controls */}
           <View style={styles.playbackControls}>
@@ -474,62 +378,29 @@ export default function NowPlayingScreen() {
                 color={isShuffle ? c0 : "rgba(255,255,255,0.4)"}
               />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push("/lyrics")}>
+            <TouchableOpacity 
+              onPress={() => {
+                router.push('/lyrics');
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+            >
               <Ionicons
-                name="chatbubble-ellipses-outline"
+                name="musical-notes"
                 size={22}
                 color="rgba(255,255,255,0.4)"
               />
             </TouchableOpacity>
             <TouchableOpacity onPress={toggleRepeat}>
               <Ionicons
-                name={repeatMode === 1 ? "repeat-outline" : "repeat"}
+                name={repeatMode === 1 ? "repeat" : "repeat-outline"}
                 size={24}
-                color={repeatMode !== 0 ? c0 : "rgba(255,255,255,0.4)"}
+                color={repeatMode === 1 ? c0 : "rgba(255,255,255,0.4)"}
               />
             </TouchableOpacity>
           </View>
 
-          {/* Volume */}
-          <View style={styles.volumeSection}>
-            <Ionicons
-              name="volume-low"
-              size={18}
-              color="rgba(255,255,255,0.2)"
-            />
-            <GestureDetector gesture={volumeGesture}>
-              <Animated.View style={styles.volumeTrackContainer}>
-                <GlassCard
-                  style={styles.volumeCard}
-                  borderRadius={4}
-                  blurIntensity={20}
-                >
-                  <View
-                    style={styles.volumeTrack}
-                    onLayout={(e) => {
-                      volumeWidth.value = e.nativeEvent.layout.width;
-                    }}
-                  >
-                    <Animated.View
-                      style={[
-                        styles.volumeFill,
-                        volumeFillStyle,
-                        { backgroundColor: c0 },
-                      ]}
-                    />
-                    <Animated.View
-                      style={[styles.volumeThumb, volumeThumbStyle]}
-                    />
-                  </View>
-                </GlassCard>
-              </Animated.View>
-            </GestureDetector>
-            <Ionicons
-              name="volume-high"
-              size={18}
-              color="rgba(255,255,255,0.2)"
-            />
-          </View>
+          {/* Optimized Volume Section */}
+          <VolumeControl accentColor={c0} />
         </View>
 
         {/* Info Modal */}
@@ -575,7 +446,142 @@ export default function NowPlayingScreen() {
   );
 }
 
-const AnimatedTimeLabel = ({ text }: { text: any }) => {
+// ── Optimized Sub-Components ──────────────────────────────────────────────────
+
+const PlaybackScrubber = memo(({ accentColor }: { accentColor: string }) => {
+  const seek = usePlayerStore(s => s.seek);
+  const progress = usePlayerStore(s => s.duration > 0 ? s.position / s.duration : 0);
+  const elapsed = usePlayerStore(s => s.position / 1000);
+  const durationSec = usePlayerStore(s => s.duration / 1000);
+
+  const scrubberX = useSharedValue(0);
+  const scrubberWidth = useSharedValue(0);
+  const isScrubbing = useSharedValue(false);
+  const thumbScale = useSharedValue(1);
+
+  useEffect(() => {
+    if (!isScrubbing.value && scrubberWidth.value > 0) {
+      scrubberX.value = withTiming(progress * scrubberWidth.value, { duration: 500 });
+    }
+  }, [progress]);
+
+  const panGesture = Gesture.Pan()
+    .onStart((event) => {
+      isScrubbing.value = true;
+      thumbScale.value = withSpring(1.4, SPRING_CONFIG);
+      scrubberX.value = Math.max(0, Math.min(event.x, scrubberWidth.value));
+      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
+    })
+    .onUpdate((event) => {
+      scrubberX.value = Math.max(0, Math.min(event.x, scrubberWidth.value));
+    })
+    .onEnd(() => {
+      isScrubbing.value = false;
+      thumbScale.value = withSpring(1, SPRING_CONFIG);
+      const newProgress = scrubberWidth.value > 0 ? scrubberX.value / scrubberWidth.value : 0;
+      runOnJS(seek)(newProgress * durationSec * 1000);
+      runOnJS(Haptics.notificationAsync)(Haptics.NotificationFeedbackType.Success);
+    });
+
+  const tapGesture = Gesture.Tap()
+    .onStart((event) => {
+      scrubberX.value = withTiming(Math.max(0, Math.min(event.x, scrubberWidth.value)), { duration: 200 });
+      const newProgress = scrubberWidth.value > 0 ? event.x / scrubberWidth.value : 0;
+      runOnJS(seek)(newProgress * durationSec * 1000);
+      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
+    });
+
+  const scrubberGesture = Gesture.Race(panGesture, tapGesture);
+
+  const scrubberFillStyle = useAnimatedStyle(() => ({ width: scrubberX.value }));
+  const scrubberThumbStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: scrubberX.value - 10 }, { scale: thumbScale.value }],
+  }));
+
+  const displayElapsed = useDerivedValue(() => {
+    if (isScrubbing.value && scrubberWidth.value > 0) {
+      return Math.round((scrubberX.value / scrubberWidth.value) * durationSec);
+    }
+    return elapsed;
+  });
+
+  const elapsedText = useDerivedValue(() => formatTime(displayElapsed.value));
+  const remainingText = useDerivedValue(() => `-${formatTime(Math.max(0, durationSec - displayElapsed.value))}`);
+
+  return (
+    <View style={styles.scrubberSection}>
+      <GestureDetector gesture={scrubberGesture}>
+        <Animated.View style={styles.scrubberContainer}>
+          <GlassCard style={styles.scrubberCard} borderRadius={8} blurIntensity={20}>
+            <View style={styles.scrubberOuter} onLayout={(e) => { scrubberWidth.value = e.nativeEvent.layout.width; }}>
+              <Animated.View style={[styles.scrubberInner, scrubberFillStyle, { backgroundColor: accentColor }]} />
+              <Animated.View style={[styles.scrubberThumb, scrubberThumbStyle]} />
+            </View>
+          </GlassCard>
+        </Animated.View>
+      </GestureDetector>
+      <View style={styles.timeLabels}>
+        <AnimatedTimeLabel text={elapsedText} />
+        <AnimatedTimeLabel text={remainingText} />
+      </View>
+    </View>
+  );
+});
+
+const VolumeControl = memo(({ accentColor }: { accentColor: string }) => {
+  const nativeVolume = usePlayerStore(s => s.volume);
+  const setVolume = usePlayerStore(s => s.setVolume);
+  
+  const volumeX = useSharedValue(nativeVolume);
+  const volumeWidth = useSharedValue(0);
+  const isAdjustingVolume = useSharedValue(false);
+
+  useEffect(() => {
+    if (!isAdjustingVolume.value) {
+      volumeX.value = nativeVolume;
+    }
+  }, [nativeVolume]);
+
+  const volumeGesture = Gesture.Pan()
+    .onStart((event) => {
+      isAdjustingVolume.value = true;
+      const vol = volumeWidth.value > 0 ? Math.max(0, Math.min(event.x / volumeWidth.value, 1)) : 0;
+      volumeX.value = vol;
+      runOnJS(setVolume)(vol);
+      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
+    })
+    .onUpdate((event) => {
+      const vol = volumeWidth.value > 0 ? Math.max(0, Math.min(event.x / volumeWidth.value, 1)) : 0;
+      volumeX.value = vol;
+      runOnJS(setVolume)(vol);
+    })
+    .onEnd(() => {
+      isAdjustingVolume.value = false;
+    });
+
+  const volumeFillStyle = useAnimatedStyle(() => ({ width: volumeX.value * volumeWidth.value }));
+  const volumeThumbStyle = useAnimatedStyle(() => ({ transform: [{ translateX: volumeX.value * volumeWidth.value - 7 }] }));
+
+  return (
+    <View style={styles.volumeSection}>
+      <Ionicons name="volume-low" size={18} color="rgba(255,255,255,0.2)" />
+      <GestureDetector gesture={volumeGesture}>
+        <Animated.View style={styles.volumeTrackContainer}>
+          <GlassCard style={styles.volumeCard} borderRadius={4} blurIntensity={20}>
+            <View style={styles.volumeTrack} onLayout={(e) => { volumeWidth.value = e.nativeEvent.layout.width; }}>
+              <Animated.View style={[styles.volumeFill, volumeFillStyle, { backgroundColor: accentColor }]} />
+              <Animated.View style={[styles.volumeThumb, volumeThumbStyle]} />
+            </View>
+          </GlassCard>
+        </Animated.View>
+      </GestureDetector>
+      <Ionicons name="volume-high" size={18} color="rgba(255,255,255,0.2)" />
+    </View>
+  );
+});
+
+
+const AnimatedTimeLabel = memo(({ text }: { text: any }) => {
   const [label, setLabel] = useState("00:00");
 
   useDerivedValue(() => {
@@ -583,7 +589,7 @@ const AnimatedTimeLabel = ({ text }: { text: any }) => {
   });
 
   return <Text style={styles.timeLabel}>{label}</Text>;
-};
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#08080d" },
@@ -638,6 +644,19 @@ const styles = StyleSheet.create({
     elevation: 20,
   },
   albumImage: { flex: 1 },
+  errorOverlay: {
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  errorText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontFamily: "Inter_500Medium",
+    textAlign: "center",
+    marginTop: 12,
+  },
   loadingOverlay: {
     backgroundColor: "rgba(0,0,0,0.3)",
     justifyContent: "center",
@@ -654,6 +673,20 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#FFF",
     letterSpacing: -0.5,
+  },
+  skeletonTitle: {
+    width: "70%",
+    height: 32,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 6,
+    marginBottom: 4,
+  },
+  skeletonArtist: {
+    width: "45%",
+    height: 20,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 4,
+    marginTop: 8,
   },
   artistName: {
     fontSize: 17,
