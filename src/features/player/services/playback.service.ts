@@ -36,9 +36,6 @@ export class PlaybackService {
           PlayerCommand.Seek,
           PlayerCommand.SkipForward,
           PlayerCommand.SkipBackward,
-          PlayerCommand.Repeat,
-          PlayerCommand.Like,
-          PlayerCommand.Dislike,
         ],
 
         forwardInterval: 30,
@@ -64,60 +61,128 @@ export class PlaybackService {
 
   /**
    * Loads a track and starts playback.
-   * videoId is resolved to a real stream URL in the store before calling this.
+   * For local tracks, we load the whole queue into the native layer for better stability.
    */
-  static loadTrack(track: PlayerTrack): void {
+  static async loadTrack(track: PlayerTrack, queue: PlayerTrack[] = [], startIndex: number = -1): Promise<void> {
     this.setupPlayer();
     if (Platform.OS === "web") return;
 
     if (!track.url) {
-      console.error("[Player] Track URL is missing during loadTrack.");
+      console.error("[LocalPlayer] Track URL is missing.");
       return;
     }
 
-    console.log("[Player] Loading real stream:", {
-      id: track.id,
-      title: track.title,
-      artist: track.artist,
-      isResolved: track.url.includes("googlevideo.com") || track.url.includes("manifest"),
-    });
+    const isLocal = !!track.isLocal;
 
     try {
-      // clear() replaces reset() in v5 — clears queue
-      TrackPlayer.clear();
+      if (isLocal) {
+        console.log(`[LocalPlayer] Loading local track: ${track.title}`);
+        console.log("[LocalPlayer] FINAL URI:", track.url);
 
-      // MediaItem in v5 uses mediaId (optional) and artworkUrl (not artwork)
-      TrackPlayer.setMediaItem({
-        mediaId: track.id,
-        url: track.url,
-        title: track.title,
-        artist: track.artist,
-        artworkUrl: track.art,
-      });
+        // Hard validation against file:// URIs
+        if (track.url.startsWith("file://")) {
+          console.error("[LocalPlayer] INVALID FILE URI DETECTED");
+          throw new Error("Invalid local file URI: Scoped storage content URI required.");
+        }
+        
+        // Optimization: Check if this track is already at the correct index in native queue
+        const activeItem = await TrackPlayer.getActiveMediaItem();
+        if (activeItem && activeItem.mediaId === track.id) {
+          console.log("[LocalPlayer] Track already active, just playing.");
+          await TrackPlayer.play();
+          return;
+        }
 
-      TrackPlayer.play();
+        // Diagnostic simplification for local tracks ONLY
+        const mediaItems = queue.length > 0 ? queue.map(t => {
+          const item = {
+            mediaId: t.id,
+            url: t.url,
+            title: t.title,
+            artist: t.artist || "Local",
+            type: "default" as const
+          };
+          if (t.id === track.id) {
+            console.log("[LocalPlayer] MediaItem Payload:", JSON.stringify(item, null, 2));
+          }
+          return item;
+        }) : [{
+          mediaId: track.id,
+          url: track.url,
+          title: track.title,
+          artist: track.artist || "Local",
+          type: "default" as const
+        }];
+
+        if (queue.length === 0) {
+          console.log("[LocalPlayer] Single MediaItem Payload:", JSON.stringify(mediaItems[0], null, 2));
+        }
+
+        const targetIndex = startIndex !== -1 ? startIndex : 0;
+        
+        // Directly call setMediaItems without stop/clear for local
+        await TrackPlayer.setMediaItems(mediaItems, targetIndex);
+
+        // Extended compatibility delay for local URIs
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        await TrackPlayer.play();
+        console.log("[LocalPlayer] Play command issued");
+      } else {
+        // Preserved online flow
+        TrackPlayer.clear();
+        
+        const mediaItem: any = {
+          mediaId: track.id,
+          url: track.url,
+          title: track.title,
+          artist: track.artist,
+        };
+
+        if (track.art && track.art.trim().length > 0) {
+          mediaItem.artworkUrl = track.art;
+        }
+
+        TrackPlayer.setMediaItem(mediaItem);
+        TrackPlayer.play();
+      }
     } catch (error) {
-      console.error("[Player] Failed to load track:", error);
+      console.error("[LocalPlayer] Failed:", error);
       throw error;
     }
   }
 
   static play(): void {
     if (Platform.OS === "web") return;
-    console.log("[Player] PlaybackService.play()");
     TrackPlayer.play();
   }
 
   static pause(): void {
     if (Platform.OS === "web") return;
-    console.log("[Player] PlaybackService.pause()");
     TrackPlayer.pause();
   }
 
   static stop(): void {
     if (Platform.OS === "web") return;
-    console.log("[Player] PlaybackService.stop()");
     TrackPlayer.stop();
+  }
+
+  static async skipToNext(): Promise<void> {
+    if (Platform.OS === "web") return;
+    try {
+      await TrackPlayer.skipToNext();
+    } catch (e) {
+      // End of queue or other error
+    }
+  }
+
+  static async skipToPrevious(): Promise<void> {
+    if (Platform.OS === "web") return;
+    try {
+      await TrackPlayer.skipToPrevious();
+    } catch (e) {
+      // Beginning of queue or other error
+    }
   }
 
   static seek(positionMillis: number): void {

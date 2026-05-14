@@ -32,6 +32,7 @@ type MusicActionsContextType = {
   toggleRepeat: () => Promise<void>;
   toggleShuffle: () => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
+  preloadTrack: (track: Track) => Promise<string | null>;
 };
 
 export type MusicContextType = PlaybackStateContextType & MusicProgressContextType & MusicActionsContextType;
@@ -60,6 +61,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setRepeatModeStore = usePlayerStore(s => s.setRepeatMode);
   const toggleShuffleStore = usePlayerStore(s => s.toggleShuffle);
   const setVolumeStore = usePlayerStore(s => s.setVolume);
+  const preloadTrackStore = usePlayerStore(s => s.preloadTrack);
 
   const repeatModeMap: Record<string, 0 | 1> = {
     off: 0,
@@ -107,8 +109,9 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       toggleRepeat,
       toggleShuffle: async () => { toggleShuffleStore(); },
       setVolume: setVolumeStore,
+      preloadTrack: preloadTrackStore,
     }),
-    [setTrackStore, playStore, pauseStore, nextStore, previousStore, seekStore, setQueueStore, toggleRepeat, toggleShuffleStore, setVolumeStore]
+    [setTrackStore, playStore, pauseStore, nextStore, previousStore, seekStore, setQueueStore, toggleRepeat, toggleShuffleStore, setVolumeStore, preloadTrackStore]
   );
 
   return (

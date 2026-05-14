@@ -1,680 +1,1363 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import React, {
+    memo,
+    useCallback,
+    useEffect,
+    useMemo,
+    useState
+} from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  StatusBar,
-  TouchableOpacity,
-  Dimensions,
-  Animated,
-  Platform,
-  ScrollView,
-  Share,
-} from 'react-native';
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import { openAlbum, openArtist, openNowPlaying } from '@/src/navigation/music-navigation';
+    Animated,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    useWindowDimensions,
+    View
+} from "react-native";
 
-const { width } = Dimensions.get('window');
-const PAD = 20;
+// Core imports
+import { useMusicActions, usePlaybackState } from "@/src/context/MusicContext";
+import { getArtistById, getTrackById } from "@/src/data/music-catalog";
+import { useReducedMotionPreference } from "@/src/hooks/use-accessibility-preferences";
+import { useResponsiveMetrics } from "@/src/hooks/use-responsive-metrics";
+import { useMusicNavigation } from "@/src/navigation/music-navigation";
 
-// ── Design Tokens ─────────────────────────────────────────────────────────────
-const C = {
-  primary: '#BF5AF2',
-  primaryMid: '#9B38DA',
-  primaryDeep: '#7B2FBE',
-  accent: '#46f5e0',
-  accentAlt: '#00D4FF',
-  bg: '#0F0F13',
-  surface: 'rgba(255,255,255,0.055)',
-  border: 'rgba(255,255,255,0.08)',
-  borderLight: 'rgba(255,255,255,0.13)',
-  text: '#FFFFFF',
-  textSecondary: '#A9A9C0',
-  textMuted: '#6C6C80',
-};
+// Design system
+import {
+    glass,
+    motion,
+    palette,
+    radius,
+    spacing
+} from "@/src/design/tokens";
 
-const SP = { tension: 65, friction: 10 };
-const MOTION = { POP: { tension: 200, friction: 8 }, SLIDE: { tension: 60, friction: 9 } };
+// Components
+import { AtmosphericBackground } from "@/src/components/ui/atmospheric-background";
+import {
+    AuraText,
+    MediaListItem,
+    MotionReveal,
+    SectionHeader,
+    SkeletonBlock,
+} from "@/src/components/ui/aura-primitives";
+import { LiquidGlass } from "@/src/components/ui/liquid-glass";
+import { PressScale } from "@/src/components/ui/press-scale";
 
-// ── Data Mapping ─────────────────────────────────────────────────────────────
-const ARTISTS_DB: Record<string, any> = {
-  'elara': {
-    name: 'Elara Vance',
-    verified: true,
-    monthlyListeners: '12.4M Monthly Listeners',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCVPNWk1tlfHYyyWTBZhwh81Z6py-WVfUuxGVj51H72sBRafC8YphQ6KN32w47mVX4Vc_Gilgd9z97W25tKGqRujSEIq2yStVYqau9IUi6SHp1oWk4cXmYzmyTW3FjDYeBq6PdVhXaO0tAWivGBf42atMriqBRDwDtZarzZFB8CXSe6nZ2p5F-dWmhBrdH-IMd3mhHX3Thcn_9L_5R7nIJdFSM0Rglel2NhCZiTz9FL4EQBpTBZwwMZTDDbA8vKdPQ3ErzWfZi8Lqw',
-    topSongs: [
-      { id: '1', title: 'Neon Pulse', album: 'Synthwave Dreams', year: '2024', duration: '3:42', active: true, image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAzO02GNA3l-NDFuwh5GDP4Dnfc8rQOC3KkStCMZb5CR6-ehD1qOMl3pNA6c6FjzXNnwntxnX5lqPMlBElIKUo37SKK6_kcuyxvU9adFkLLm_ZKnb6eCe-0jBpfBz4IbuOOFqLxVpD5gsiJcXy4FV6KeH8zSLLAaJtEndA8J5Jd7VccSyRNQOGFF8GOeIKaYPeOPQ-_EuouUvESnitU-7HNDAputZyzDIeM5eNO8kEFo42zcTZFehnlsRkzwm-QNmVnzqz_kHokjOU' },
-      { id: '2', title: 'Ghost Border', album: 'Aura Chronicles', year: '2023', duration: '4:11', active: false, image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBACP7jafIOuSRotl0kPN2deZRu-vI8D1D6HyfdgqWmIoGA-IfyOYd_y0slIBNpoI4fBr-onfSxamgCX9Fw6tS-uoOLVAatX9P0-aNa-k7n81_CVBHSXph5znqM6o4x5jB6IhOhYRFrCRBf0ORFNaKF6yNHrLcGxUZJomXYkmUzrA2OpvcLfiOOD17gr8IcVH-Y63YWMRnvV8lBk91_qivfLNv_rLWTB_tTsatZbL5v1ZaVLytQDSqVyqqt8lqQ_z86DNbMr93y_JY' },
-      { id: '3', title: 'Velvet Void', album: 'Ethereal Sessions', year: '2023', duration: '5:03', active: false, image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDrWQlttj2sje1aiBrW42cU_zIjVHAPnp03JTN497WR39LhPvX5UUqYZ1KRALgBx4j0c__5DrncFy7VKNGvWdiik_MJ2jxPsOJAjH4Y6utrtRCRyZBYh8MopmEjU-ZnvLzgtvjXKcaR4s90U-1PAgJoQv9i75WEJbOrEhKHFmDd6A1fArxzLaCG8uU-55-HyXXSoUZXcKs2QRsPKfKPAoRsqDse5RF_yFTApMwqA2Q2zwK4-HOL-I4Id76c0R5iKLKxJWhI7_0EzR4' },
-    ],
-    albums: [
-      { id: 'a1', title: 'Aura Chronicles', year: '2023', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAz8RqwcbhogJvQK-XSCa1l9QanY-yGYVO-MAr46oay_iMenqdHTTuWjQENKUvx_FZeVYPeKBMsj-mkWDKW2Sf3detWEjeC7COZXxe58Tnxd3xc_ClprrIG_G2wHfQRqOKkBKUYRafyvKCDMtLUyN-EDpM1HORMK65E_-LfJm21Z7trPYcV12yS999Iy7dguJbhk613b94CLrRaZ_ax4urv7aMvHkLd-X12g42ZiDvDIJC7tvm33rzbQD-hM3SP8IzX5KR3rL0MyLc' },
-      { id: 'a2', title: 'Glass Horizons', year: '2022', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuD7aAtCTxo4i6KCgxAmdUwmgPsmeRlhnXplryYoUyK1tJtrInDD-7xH4B2jQsNSzhbp1vnlHa8uIrpKQAlpOiWWGu7G7hU1db25fRyQVvnQDbdNyQGkyDW-GUmgHeavXBx0faviwux5a1kRyDCAHRuuCk2CMNKg-kMFvRd-aaiJ6dR6al-ANB321xYErz7LdJ6TVd56LNpZp9xgYSdudWs4tspMLz3hltAT0g7v-Q1kzCM35Op_wfq9DLvwgyU8vC8Q--R48rW0pgY' },
-      { id: 'a3', title: 'Synthwave Dreams', year: '2024', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAzO02GNA3l-NDFuwh5GDP4Dnfc8rQOC3KkStCMZb5CR6-ehD1qOMl3pNA6c6FjzXNnwntxnX5lqPMlBElIKUo37SKK6_kcuyxvU9adFkLLm_ZKnb6eCe-0jBpfBz4IbuOOFqLxVpD5gsiJcXy4FV6KeH8zSLLAaJtEndA8J5Jd7VccSyRNQOGFF8GOeIKaYPeOPQ-_EuouUvESnitU-7HNDAputZyzDIeM5eNO8kEFo42zcTZFehnlsRkzwm-QNmVnzqz_kHokjOU' },
-    ],
-    insights: { globalRank: '#4', match: '88%', chartData: [0.45, 0.65, 1.0, 0.75, 0.55] },
-    biography: "Elara Vance doesn't just create music; she constructs sonic landscapes. Born from the digital fog of London's underground scene, her sound weaves through genres with the precision of a sculptor — carving space out of silence, and filling it with light.",
-    similar: [
-      { id: 's1', name: 'Lumiere', listeners: '8.2M', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAXxnAEONBrxrm1aHJG7P_q70E0zQAINX7jWFfWhNWKHIUlNViAkUQWI_yDd4OaO4mVUlRVmt1XwUXvs31uibSBJ8NmCgn-UhUm5dr0Em6-4K-2BpAOfv6qzRJRpDGdC8GhCqLtJFou2qTdvxFOWgUwEc9e2nEIK0fGF16u_61i4hqTTccOytjYAuhtyNYfSBVbOCk5UrT81ST0Lt1JgPGiOXib3OBz5qcJoOz6XZaabbote6MGeQ7uU6ez4RjWE555l3y7yWmoAfI' },
-      { id: 's2', name: 'Vortex', listeners: '4.5M', image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDJfQTHCsgRAQhT3PFpk0QhA2Fknr2fyKBURl-hnttA53FXzuiSE4WRhuPIFFdEa7CFB7hPfCR7hUVUnA5NI4TF-iM_S2CqlKf42Kogp3fQqKdmI2zlcV97jDnrC0gTgA6t7hR3ezJ2DkvL3vYXyfud5TsWfIEAB_P8O6vn6K4zaBCHZA7_DQgTfd6z9BNU_HoA4EVCkRmSMOusP8cWN2lXYPwG0BXLQtMnN-uDUYMaOxpT8tgp7Zx9N5vSQcLvfum9AwyWiVZKTj8' },
-    ],
+// Types
+import { CatalogArtist, CatalogTrack } from "@/src/data/music-catalog";
+
+// Extended artist data for the page
+interface ArtistPageData extends CatalogArtist {
+  monthlyListeners?: string;
+  verified?: boolean;
+  genres?: string[];
+  tagline?: string;
+  biography?: string;
+  origin?: string;
+  influences?: string[];
+  topTracks?: CatalogTrack[];
+  popularReleases?: any[];
+  relatedArtists?: CatalogArtist[];
+  collaborators?: string[];
+  fanInsights?: {
+    trendGraph?: any;
+    listenerHeatmap?: any;
+    genreOverlap?: number;
+    popularityScore?: number;
+  };
+  musicVideos?: any[];
+  liveEvents?: any[];
+}
+
+// Mock extended data - in production this would come from API
+const getExtendedArtistData = (artist: CatalogArtist): ArtistPageData => ({
+  ...artist,
+  monthlyListeners: "12.4M",
+  verified: true,
+  genres: ["Synthwave", "Electronic", "Ambient"],
+  tagline: "Pioneering the future of electronic music",
+  biography: `Elara Vance emerged from the underground synthwave scene in 2018 with her debut EP "Neon Dreams". Her unique blend of retro-futuristic aesthetics and modern production techniques quickly garnered attention from both critics and fans alike. Known for her immersive live performances and innovative use of technology in music creation, Elara has become a leading voice in the electronic music renaissance.`,
+  origin: "Los Angeles, CA",
+  influences: ["Kavinsky", "The Midnight", "Timecop1983"],
+  topTracks: [
+    getTrackById("nebula"),
+    getTrackById("neon"),
+    getTrackById("solar"),
+    getTrackById("nightcall"),
+  ].filter(Boolean) as CatalogTrack[],
+  popularReleases: [],
+  relatedArtists: [],
+  collaborators: ["Synthwave Collective", "Cosmic Echo"],
+  fanInsights: {
+    popularityScore: 92,
   },
-  '1': {
-    name: 'Solstice',
-    verified: true,
-    monthlyListeners: '8.2M Monthly Listeners',
-    image: 'https://picsum.photos/600/800?random=4',
-    topSongs: [
-      { id: 't1', title: 'Midnight Sun', album: 'Solaris', year: '2024', duration: '3:15', active: true, image: 'https://picsum.photos/300/300?random=41' },
-      { id: 't2', title: 'Equinox', album: 'Solaris', year: '2024', duration: '4:20', active: false, image: 'https://picsum.photos/300/300?random=42' },
-    ],
-    albums: [{ id: 'a4', title: 'Solaris', year: '2024', image: 'https://picsum.photos/400/400?random=43' }],
-    insights: { globalRank: '#12', match: '94%', chartData: [0.6, 0.8, 0.7, 0.9, 1.0] },
-    biography: "Solstice brings the warmth of the sun into every beat. A pioneer of solar-pop, their music radiates energy and optimism.",
-    similar: [{ id: 's3', name: 'Lumina Flux', listeners: '5.1M', image: 'https://picsum.photos/300/300?random=44' }],
-  },
-  '2': {
-    name: 'Luna Ray',
-    verified: true,
-    monthlyListeners: '5.4M Monthly Listeners',
-    image: 'https://picsum.photos/600/800?random=5',
-    topSongs: [{ id: 't3', title: 'Moonlight', album: 'Lunar Phase', year: '2023', duration: '3:50', active: true, image: 'https://picsum.photos/300/300?random=51' }],
-    albums: [{ id: 'a5', title: 'Lunar Phase', year: '2023', image: 'https://picsum.photos/400/400?random=52' }],
-    insights: { globalRank: '#28', match: '76%', chartData: [0.3, 0.5, 0.4, 0.6, 0.5] },
-    biography: "Luna Ray captures the mysterious beauty of the night sky in her ethereal synth compositions.",
-    similar: [{ id: 's4', name: 'Digital Echo', listeners: '3.2M', image: 'https://picsum.photos/300/300?random=53' }],
-  },
-};
+  musicVideos: [],
+  liveEvents: [],
+});
 
-const ARTIST_DEFAULT = ARTISTS_DB['elara'];
-
-// ── Glass Pane ─────────────────────────────────────────────────────────────────
-const GlassPane = ({ children, style, r = 20, blur = 40, accent = false }: any) => (
-  <View style={[{ borderRadius: r, overflow: 'hidden' }, style]}>
-    <BlurView intensity={blur} tint="dark" style={StyleSheet.absoluteFill} />
-    <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: C.surface, borderRadius: r }]} />
-    {/* specular top line */}
-    <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: r * 0.25, right: r * 0.25, height: 1, backgroundColor: 'rgba(255,255,255,0.18)', zIndex: 5 }} />
-    {/* left refraction */}
-    <View pointerEvents="none" style={{ position: 'absolute', left: 7, top: 10, bottom: 10, width: 2, backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 1, zIndex: 4 }} />
-    {/* outer border */}
-    <View pointerEvents="none" style={{ ...StyleSheet.absoluteFillObject, borderRadius: r, borderWidth: 1, borderColor: accent ? 'rgba(191,90,242,0.35)' : C.borderLight, zIndex: 3 }} />
-    {accent && (
-      <LinearGradient
-        colors={['rgba(191,90,242,0.10)', 'transparent']}
-        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-        style={[StyleSheet.absoluteFillObject, { borderRadius: r, zIndex: 2 }]}
-        pointerEvents="none"
-      />
-    )}
-    <View style={{ zIndex: 1 }}>{children}</View>
-  </View>
-);
-
-// ── Entrance animation ─────────────────────────────────────────────────────────
-const Fade = ({ children, delay = 0, style }: any) => {
-  const op = useRef(new Animated.Value(0)).current;
-  const ty = useRef(new Animated.Value(18)).current;
-  useEffect(() => {
-    const t = setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(op, { toValue: 1, duration: 480, useNativeDriver: true }),
-        Animated.spring(ty, { toValue: 0, ...SP, useNativeDriver: true }),
-      ]).start();
-    }, delay);
-    return () => clearTimeout(t);
-  }, []);
-  return <Animated.View style={[{ opacity: op, transform: [{ translateY: ty }] }, style]}>{children}</Animated.View>;
-};
-
-// ── Press-scale button ─────────────────────────────────────────────────────────
-const Tap = ({ children, onPress, style, h = 'medium' }: any) => {
-  const sc = useRef(new Animated.Value(1)).current;
-  const haptic = useCallback(() => {
-    if (h === 'heavy') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    else if (h === 'light') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    else Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  }, [h]);
-  return (
-    <TouchableOpacity
-      activeOpacity={1}
-      delayPressIn={110}
-      onPressIn={() => { Animated.spring(sc, { toValue: 0.96, ...MOTION.POP, useNativeDriver: true }).start(); }}
-      onPressOut={() => Animated.spring(sc, { toValue: 1, ...MOTION.POP, useNativeDriver: true }).start()}
-      onPress={() => { haptic(); onPress?.(); }}
-      style={style}
-    >
-      <Animated.View style={{ transform: [{ scale: sc }] }}>{children}</Animated.View>
-    </TouchableOpacity>
-  );
-};
-
-// ── Animated chart bar ─────────────────────────────────────────────────────────
-const Bar = ({ val, i, active }: any) => {
-  const h = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    setTimeout(() => Animated.spring(h, { toValue: val * 56, ...SP, useNativeDriver: false }).start(), 400 + i * 70);
-  }, []);
-  return (
-    <Animated.View style={{ width: 34, height: h, borderRadius: 8, overflow: 'hidden' }}>
-      <LinearGradient
-        colors={active ? [C.primary, C.primaryDeep] : ['rgba(255,255,255,0.12)', 'rgba(255,255,255,0.04)']}
-        start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-      {active && <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2.5, backgroundColor: 'rgba(255,255,255,0.35)', borderRadius: 8 }} />}
-    </Animated.View>
-  );
-};
-
-// ── Screen ────────────────────────────────────────────────────────────────────
-export default function ArtistProfileScreen() {
+function ArtistPage() {
+  const params = useLocalSearchParams();
   const router = useRouter();
-  const { id } = useLocalSearchParams();
-  const insets = useSafeAreaInsets();
-  const scrollY = useRef(new Animated.Value(0)).current;
+  const { width, height } = useWindowDimensions();
+  const responsive = useResponsiveMetrics();
+  const reduceMotion = useReducedMotionPreference();
+  const navigation = useMusicNavigation("artist");
+  const { currentTrack, isPlaying } = usePlaybackState();
+  const { play, setQueue } = useMusicActions();
 
-  const ARTIST = ARTISTS_DB[id as string] || ARTIST_DEFAULT;
+  const [pageOpacity] = useState(() => new Animated.Value(0));
+  const [isLeaving, setIsLeaving] = useState(false);
 
-  const [followed, setFollowed] = useState(false);
-  const [likedSongs, setLikedSongs] = useState<Set<string>>(new Set(['1']));
-  const [expandBio, setExpandBio] = useState(false);
-  const [showAllSongs, setShowAllSongs] = useState(false);
-  const followSc = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (reduceMotion) {
+      pageOpacity.setValue(1);
+      return;
+    }
 
-  // Scroll-driven animations
-  const HERO_H = width * 0.88;
-  const headerOp = scrollY.interpolate({ inputRange: [HERO_H * 0.55, HERO_H * 0.82], outputRange: [0, 1], extrapolate: 'clamp' });
-  const floatOp = scrollY.interpolate({ inputRange: [HERO_H * 0.55, HERO_H * 0.82], outputRange: [1, 0], extrapolate: 'clamp' });
-  const imgScale = scrollY.interpolate({ inputRange: [-80, 0, HERO_H], outputRange: [1.15, 1, 0.88], extrapolate: 'clamp' });
-  const imgOp = scrollY.interpolate({ inputRange: [0, HERO_H * 0.7], outputRange: [1, 0.3], extrapolate: 'clamp' });
+    Animated.timing(pageOpacity, {
+      toValue: 1,
+      duration: motion.duration.base,
+      useNativeDriver: true,
+    }).start();
+  }, [pageOpacity, reduceMotion]);
 
-  const handleFollow = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    Animated.sequence([
-      Animated.spring(followSc, { toValue: 0.82, ...MOTION.POP, useNativeDriver: true }),
-      Animated.spring(followSc, { toValue: 1.08, ...MOTION.POP, useNativeDriver: true }),
-      Animated.spring(followSc, { toValue: 1.00, ...MOTION.POP, useNativeDriver: true }),
-    ]).start();
-    setFollowed(f => !f);
-  }, []);
+  const handleBackPress = useCallback(() => {
+    if (isLeaving) return;
+    setIsLeaving(true);
+    Animated.timing(pageOpacity, {
+      toValue: 0,
+      duration: motion.duration.fast,
+      useNativeDriver: true,
+    }).start(() => router.back());
+  }, [isLeaving, pageOpacity, router]);
 
-  const toggleLike = useCallback((id: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    setLikedSongs(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  }, []);
+  // Artist data
+  const artistId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const baseArtist = getArtistById(artistId);
+  const artist = useMemo(
+    () => (baseArtist ? getExtendedArtistData(baseArtist) : null),
+    [baseArtist],
+  );
 
-  const handleShare = useCallback(async () => {
-    try { await Share.share({ message: `Listen to ${ARTIST.name} on Aura Music 🎵` }); } catch { }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  }, [ARTIST]);
+  // Loading state
+  const [isLoading, setIsLoading] = useState(!artist);
+  const [scrollY] = useState(() => new Animated.Value(0));
+
+  // Simulate loading
+  useEffect(() => {
+    if (!artist) {
+      const timer = setTimeout(() => setIsLoading(false), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [artist]);
+
+  // Animation values
+  const heroOpacity = scrollY.interpolate({
+    inputRange: [0, height * 0.4],
+    outputRange: [1, 0],
+    extrapolate: "clamp",
+  });
+
+  const heroScale = scrollY.interpolate({
+    inputRange: [0, height * 0.6],
+    outputRange: [1, 0.8],
+    extrapolate: "clamp",
+  });
+
+  const stickyHeaderOpacity = scrollY.interpolate({
+    inputRange: [height * 0.3, height * 0.5],
+    outputRange: [0, 1],
+    extrapolate: "clamp",
+  });
+
+  const blurIntensity = scrollY.interpolate({
+    inputRange: [0, height * 0.4],
+    outputRange: [glass.surfaceBlur, glass.denseBlur],
+    extrapolate: "clamp",
+  });
+
+  // Actions
+  const handlePlayArtist = useCallback(async () => {
+    if (!artist?.topTracks?.length) return;
+    await setQueue(
+      artist.topTracks.map((track) => ({
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        art: track.art,
+        url: track.art, // Placeholder - would be actual audio URL
+        duration: track.durationSec,
+        dominantColors: track.dominantColors,
+      })),
+      0,
+    );
+  }, [artist, setQueue]);
+
+  const handleShuffleArtist = useCallback(async () => {
+    if (!artist?.topTracks?.length) return;
+    const shuffled = [...artist.topTracks].sort(() => Math.random() - 0.5);
+    await setQueue(
+      shuffled.map((track) => ({
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        art: track.art,
+        url: track.art,
+        duration: track.durationSec,
+        dominantColors: track.dominantColors,
+      })),
+      0,
+    );
+  }, [artist, setQueue]);
+
+  const handleTrackPress = useCallback(
+    (track: CatalogTrack) => {
+      navigation.goNowPlaying(track.id);
+    },
+    [navigation],
+  );
+
+  const handleFollowPress = useCallback(() => {
+    // TODO: Implement follow functionality
+    console.log("Follow artist:", artist?.name);
+  }, [artist]);
+
+  const handleSharePress = useCallback(() => {
+    // TODO: Implement share functionality
+    console.log("Share artist:", artist?.name);
+  }, [artist]);
+
+  const handleLikePress = useCallback(() => {
+    // TODO: Implement like functionality
+    console.log("Like artist:", artist?.name);
+  }, [artist]);
+
+  // Loading skeleton
+  if (isLoading || !artist) {
+    return (
+      <View style={styles.container}>
+        <StatusBar style="light" />
+        <AtmosphericBackground />
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.loadingContent}
+        >
+          <HeroSkeleton />
+          <ControlsSkeleton />
+          <StatsSkeleton />
+          <TracksSkeleton />
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
-    <View style={s.root}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+    <View style={styles.container}>
+      <StatusBar style="light" />
+      <AtmosphericBackground />
 
-      {/* ── BG BLOBS ────────────────────────────────────────────────────────── */}
-      <View style={StyleSheet.absoluteFill}>
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]} />
-        <View style={[s.blob, { width: 360, height: 360, top: -70, left: -70, backgroundColor: 'rgba(191,90,242,0.22)' }]} />
-        <View style={[s.blob, { width: 240, height: 240, top: 180, right: -50, backgroundColor: 'rgba(26,35,126,0.20)' }]} />
-        <View style={[s.blob, { width: 180, height: 180, bottom: 80, left: '45%', backgroundColor: 'rgba(70,245,224,0.08)' }]} />
-      </View>
-
-      {/* ── STICKY HEADER ───────────────────────────────────────────────────── */}
-      <Animated.View style={[s.stickyHdr, { paddingTop: insets.top, opacity: headerOp }]} pointerEvents="box-none">
-        <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />
-        <View style={[StyleSheet.absoluteFill, { borderBottomWidth: 1, borderBottomColor: C.border }]} pointerEvents="none" />
-        <View style={s.stickyRow}>
-          <Tap onPress={() => router.back()} h="light" style={s.stickyBtn}>
-            <Ionicons name="chevron-back" size={24} color={C.text} />
-          </Tap>
-          <Text style={s.stickyName}>{ARTIST.name}</Text>
-          <Tap onPress={handleShare} h="light" style={s.stickyBtn}>
-            <Ionicons name="share-outline" size={22} color={C.text} />
-          </Tap>
-        </View>
-      </Animated.View>
-
-      {/* ── HERO IMAGE ──────────────────────────────────────────────────────── */}
-      <Animated.View style={[s.heroWrap, { transform: [{ scale: imgScale }], opacity: imgOp }]} pointerEvents="none">
-        <Image source={{ uri: ARTIST.image }} style={StyleSheet.absoluteFill} contentFit="cover" />
-        {/* bottom fade to bg */}
-        <LinearGradient colors={['transparent', 'rgba(15,15,19,0.7)', C.bg]} locations={[0.35, 0.72, 1]} style={StyleSheet.absoluteFill} />
-        {/* left bloom */}
-        <LinearGradient colors={['rgba(191,90,242,0.28)', 'transparent']} start={{ x: 0, y: 0.5 }} end={{ x: 0.7, y: 0.5 }} style={StyleSheet.absoluteFill} />
-      </Animated.View>
-
-      {/* ── FLOATING NAV BUTTONS ────────────────────────────────────────────── */}
-      <Animated.View style={[s.floatBack, { top: insets.top + 8, opacity: floatOp }]} pointerEvents="box-none">
-        <Tap onPress={() => router.back()} h="light">
-          <GlassPane r={21} blur={45} style={s.floatBtn}>
-            <Ionicons name="chevron-back" size={22} color={C.text} />
-          </GlassPane>
-        </Tap>
-      </Animated.View>
-      <Animated.View style={[s.floatShare, { top: insets.top + 8, opacity: floatOp }]} pointerEvents="box-none">
-        <Tap onPress={handleShare} h="light">
-          <GlassPane r={21} blur={45} style={s.floatBtn}>
-            <Ionicons name="share-outline" size={20} color={C.text} />
-          </GlassPane>
-        </Tap>
-      </Animated.View>
-
-      {/* ── SCROLLABLE CONTENT ──────────────────────────────────────────────── */}
-      <Animated.ScrollView
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
-        scrollEventThrottle={16}
-        contentContainerStyle={{ paddingTop: HERO_H * 0.64, paddingBottom: 120 }}
-        showsVerticalScrollIndicator={false}
+      {/* Sticky Header */}
+      <Animated.View
+        style={[styles.stickyHeader, { opacity: stickyHeaderOpacity }]}
       >
-
-        {/* ════════════ ARTIST HEADER ════════════ */}
-        <Fade delay={0}>
-          <View style={s.artistBlock}>
-            {/* badge + listeners */}
-            <View style={s.badgeRow}>
-              <View style={s.verifiedPill}>
-                <Ionicons name="checkmark-circle" size={12} color={C.accent} />
-                <Text style={s.verifiedTxt}>VERIFIED ARTIST</Text>
-              </View>
-              <Text style={s.listenersTxt}>{ARTIST.monthlyListeners}</Text>
-            </View>
-
-            {/* artist name */}
-            <Text style={s.artistName}>{ARTIST.name}</Text>
-
-            {/* ── ACTION ROW ── FIX: proper widths, no overflow, all visible */}
-            <View style={s.actionRow}>
-              {/* PLAY — widest */}
-              <Tap
-                h="heavy"
-                onPress={() => openNowPlaying(router, ARTIST.topSongs[0]?.id ?? '1', 'artist')}
-                style={s.playWrap}
-              >
-                <LinearGradient colors={[C.primary, C.primaryDeep]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.playInner}>
-                  {/* glass specular */}
-                  <View style={{ position: 'absolute', top: 3, left: 20, right: 20, height: 2, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 1 }} />
-                  <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' }} />
-                  <Ionicons name="play" size={18} color="#fff" />
-                  <Text style={s.btnTxt}>Play</Text>
-                </LinearGradient>
-              </Tap>
-
-              {/* SHUFFLE — icon only pill */}
-              <Tap h="medium" onPress={() => { }} style={s.iconBtnWrap}>
-                <GlassPane r={26} blur={40} style={s.iconBtnInner}>
-                  <Ionicons name="shuffle" size={20} color={C.text} />
-                </GlassPane>
-              </Tap>
-
-              {/* FOLLOW */}
-              <Tap onPress={handleFollow} h="heavy" style={s.followWrap}>
-                <Animated.View style={{ transform: [{ scale: followSc }] }}>
-                  {followed ? (
-                    <View style={s.followingInner}>
-                      <Ionicons name="checkmark" size={16} color={C.accent} />
-                      <Text style={[s.btnTxt, { color: C.accent, fontSize: 13 }]}>Following</Text>
-                    </View>
-                  ) : (
-                    <GlassPane r={26} blur={40} style={s.followInner}>
-                      <Text style={[s.btnTxt, { fontSize: 14 }]}>Follow</Text>
-                    </GlassPane>
-                  )}
-                </Animated.View>
-              </Tap>
-            </View>
-          </View>
-        </Fade>
-
-        {/* ════════════ TOP SONGS ════════════ */}
-        <Fade delay={100} style={s.section}>
-          <View style={s.secHead}>
-            <Text style={s.secTitle}>Top Songs</Text>
-            <Tap onPress={() => setShowAllSongs((value) => !value)} h="light"><Text style={s.seeAll}>{showAllSongs ? 'Show less' : 'View all'}</Text></Tap>
-          </View>
-
-          {/* FIX: each song is full-width, no image bleed, artwork clipped, duration visible */}
-          {ARTIST.topSongs.slice(0, showAllSongs ? ARTIST.topSongs.length : 3).map((song: any, idx: number) => (
-            <Fade key={song.id} delay={140 + idx * 55}>
-              <Tap
-                h={song.active ? 'heavy' : 'medium'}
-                onPress={() => openNowPlaying(router, song.id, 'artist-top-songs')}
-                style={{ marginBottom: 10 }}
-              >
-                <GlassPane r={18} blur={song.active ? 55 : 38} accent={song.active} style={s.songRow}>
-                  {/* rank */}
-                  <Text style={[s.songRank, song.active && { color: C.primary }]}>{idx + 1}</Text>
-
-                  {/* artwork — fixed size, no overflow into text */}
-                  <View style={s.songArtBox}>
-                    <Image source={{ uri: song.image }} style={StyleSheet.absoluteFill} contentFit="cover" />
-                    {song.active && (
-                      <View style={s.playingBadge}>
-                        <Ionicons name="musical-note" size={9} color="#fff" />
-                      </View>
-                    )}
-                  </View>
-
-                  {/* text — flex:1 so it shrinks, never pushes actions off screen */}
-                  <View style={s.songText}>
-                    <Text style={[s.songTitle, song.active && { color: C.primary }]} numberOfLines={1}>{song.title}</Text>
-                    <Text style={s.songMeta} numberOfLines={1}>{song.album} · {song.year}</Text>
-                  </View>
-
-                  {/* FIX: actions at end, never clipped — fixed width container */}
-                  <View style={s.songActions}>
-                    <Text style={s.songDur}>{song.duration}</Text>
-                    <Tap h="heavy" onPress={() => toggleLike(song.id)} style={s.songIconBtn}>
-                      <Ionicons name={likedSongs.has(song.id) ? 'heart' : 'heart-outline'} size={17} color={likedSongs.has(song.id) ? '#FF2D55' : C.textMuted} />
-                    </Tap>
-                    <Tap h="light" onPress={() => { }} style={s.songIconBtn}>
-                      <Ionicons name="ellipsis-horizontal" size={16} color={C.textMuted} />
-                    </Tap>
-                  </View>
-                </GlassPane>
-              </Tap>
-            </Fade>
-          ))}
-        </Fade>
-
-        {/* ════════════ POPULAR ALBUMS ════════════ */}
-        <Fade delay={220} style={{ marginBottom: 44 }}>
-          <View style={[s.secHead, { paddingHorizontal: PAD }]}>
-            <Text style={s.secTitle}>Popular Albums</Text>
-            <Tap onPress={() => { }} h="light"><Text style={s.seeAll}>See all</Text></Tap>
-          </View>
-
-          {/* FIX: proper paddingLeft so first card is aligned, last card not cut */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingLeft: PAD, paddingRight: PAD, gap: 14 }}
-            decelerationRate="fast"
-            snapToInterval={154}
-            snapToAlignment="start"
+        <LiquidGlass
+          intensity={glass.navBlur}
+          borderRadius={0}
+          style={styles.stickyHeaderGlass}
+          contentStyle={styles.stickyHeaderContent}
+        >
+          <PressScale
+            onPress={handleBackPress}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            wrapperStyle={styles.backButtonWrapper}
+            style={styles.backButton}
           >
-            {ARTIST.albums.map((album: any, idx: number) => (
-              <Fade key={album.id} delay={260 + idx * 70}>
-                <Tap h="medium" onPress={() => openAlbum(router, album.id, 'artist-albums')}>
-                  {/* FIX: fixed explicit width so third card is fully visible */}
-                  <View style={s.albumCard}>
-                    <View style={s.albumArtWrap}>
-                      <Image source={{ uri: album.image }} style={StyleSheet.absoluteFill} contentFit="cover" />
-                      <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)']} style={StyleSheet.absoluteFill} />
-                      {/* play button bottom-right */}
-                      <View style={s.albumPlayBtn}>
-                        <BlurView intensity={35} tint="dark" style={StyleSheet.absoluteFill} />
-                        <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }} />
-                        <Ionicons name="play" size={14} color="#fff" style={{ marginLeft: 2 }} />
-                      </View>
-                    </View>
-                    <Text style={s.albumTitle} numberOfLines={1}>{album.title}</Text>
-                    <Text style={s.albumYear}>{album.year} · Album</Text>
-                  </View>
-                </Tap>
-              </Fade>
-            ))}
-          </ScrollView>
-        </Fade>
+            <Ionicons name="chevron-back" size={18} color={palette.ink} />
+          </PressScale>
 
-        {/* ════════════ FAN INSIGHTS ════════════ */}
-        <Fade delay={310} style={s.section}>
-          <GlassPane r={28} blur={60} accent style={s.insightsCard}>
-            <View style={s.insightsHead}>
-              <View style={s.insightsIcon}>
-                <Ionicons name="trending-up" size={16} color={C.accent} />
-              </View>
-              <Text style={s.insightsTitle}>Fan Insights</Text>
-              <View style={{ flex: 1 }} />
-              <View style={s.liveBadge}>
-                <View style={s.liveDot} />
-                <Text style={s.liveTxt}>LIVE</Text>
-              </View>
-            </View>
-
-            {/* chart — FIX: centred, proper height, bars fully visible */}
-            <View style={s.chartWrap}>
-              {ARTIST.insights.chartData.map((v: number, i: number) => (
-                <Bar key={i} val={v} i={i} active={i === 2} />
-              ))}
-            </View>
-
-            {/* stat pills */}
-            <View style={s.statRow}>
-              <View style={s.statPill}>
-                <Text style={s.statNum}>{ARTIST.insights.globalRank}</Text>
-                <Text style={s.statLbl}>GLOBAL RANK</Text>
-              </View>
-              <View style={[s.statPill, { borderColor: 'rgba(70,245,224,0.25)', backgroundColor: 'rgba(70,245,224,0.06)' }]}>
-                <Text style={[s.statNum, { color: C.accent }]}>{ARTIST.insights.match}</Text>
-                <Text style={s.statLbl}>YOUR MATCH</Text>
-              </View>
-            </View>
-          </GlassPane>
-        </Fade>
-
-        {/* ════════════ BIOGRAPHY ════════════ */}
-        <Fade delay={380} style={s.section}>
-          <GlassPane r={28} blur={50} style={s.bioCard}>
-            {/* purple glow orb */}
-            <View style={s.bioGlow} />
-            <View style={{ padding: 22 }}>
-              <View style={s.bioHead}>
-                <View style={s.bioMicIcon}>
-                  <Ionicons name="mic" size={15} color={C.primary} />
-                </View>
-                <Text style={s.bioTitle}>The Soul Behind the Sound</Text>
-              </View>
-              <Text style={s.bioBody} numberOfLines={expandBio ? undefined : 4}>
-                {ARTIST.biography}
-              </Text>
-              <Tap h="light" onPress={() => { setExpandBio(e => !e); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}>
-                <View style={s.bioMore}>
-                  <Text style={s.bioMoreTxt}>{expandBio ? 'Show less' : 'Full Biography'}</Text>
-                  <Ionicons name={expandBio ? 'chevron-up' : 'chevron-forward'} size={14} color={C.primary} />
-                </View>
-              </Tap>
-            </View>
-          </GlassPane>
-        </Fade>
-
-        {/* ════════════ SIMILAR ARTISTS ════════════ */}
-        <Fade delay={450} style={s.section}>
-          <View style={[s.secHead, { marginBottom: 16 }]}>
-            <Text style={s.secTitle}>Similar Listeners Love</Text>
+          <View style={styles.stickyTitleGroup}>
+            <AuraText
+              variant="headline"
+              numberOfLines={1}
+              style={styles.stickyTitle}
+            >
+              {artist.name}
+            </AuraText>
+            <AuraText variant="caption" style={styles.stickySubtitle}>
+              {artist.monthlyListeners} monthly listeners
+            </AuraText>
           </View>
+        </LiquidGlass>
+      </Animated.View>
 
-          {/* FIX: similar artists are full-width cards, not narrow rows with cut content */}
-          {ARTIST.similar.map((artist: any, idx: number) => (
-            <Fade key={artist.id} delay={490 + idx * 60}>
-              <Tap h="medium" onPress={() => openArtist(router, artist.id, { origin: 'similar-artists' })} style={{ marginBottom: 10 }}>
-                <GlassPane r={18} blur={40} style={s.similarRow}>
-                  {/* avatar */}
-                  <View style={s.similarAvatarWrap}>
-                    <Image source={{ uri: artist.image }} style={StyleSheet.absoluteFill} contentFit="cover" />
-                  </View>
-                  {/* info */}
-                  <View style={s.similarInfo}>
-                    <Text style={s.similarName}>{artist.name}</Text>
-                    <Text style={s.similarListeners}>{artist.listeners} Monthly Listeners</Text>
-                  </View>
-                  {/* follow button — FIX: always visible, proper size */}
-                  <Tap h="light" onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)} style={s.simFollowWrap}>
-                    <GlassPane r={14} blur={30} style={s.simFollowInner}>
-                      <Ionicons name="add" size={14} color={C.primary} />
-                      <Text style={s.simFollowTxt}>Follow</Text>
-                    </GlassPane>
-                  </Tap>
-                </GlassPane>
-              </Tap>
-            </Fade>
-          ))}
-        </Fade>
+      <Animated.View style={[styles.pageTransition, { opacity: pageOpacity }]}> 
+        <Animated.ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.content}
+          scrollEventThrottle={16}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true },
+          )}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Hero Section */}
+          <Animated.View
+            style={[
+              styles.heroContainer,
+              { opacity: heroOpacity, transform: [{ scale: heroScale }] },
+            ]}
+          >
+            <HeroSection
+              artist={artist}
+              onBack={handleBackPress}
+              onFollow={handleFollowPress}
+            />
+          </Animated.View>
 
+          {/* Floating Controls */}
+          <MotionReveal delay={200}>
+            <FloatingControls
+              onPlay={handlePlayArtist}
+              onShuffle={handleShuffleArtist}
+              onFollow={handleFollowPress}
+              onShare={handleSharePress}
+              onLike={handleLikePress}
+            />
+          </MotionReveal>
+
+          {/* Quick Stats */}
+        <MotionReveal delay={400}>
+          <QuickStats artist={artist} />
+        </MotionReveal>
+
+        {/* Top Tracks */}
+        <MotionReveal delay={600}>
+          <TopTracksSection
+            tracks={artist.topTracks || []}
+            currentTrack={currentTrack}
+            isPlaying={isPlaying}
+            onTrackPress={handleTrackPress}
+          />
+        </MotionReveal>
+
+        {/* Popular Releases */}
+        <MotionReveal delay={800}>
+          <PopularReleasesSection />
+        </MotionReveal>
+
+        {/* Visual Album Showcase */}
+        <MotionReveal delay={1000}>
+          <AlbumShowcaseSection />
+        </MotionReveal>
+
+        {/* About Artist */}
+        <MotionReveal delay={1200}>
+          <AboutArtistSection artist={artist} />
+        </MotionReveal>
+
+        {/* Collaborators */}
+        <MotionReveal delay={1400}>
+          <CollaboratorsSection collaborators={artist.collaborators || []} />
+        </MotionReveal>
+
+        {/* Related Artists */}
+        <MotionReveal delay={1600}>
+          <RelatedArtistsSection />
+        </MotionReveal>
+
+        {/* Fan Insights */}
+        <MotionReveal delay={1800}>
+          <FanInsightsSection insights={artist.fanInsights} />
+        </MotionReveal>
+
+        {/* Music Videos */}
+        <MotionReveal delay={2000}>
+          <MusicVideosSection />
+        </MotionReveal>
+
+        {/* Live Events */}
+        <MotionReveal delay={2200}>
+          <LiveEventsSection />
+        </MotionReveal>
+
+        {/* Bottom Spacing */}
+        <View style={styles.bottomSpacing} />
       </Animated.ScrollView>
+    </Animated.View>
     </View>
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
-const ALBUM_W = 146;
-const SONG_ART = 46;
+// Hero Section Component
+const HeroSection = memo(
+  ({
+    artist,
+    onBack,
+    onFollow,
+  }: {
+    artist: ArtistPageData;
+    onBack: () => void;
+    onFollow: () => void;
+  }) => {
+    const responsive = useResponsiveMetrics();
 
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
-  blob: { position: 'absolute', borderRadius: 999 },
+    return (
+      <View
+        style={[
+          styles.heroSection,
+          { paddingHorizontal: responsive.horizontalPadding },
+        ]}
+      >
+      <View style={styles.heroContent}>
+        <View style={styles.heroTopBar}>
+          <PressScale
+            onPress={onBack}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            style={styles.heroNavButton}
+          >
+            <Ionicons name="chevron-back" size={18} color={palette.ink} />
+          </PressScale>
+          <PressScale
+            onPress={onFollow}
+            accessibilityRole="button"
+            accessibilityLabel="Follow artist"
+            style={styles.heroFollowButton}
+          >
+            <Ionicons name="heart-outline" size={18} color={palette.ink} />
+            <AuraText variant="caption" style={styles.heroFollowText}>
+              Follow
+            </AuraText>
+          </PressScale>
+        </View>
 
-  // ── sticky header
-  stickyHdr: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100, overflow: 'hidden' },
-  stickyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, height: 54 },
-  stickyBtn: { width: 42, height: 42, justifyContent: 'center', alignItems: 'center' },
-  stickyName: { color: C.text, fontSize: 17, fontWeight: '800', letterSpacing: -0.3 },
+        {/* Artist Image */}
+        <View style={styles.heroImageContainer}>
+          <Image
+            source={{ uri: artist.image }}
+            style={styles.heroImage}
+            contentFit="cover"
+            transition={300}
+            placeholder={palette.backgroundRaised}
+          />
+          <LinearGradient
+            colors={["transparent", "rgba(7,7,12,0.8)"]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={styles.heroImageOverlay}
+          />
+        </View>
 
-  // ── floating buttons
-  floatBack: { position: 'absolute', left: 16, zIndex: 90 },
-  floatShare: { position: 'absolute', right: 16, zIndex: 90 },
-  floatBtn: { width: 42, height: 42, justifyContent: 'center', alignItems: 'center' },
+        {/* Artist Info */}
+        <View style={styles.heroInfo}>
+          {artist.verified && (
+            <View style={styles.verifiedBadge}>
+              <Ionicons
+                name="checkmark-circle"
+                size={16}
+                color={palette.primary}
+              />
+              <AuraText variant="caption" style={styles.verifiedText}>
+                Verified Artist
+              </AuraText>
+            </View>
+          )}
 
-  // ── hero image
-  heroWrap: { position: 'absolute', top: 0, left: 0, right: 0, height: width * 0.88 },
+          <AuraText
+            variant="display"
+            style={styles.artistName}
+            numberOfLines={2}
+          >
+            {artist.name}
+          </AuraText>
 
-  // ── artist info block
-  artistBlock: { paddingHorizontal: PAD, marginBottom: 36 },
+          <AuraText variant="body" style={styles.monthlyListeners}>
+            {artist.monthlyListeners} monthly listeners
+          </AuraText>
 
-  // badge row
-  badgeRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
-  verifiedPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(70,245,224,0.10)', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(70,245,224,0.22)' },
-  verifiedTxt: { color: C.accent, fontSize: 9, fontWeight: '900', letterSpacing: 0.9 },
-  listenersTxt: { color: C.textSecondary, fontSize: 13, fontWeight: '500' },
-  artistName: { color: C.text, fontSize: 44, fontWeight: '900', letterSpacing: -1.8, marginBottom: 22, lineHeight: 50 },
+          {artist.genres && (
+            <View style={styles.genresContainer}>
+              {artist.genres.map((genre, index) => (
+                <AuraText key={genre} variant="caption" style={styles.genre}>
+                  {genre}
+                  {index < artist.genres!.length - 1 ? " • " : ""}
+                </AuraText>
+              ))}
+            </View>
+          )}
 
-  // action row — FIX: all three always visible
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 10,
-    rowGap: 12,
+          {artist.tagline && (
+            <AuraText
+              variant="headline"
+              style={styles.tagline}
+              numberOfLines={2}
+            >
+              {artist.tagline}
+            </AuraText>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+});
+
+// Floating Controls Component
+const FloatingControls = memo(
+  ({
+    onPlay,
+    onShuffle,
+    onFollow,
+    onShare,
+    onLike,
+  }: {
+    onPlay: () => void;
+    onShuffle: () => void;
+    onFollow: () => void;
+    onShare: () => void;
+    onLike: () => void;
+  }) => {
+    const responsive = useResponsiveMetrics();
+
+    return (
+      <View
+        style={[
+          styles.floatingControls,
+          { paddingHorizontal: responsive.horizontalPadding },
+        ]}
+      >
+        <LiquidGlass
+          borderRadius={radius.xl}
+          style={styles.controlsContainer}
+          contentStyle={styles.controlsStack}
+        >
+          <View style={styles.primaryControls}>
+            <PressScale
+              scaleTo={0.94}
+              onPress={onPlay}
+              accessibilityRole="button"
+              accessibilityLabel="Play artist"
+              style={[styles.controlButton, styles.primaryButton]}
+            >
+              <Ionicons name="play" size={18} color={palette.ink} />
+              <AuraText variant="headline" style={styles.controlText}>
+                Play
+              </AuraText>
+            </PressScale>
+
+            <PressScale
+              scaleTo={0.94}
+              onPress={onShuffle}
+              accessibilityRole="button"
+              accessibilityLabel="Shuffle artist"
+              style={[styles.controlButton, styles.primaryButton]}
+            >
+              <Ionicons name="shuffle" size={18} color={palette.ink} />
+              <AuraText variant="headline" style={styles.controlText}>
+                Shuffle
+              </AuraText>
+            </PressScale>
+          </View>
+
+          <View style={styles.secondaryControls}>
+            <PressScale
+              scaleTo={0.92}
+              onPress={onFollow}
+              accessibilityRole="button"
+              accessibilityLabel="Follow artist"
+              style={styles.iconButton}
+            >
+              <Ionicons name="person-add" size={18} color={palette.ink} />
+            </PressScale>
+
+            <PressScale
+              scaleTo={0.92}
+              onPress={onShare}
+              accessibilityRole="button"
+              accessibilityLabel="Share artist"
+              style={styles.iconButton}
+            >
+              <Ionicons name="share-social" size={18} color={palette.ink} />
+            </PressScale>
+
+            <PressScale
+              scaleTo={0.92}
+              onPress={onLike}
+              accessibilityRole="button"
+              accessibilityLabel="Like artist"
+              style={styles.iconButton}
+            >
+              <Ionicons name="heart" size={18} color={palette.primary} />
+            </PressScale>
+          </View>
+        </LiquidGlass>
+      </View>
+    );
   },
-  playWrap: { flexGrow: 1, flexBasis: 148, height: 50, borderRadius: 26, overflow: 'hidden', minWidth: 132 },
-  playInner: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  iconBtnWrap: { width: 50, height: 50, borderRadius: 26, overflow: 'hidden', flexShrink: 0 },
-  iconBtnInner: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  followWrap: { flexGrow: 1, flexBasis: 124, height: 50, borderRadius: 26, overflow: 'hidden', flexShrink: 0, minWidth: 118 },
-  followInner: { flex: 1, height: 50, justifyContent: 'center', alignItems: 'center' },
-  followingInner: {
-    flex: 1, height: 50, flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'center', gap: 5,
-    backgroundColor: 'rgba(70,245,224,0.09)',
-    borderRadius: 26, borderWidth: 1, borderColor: 'rgba(70,245,224,0.22)',
-  },
-  btnTxt: { color: C.text, fontSize: 15, fontWeight: '700' },
+);
 
-  // ── sections
-  section: { paddingHorizontal: PAD, marginBottom: 40 },
-  secHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  secTitle: { color: C.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.4 },
-  seeAll: { color: C.accent, fontSize: 13, fontWeight: '700' },
+// Quick Stats Component
+const QuickStats = memo(({ artist }: { artist: ArtistPageData }) => {
+  const responsive = useResponsiveMetrics();
 
-  // ── song rows — FIX: all elements visible
-  songRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: 12,
-    paddingRight: 8,  // less padding on right — actions have own padding
-    paddingVertical: 11,
-    gap: 10,
-    width: '100%',
-  },
-  songRank: { color: C.textMuted, fontSize: 13, fontWeight: '700', width: 18, textAlign: 'center', flexShrink: 0 },
-  songArtBox: {
-    width: SONG_ART, height: SONG_ART,
-    borderRadius: 10,
-    overflow: 'hidden',
-    flexShrink: 0,         // never shrink art
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  playingBadge: {
-    position: 'absolute', bottom: 2, right: 2,
-    width: 16, height: 16, borderRadius: 8,
-    backgroundColor: C.primary,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  songText: { flex: 1, minWidth: 0 },  // flex:1 + minWidth:0 = shrinks properly
-  songTitle: { color: C.text, fontSize: 15, fontWeight: '700', marginBottom: 3 },
-  songMeta: { color: C.textSecondary, fontSize: 11, fontWeight: '500' },
-  songActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    flexShrink: 0,         // never shrink actions — they stay visible
-  },
-  songDur: { color: C.textMuted, fontSize: 11, fontWeight: '600', marginRight: 2, width: 30, textAlign: 'right' },
-  songIconBtn: { width: 32, height: 32, justifyContent: 'center', alignItems: 'center' },
+  const stats = [
+    { label: "Monthly Listeners", value: artist.monthlyListeners || "0" },
+    { label: "Total Plays", value: "2.1B" },
+    { label: "Followers", value: artist.followers || "0" },
+    { label: "Trending", value: "#12" },
+    { label: "Match", value: "98%" },
+  ];
 
-  // ── albums
-  albumCard: { width: ALBUM_W },
-  albumArtWrap: {
-    width: ALBUM_W, height: ALBUM_W,
-    borderRadius: 20, overflow: 'hidden',
-    marginBottom: 10,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  albumPlayBtn: {
-    position: 'absolute', bottom: 10, right: 10,
-    width: 34, height: 34, borderRadius: 17,
-    overflow: 'hidden',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  albumTitle: { color: C.text, fontSize: 14, fontWeight: '700', marginBottom: 3 },
-  albumYear: { color: C.textMuted, fontSize: 11, fontWeight: '500' },
+  return (
+    <View
+      style={[
+        styles.statsSection,
+        { paddingHorizontal: responsive.horizontalPadding },
+      ]}
+    >
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.statsContainer}
+      >
+        {stats.map((stat, index) => (
+          <MotionReveal key={stat.label} delay={index * 100}>
+            <LiquidGlass
+              borderRadius={radius.lg}
+              style={styles.statCard}
+              contentStyle={styles.statContent}
+            >
+              <AuraText variant="caption" style={styles.statLabel}>
+                {stat.label}
+              </AuraText>
+              <AuraText variant="title" style={styles.statValue}>
+                {stat.value}
+              </AuraText>
+            </LiquidGlass>
+          </MotionReveal>
+        ))}
+      </ScrollView>
+    </View>
+  );
+});
 
-  // ── insights
-  insightsCard: { padding: 22 },
-  insightsHead: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
-  insightsIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: 'rgba(70,245,224,0.10)', justifyContent: 'center', alignItems: 'center' },
-  insightsTitle: { color: C.text, fontSize: 17, fontWeight: '800' },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,59,48,0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,59,48,0.22)' },
-  liveDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: '#FF3B30' },
-  liveTxt: { color: '#FF3B30', fontSize: 9, fontWeight: '900', letterSpacing: 1 },
-  chartWrap: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height: 60, marginBottom: 22, paddingHorizontal: 4 },
-  statRow: { flexDirection: 'row', gap: 12 },
-  statPill: { flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', padding: 14, borderRadius: 18, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  statNum: { color: C.text, fontSize: 26, fontWeight: '900', marginBottom: 3 },
-  statLbl: { color: C.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1 },
+// Top Tracks Section
+const TopTracksSection = memo(
+  ({
+    tracks,
+    currentTrack,
+    isPlaying,
+    onTrackPress,
+  }: {
+    tracks: CatalogTrack[];
+    currentTrack: any;
+    isPlaying: boolean;
+    onTrackPress: (track: CatalogTrack) => void;
+  }) => {
+    const responsive = useResponsiveMetrics();
 
-  // ── bio
-  bioCard: { overflow: 'hidden' },
-  bioGlow: { position: 'absolute', top: -50, right: -50, width: 160, height: 160, backgroundColor: C.primary, opacity: 0.09, borderRadius: 80 },
-  bioHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  bioMicIcon: { width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(191,90,242,0.15)', justifyContent: 'center', alignItems: 'center' },
-  bioTitle: { color: C.text, fontSize: 17, fontWeight: '800', flex: 1 },
-  bioBody: { color: C.textSecondary, fontSize: 14, lineHeight: 22, opacity: 0.88 },
-  bioMore: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 16 },
-  bioMoreTxt: { color: C.primary, fontSize: 13, fontWeight: '700' },
+    return (
+      <View
+        style={[
+          styles.section,
+          { paddingHorizontal: responsive.horizontalPadding },
+        ]}
+      >
+        <SectionHeader title="Top Tracks" actionLabel="See all" />
 
-  // ── similar
-  similarRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 12,
-    minHeight: 84,
+        <View style={styles.tracksList}>
+          {tracks.map((track, index) => (
+            <MotionReveal key={track.id} delay={index * 50}>
+              <MediaListItem
+                title={track.title}
+                subtitle={track.artist}
+                image={track.art}
+                meta={track.duration}
+                active={currentTrack?.id === track.id}
+                onPress={() => onTrackPress(track)}
+                style={styles.trackItem}
+              />
+            </MotionReveal>
+          ))}
+        </View>
+      </View>
+    );
   },
-  similarAvatarWrap: { width: 50, height: 50, borderRadius: 25, overflow: 'hidden', flexShrink: 0, backgroundColor: 'rgba(255,255,255,0.05)' },
-  similarInfo: { flex: 1, minWidth: 0 },
-  similarName: { color: C.text, fontSize: 15, fontWeight: '700', marginBottom: 2 },
-  similarListeners: { color: C.textMuted, fontSize: 11, fontWeight: '500' },
-  simFollowWrap: { flexShrink: 0, minWidth: 88 },
-  simFollowInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, minHeight: 36, paddingHorizontal: 12, paddingVertical: 8 },
-  simFollowTxt: { color: C.primary, fontSize: 12, fontWeight: '700' },
+);
+
+// Popular Releases Section
+const PopularReleasesSection = memo(() => {
+  const responsive = useResponsiveMetrics();
+
+  return (
+    <View
+      style={[
+        styles.section,
+        { paddingHorizontal: responsive.horizontalPadding },
+      ]}
+    >
+      <SectionHeader title="Popular Releases" actionLabel="See all" />
+
+      {/* Placeholder for popular releases */}
+      <View style={styles.placeholder}>
+        <AuraText variant="body" muted>
+          Popular releases will appear here
+        </AuraText>
+      </View>
+    </View>
+  );
+});
+
+// Album Showcase Section
+const AlbumShowcaseSection = memo(() => {
+  const responsive = useResponsiveMetrics();
+
+  return (
+    <View
+      style={[
+        styles.section,
+        { paddingHorizontal: responsive.horizontalPadding },
+      ]}
+    >
+      <SectionHeader title="Albums" actionLabel="See all" />
+
+      {/* Placeholder for album showcase */}
+      <View style={styles.placeholder}>
+        <AuraText variant="body" muted>
+          Album showcase will appear here
+        </AuraText>
+      </View>
+    </View>
+  );
+});
+
+// About Artist Section
+const AboutArtistSection = memo(({ artist }: { artist: ArtistPageData }) => {
+  const responsive = useResponsiveMetrics();
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <View
+      style={[
+        styles.section,
+        { paddingHorizontal: responsive.horizontalPadding },
+      ]}
+    >
+      <SectionHeader title="About" />
+
+      <LiquidGlass
+        borderRadius={radius.lg}
+        style={styles.aboutCard}
+        contentStyle={styles.aboutContent}
+      >
+        <AuraText variant="body" style={styles.biography}>
+          {expanded
+            ? artist.biography
+            : `${artist.biography?.slice(0, 150)}...`}
+        </AuraText>
+
+        <PressScale scaleTo={0.98} onPress={() => setExpanded(!expanded)}>
+          <AuraText variant="caption" style={styles.expandText}>
+            {expanded ? "Show less" : "Show more"}
+          </AuraText>
+        </PressScale>
+
+        <View style={styles.aboutDetails}>
+          {artist.origin && (
+            <View style={styles.detailRow}>
+              <Ionicons
+                name="location-outline"
+                size={16}
+                color={palette.inkDim}
+              />
+              <AuraText variant="caption" style={styles.detailText}>
+                {artist.origin}
+              </AuraText>
+            </View>
+          )}
+
+          {artist.influences && (
+            <View style={styles.detailRow}>
+              <Ionicons
+                name="musical-notes-outline"
+                size={16}
+                color={palette.inkDim}
+              />
+              <AuraText variant="caption" style={styles.detailText}>
+                Influences: {artist.influences.join(", ")}
+              </AuraText>
+            </View>
+          )}
+        </View>
+      </LiquidGlass>
+    </View>
+  );
+});
+
+// Collaborators Section
+const CollaboratorsSection = memo(
+  ({ collaborators }: { collaborators: string[] }) => {
+    const responsive = useResponsiveMetrics();
+
+    if (!collaborators.length) return null;
+
+    return (
+      <View
+        style={[
+          styles.section,
+          { paddingHorizontal: responsive.horizontalPadding },
+        ]}
+      >
+        <SectionHeader title="Collaborators" />
+
+        <LiquidGlass
+          borderRadius={radius.lg}
+          style={styles.collaboratorsCard}
+          contentStyle={styles.collaboratorsContent}
+        >
+          {collaborators.map((collaborator, index) => (
+            <AuraText
+              key={collaborator}
+              variant="body"
+              style={styles.collaborator}
+            >
+              {collaborator}
+              {index < collaborators.length - 1 ? ", " : ""}
+            </AuraText>
+          ))}
+        </LiquidGlass>
+      </View>
+    );
+  },
+);
+
+// Related Artists Section
+const RelatedArtistsSection = memo(() => {
+  const responsive = useResponsiveMetrics();
+
+  return (
+    <View
+      style={[
+        styles.section,
+        { paddingHorizontal: responsive.horizontalPadding },
+      ]}
+    >
+      <SectionHeader title="Related Artists" actionLabel="See all" />
+
+      {/* Placeholder for related artists */}
+      <View style={styles.placeholder}>
+        <AuraText variant="body" muted>
+          Related artists will appear here
+        </AuraText>
+      </View>
+    </View>
+  );
+});
+
+// Fan Insights Section
+const FanInsightsSection = memo(
+  ({ insights }: { insights?: ArtistPageData["fanInsights"] }) => {
+    const responsive = useResponsiveMetrics();
+
+    if (!insights) return null;
+
+    return (
+      <View
+        style={[
+          styles.section,
+          { paddingHorizontal: responsive.horizontalPadding },
+        ]}
+      >
+        <SectionHeader title="Fan Insights" />
+
+        <LiquidGlass
+          borderRadius={radius.lg}
+          style={styles.insightsCard}
+          contentStyle={styles.insightsContent}
+        >
+          <View style={styles.insightRow}>
+            <AuraText variant="headline" style={styles.insightLabel}>
+              Popularity Score
+            </AuraText>
+            <AuraText variant="title" style={styles.insightValue}>
+              {insights.popularityScore}%
+            </AuraText>
+          </View>
+        </LiquidGlass>
+      </View>
+    );
+  },
+);
+
+// Music Videos Section
+const MusicVideosSection = memo(() => {
+  const responsive = useResponsiveMetrics();
+
+  return (
+    <View
+      style={[
+        styles.section,
+        { paddingHorizontal: responsive.horizontalPadding },
+      ]}
+    >
+      <SectionHeader title="Music Videos" actionLabel="See all" />
+
+      {/* Placeholder for music videos */}
+      <View style={styles.placeholder}>
+        <AuraText variant="body" muted>
+          Music videos will appear here
+        </AuraText>
+      </View>
+    </View>
+  );
+});
+
+// Live Events Section
+const LiveEventsSection = memo(() => {
+  const responsive = useResponsiveMetrics();
+
+  return (
+    <View
+      style={[
+        styles.section,
+        { paddingHorizontal: responsive.horizontalPadding },
+      ]}
+    >
+      <SectionHeader title="Live Events" actionLabel="See all" />
+
+      {/* Placeholder for live events */}
+      <View style={styles.placeholder}>
+        <AuraText variant="body" muted>
+          Live events will appear here
+        </AuraText>
+      </View>
+    </View>
+  );
+});
+
+// Skeleton Components
+const HeroSkeleton = memo(() => (
+  <View style={styles.heroSkeleton}>
+    <SkeletonBlock style={styles.heroImageSkeleton} />
+    <View style={styles.heroInfoSkeleton}>
+      <SkeletonBlock style={styles.verifiedSkeleton} />
+      <SkeletonBlock style={styles.nameSkeleton} />
+      <SkeletonBlock style={styles.listenersSkeleton} />
+      <SkeletonBlock style={styles.genresSkeleton} />
+    </View>
+  </View>
+));
+
+const ControlsSkeleton = memo(() => (
+  <View style={styles.controlsSkeleton}>
+    <SkeletonBlock style={styles.controlsSkeletonBlock} />
+  </View>
+));
+
+const StatsSkeleton = memo(() => (
+  <View style={styles.statsSkeleton}>
+    {Array.from({ length: 5 }).map((_, i) => (
+      <SkeletonBlock key={i} style={styles.statSkeleton} />
+    ))}
+  </View>
+));
+
+const TracksSkeleton = memo(() => (
+  <View style={styles.tracksSkeleton}>
+    {Array.from({ length: 4 }).map((_, i) => (
+      <SkeletonBlock key={i} style={styles.trackSkeleton} />
+    ))}
+  </View>
+));
+
+export default memo(ArtistPage);
+
+// Styles
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: palette.background,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  content: {
+    paddingTop: 0,
+  },
+  loadingContent: {
+    paddingTop: 0,
+  },
+
+  // Sticky Header
+  stickyHeader: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+  },
+  stickyHeaderGlass: {
+    borderTopWidth: 0,
+    borderLeftWidth: 0,
+    borderRightWidth: 0,
+  },
+  stickyHeaderContent: {
+    paddingTop: Platform.OS === "ios" ? 50 : 30,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  backButtonWrapper: {
+    marginRight: spacing.sm,
+  },
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: radius.xl,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  stickyTitleGroup: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  stickyTitle: {
+    flex: 1,
+  },
+  stickySubtitle: {
+    color: palette.inkMuted,
+  },
+
+  // Hero Section
+  heroSection: {
+    paddingTop: Platform.OS === "ios" ? 60 : 40,
+    paddingBottom: spacing.xxl,
+  },
+  heroContainer: {
+    alignItems: "center",
+  },
+  pageTransition: {
+    flex: 1,
+  },
+  heroTopBar: {
+    position: "absolute",
+    top: 12,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+  },
+  heroNavButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.xl,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  heroFollowButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.xl,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  heroFollowText: {
+    color: palette.ink,
+  },
+  heroContent: {
+    alignItems: "center",
+  },
+  heroImageContainer: {
+    position: "relative",
+    marginBottom: spacing.xl,
+  },
+  heroImage: {
+    width: 280,
+    height: 280,
+    borderRadius: radius.xl,
+    backgroundColor: palette.backgroundRaised,
+  },
+  heroImageOverlay: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 140,
+    borderRadius: radius.xl,
+  },
+  heroInfo: {
+    alignItems: "center",
+    maxWidth: 320,
+  },
+  verifiedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  verifiedText: {
+    color: palette.primary,
+  },
+  artistName: {
+    textAlign: "center",
+    marginBottom: spacing.sm,
+  },
+  monthlyListeners: {
+    color: palette.inkMuted,
+    marginBottom: spacing.md,
+  },
+  genresContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    marginBottom: spacing.md,
+  },
+  genre: {
+    color: palette.inkDim,
+  },
+  tagline: {
+    textAlign: "center",
+    color: palette.inkMuted,
+    fontStyle: "italic",
+  },
+
+  // Floating Controls
+  floatingControls: {
+    marginBottom: spacing.xxl,
+  },
+  controlsContainer: {
+    marginHorizontal: spacing.md,
+  },
+  controlsStack: {
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.md,
+  },
+  primaryControls: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: spacing.md,
+  },
+  secondaryControls: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  controlButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    justifyContent: "center",
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.xl,
+    minHeight: 48,
+    flex: 1,
+  },
+  primaryButton: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  iconButton: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.xl,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  controlText: {
+    fontSize: 15,
+  },
+  controlDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: palette.border,
+  },
+
+  // Stats Section
+  statsSection: {
+    marginBottom: spacing.xxl,
+  },
+  statsContainer: {
+    paddingHorizontal: spacing.md,
+    gap: spacing.md,
+  },
+  statCard: {
+    minWidth: 120,
+    height: 80,
+  },
+  statContent: {
+    padding: spacing.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statLabel: {
+    color: palette.inkDim,
+    marginBottom: spacing.xs,
+  },
+  statValue: {
+    color: palette.primary,
+  },
+
+  // Section
+  section: {
+    marginBottom: spacing.xxl,
+  },
+  tracksList: {
+    gap: spacing.xs,
+  },
+  trackItem: {
+    marginHorizontal: spacing.md,
+  },
+
+  // About Section
+  aboutCard: {
+    marginHorizontal: spacing.md,
+  },
+  aboutContent: {
+    padding: spacing.lg,
+  },
+  biography: {
+    lineHeight: 22,
+    marginBottom: spacing.md,
+  },
+  expandText: {
+    color: palette.primary,
+    marginBottom: spacing.lg,
+  },
+  aboutDetails: {
+    gap: spacing.sm,
+  },
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  detailText: {
+    color: palette.inkMuted,
+  },
+
+  // Collaborators
+  collaboratorsCard: {
+    marginHorizontal: spacing.md,
+  },
+  collaboratorsContent: {
+    padding: spacing.lg,
+  },
+  collaborator: {
+    color: palette.inkMuted,
+  },
+
+  // Insights
+  insightsCard: {
+    marginHorizontal: spacing.md,
+  },
+  insightsContent: {
+    padding: spacing.lg,
+  },
+  insightRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  insightLabel: {
+    color: palette.inkMuted,
+  },
+  insightValue: {
+    color: palette.primary,
+  },
+
+  // Placeholder
+  placeholder: {
+    marginHorizontal: spacing.md,
+    padding: spacing.lg,
+    alignItems: "center",
+  },
+
+  // Bottom Spacing
+  bottomSpacing: {
+    height: spacing.xxl * 2,
+  },
+
+  // Skeletons
+  heroSkeleton: {
+    paddingTop: Platform.OS === "ios" ? 60 : 40,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxl,
+    alignItems: "center",
+  },
+  heroImageSkeleton: {
+    width: 280,
+    height: 280,
+    borderRadius: radius.xl,
+    marginBottom: spacing.xl,
+  },
+  heroInfoSkeleton: {
+    alignItems: "center",
+    maxWidth: 320,
+  },
+  verifiedSkeleton: {
+    width: 100,
+    height: 20,
+    marginBottom: spacing.md,
+  },
+  nameSkeleton: {
+    width: 200,
+    height: 42,
+    marginBottom: spacing.sm,
+  },
+  listenersSkeleton: {
+    width: 150,
+    height: 16,
+    marginBottom: spacing.md,
+  },
+  genresSkeleton: {
+    width: 120,
+    height: 14,
+  },
+
+  controlsSkeleton: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.xxl,
+  },
+  controlsSkeletonBlock: {
+    height: 60,
+    borderRadius: radius.pill,
+  },
+
+  statsSkeleton: {
+    flexDirection: "row",
+    paddingHorizontal: spacing.md,
+    gap: spacing.md,
+    marginBottom: spacing.xxl,
+  },
+  statSkeleton: {
+    width: 120,
+    height: 80,
+    borderRadius: radius.lg,
+  },
+
+  tracksSkeleton: {
+    marginHorizontal: spacing.md,
+    gap: spacing.xs,
+    marginBottom: spacing.xxl,
+  },
+  trackSkeleton: {
+    height: 70,
+    borderRadius: radius.md,
+  },
 });

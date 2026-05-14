@@ -25,9 +25,26 @@ export class PlaybackController {
       const newState = data.state;
       
       if (this.lastState === newState) return; // Deduplicate
+      const previousState = this.lastState;
       this.lastState = newState;
 
       console.log("[Player] Playback state:", newState);
+
+      // Deep diagnostics for local playback
+      if (store.currentTrack?.isLocal) {
+        const progress = TrackPlayer.getProgress();
+        const activeItem = TrackPlayer.getActiveMediaItem();
+        console.log(`[LocalPlayer Diagnostic] State: ${previousState} -> ${newState}`, {
+          activeTrack: activeItem?.title,
+          activeId: activeItem?.mediaId,
+          pos: progress.position.toFixed(2),
+          dur: progress.duration.toFixed(2),
+        });
+
+        if (previousState === PlaybackState.Buffering && newState === PlaybackState.Idle) {
+          console.error("[LocalPlayer] Native preparation failed: buffering -> idle transition detected.");
+        }
+      }
 
       switch (newState) {
         case PlaybackState.Ready:
@@ -126,27 +143,7 @@ export class PlaybackController {
       usePlayerStore.getState().previous();
     });
 
-    TrackPlayer.addEventListener(Event.RemoteRepeat, () => {
-      console.log("[Player] Remote Repeat Toggle (2-State)");
-      const store = usePlayerStore.getState();
-      const currentMode = store.repeatMode;
-      const nextMode = currentMode === "off" ? "track" : "off";
-      store.setRepeatMode(nextMode);
-    });
-
-    TrackPlayer.addEventListener(Event.RemoteLike, () => {
-      console.log("[Player] Remote Like (Placeholder)");
-      // TODO: Implement like logic in store
-    });
-
-    TrackPlayer.addEventListener(Event.RemoteDislike, () => {
-      console.log("[Player] Remote Dislike (Placeholder)");
-      // TODO: Implement dislike logic in store
-    });
-
     TrackPlayer.addEventListener(Event.RemoteSeek, (event) => {
-
-
       TrackPlayer.seekTo(event.position);
     });
 

@@ -4,8 +4,8 @@ import { ThemeProvider as NavigationThemeProvider, DarkTheme } from '@react-navi
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { MusicProvider, useNowPlayingTrack } from '../src/context/MusicContext';
 import { palette } from '../src/design/tokens';
-import { StyleSheet, BackHandler } from 'react-native';
-import { useRouter, usePathname, useSegments } from 'expo-router';
+import { StyleSheet } from 'react-native';
+import { usePathname, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts, Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
@@ -16,6 +16,7 @@ import { enableFreeze } from 'react-native-screens';
 import MiniPlayer from '../src/components/MiniPlayer';
 import { PlaybackService } from '../src/features/player/services/playback.service';
 import { PlaybackController } from '../src/features/player/services/playback.controller';
+import { useSmartBackNavigation } from '../src/hooks/use-navigation-history';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 enableFreeze(true);
@@ -57,27 +58,7 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, error]);
 
-  const router = useRouter();
-  const segments = useSegments();
-
-  useEffect(() => {
-    const onBackPress = () => {
-      // Use type cast to bypass overly restrictive segment types from typed routes
-      const s = segments as string[];
-      const isAtRoot = 
-        s.length === 0 || 
-        (s[0] === '(tabs)' && (s.length === 1 || s[1] === 'index' || s[1] === '(index)'));
-      
-      if (!isAtRoot && router.canGoBack()) {
-        router.back();
-        return true;
-      }
-      return false;
-    };
-
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', onBackPress);
-    return () => backHandler.remove();
-  }, [segments, router]);
+  useSmartBackNavigation();
 
   const navigationTheme = useMemo(
     () => ({

@@ -35,6 +35,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
+import { QueueSheet } from "@/src/features/player/components/QueueSheet";
+import { InsightPanel } from "@/src/features/player/components/InsightPanel";
 
 const { width, height } = Dimensions.get("window");
 
@@ -95,6 +97,36 @@ const GlassCard = ({
   </View>
 );
 
+// ── Interactive Artist Names ────────────────────────────────────────────────
+const InteractiveArtistNames = ({ names, onArtistPress }: { names: string, onArtistPress: (name: string) => void }) => {
+  const artistList = names.split(/[,&]|\sfeat\.|\sft\./).map(n => n.trim()).filter(Boolean);
+  
+  if (artistList.length <= 1) {
+    return (
+      <TouchableOpacity onPress={() => onArtistPress(names)}>
+        <Text style={styles.artistName} numberOfLines={1}>
+          {names}
+        </Text>
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View style={styles.artistNamesRow}>
+      {artistList.map((name, index) => (
+        <React.Fragment key={name}>
+          <TouchableOpacity onPress={() => onArtistPress(name)}>
+            <Text style={styles.artistName}>{name}</Text>
+          </TouchableOpacity>
+          {index < artistList.length - 1 && (
+            <Text style={styles.artistSeparator}> • </Text>
+          )}
+        </React.Fragment>
+      ))}
+    </View>
+  );
+};
+
 // ── Main Screen ───────────────────────────────────────────────────────────────
 export default function NowPlayingScreen() {
   const router = useRouter();
@@ -121,6 +153,8 @@ export default function NowPlayingScreen() {
   const [isLiked, setIsLiked] = useState(false);
   const [isInfoVisible, setIsInfoVisible] = useState(false);
   const [isImageLoading, setIsImageLoading] = useState(true);
+  const [isQueueVisible, setIsQueueVisible] = useState(false);
+  const [isInsightVisible, setIsInsightVisible] = useState(false);
 
   // Re-track image loading when track changes
   useEffect(() => {
@@ -134,6 +168,9 @@ export default function NowPlayingScreen() {
 
   const pageOpacity = useSharedValue(0);
   const pageScale = useSharedValue(0.95);
+
+  // Insight Panel Reveal Value
+  const insightReveal = useSharedValue(0);
 
   // Reset art visually when track changes
   useEffect(() => {
@@ -153,7 +190,8 @@ export default function NowPlayingScreen() {
   }, [isPlaying]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  const artGesture = Gesture.Pan()
+  const horizontalGesture = Gesture.Pan()
+    .activeOffsetX([-10, 10])
     .onUpdate((event) => {
       artTranslateX.value = event.translationX;
       artScale.value = 1.05 - Math.abs(event.translationX / width) * 0.2;
@@ -176,6 +214,23 @@ export default function NowPlayingScreen() {
       }
     });
 
+  const verticalGesture = Gesture.Pan()
+    .activeOffsetY([10, 20])
+    .onUpdate((event) => {
+      if (event.translationY > 0) {
+        insightReveal.value = event.translationY;
+      }
+    })
+    .onEnd((event) => {
+      if (event.translationY > 120 || event.velocityY > 500) {
+        runOnJS(setIsInsightVisible)(true);
+        runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
+      }
+      insightReveal.value = withSpring(0, SPRING_CONFIG);
+    });
+
+  const artGesture = Gesture.Exclusive(horizontalGesture, verticalGesture);
+
   const artStyle = useAnimatedStyle(() => ({
     transform: [
       { scale: artScale.value },
@@ -187,6 +242,10 @@ export default function NowPlayingScreen() {
   const containerStyle = useAnimatedStyle(() => ({
     opacity: pageOpacity.value,
     transform: [{ scale: pageScale.value }],
+  }));
+
+  const insightRevealStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: insightReveal.value }],
   }));
 
   if (!currentTrack) {
@@ -240,7 +299,7 @@ export default function NowPlayingScreen() {
           />
         </View>
 
-        <View style={[styles.mainCanvas, { paddingTop: insets.top + 4 }]}>
+        <Animated.View style={[styles.mainCanvas, insightRevealStyle, { paddingTop: insets.top + 4 }]}>
           {/* Header */}
           <View style={styles.dragHandleContainer}>
             <View style={styles.dragHandle} />
@@ -305,13 +364,13 @@ export default function NowPlayingScreen() {
               <Text style={styles.trackTitle} numberOfLines={1}>
                 {currentTrack.title}
               </Text>
-              <TouchableOpacity
-                onPress={() => openArtistByName(router, currentTrack.artist)}
-              >
-                <Text style={styles.artistName} numberOfLines={1}>
-                  {currentTrack.artist}
-                </Text>
-              </TouchableOpacity>
+              <InteractiveArtistNames 
+                names={currentTrack.artist} 
+                onArtistPress={(name) => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  openArtistByName(router, name);
+                }} 
+              />
             </View>
             <TouchableOpacity
               onPress={() => {
@@ -390,6 +449,13 @@ export default function NowPlayingScreen() {
                 color="rgba(255,255,255,0.4)"
               />
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => setIsQueueVisible(true)}>
+              <Ionicons
+                name="list"
+                size={26}
+                color="rgba(255,255,255,0.4)"
+              />
+            </TouchableOpacity>
             <TouchableOpacity onPress={toggleRepeat}>
               <Ionicons
                 name={repeatMode === 1 ? "repeat" : "repeat-outline"}
@@ -401,7 +467,7 @@ export default function NowPlayingScreen() {
 
           {/* Optimized Volume Section */}
           <VolumeControl accentColor={c0} />
-        </View>
+        </Animated.View>
 
         {/* Info Modal */}
         <Modal
@@ -441,6 +507,21 @@ export default function NowPlayingScreen() {
             </GlassCard>
           </TouchableOpacity>
         </Modal>
+
+        {/* Queue Sheet */}
+        <QueueSheet 
+          isVisible={isQueueVisible} 
+          onClose={() => setIsQueueVisible(false)} 
+          accentColor={c0}
+        />
+
+        {/* Insight Panel */}
+        <InsightPanel 
+          isVisible={isInsightVisible} 
+          onClose={() => setIsInsightVisible(false)} 
+          track={currentTrack}
+          accentColor={c0}
+        />
       </Animated.View>
     </GestureHandlerRootView>
   );
@@ -692,6 +773,16 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: "rgba(255,255,255,0.5)",
     marginTop: 4,
+    fontWeight: "500",
+  },
+  artistNamesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  artistSeparator: {
+    fontSize: 17,
+    color: "rgba(255,255,255,0.3)",
     fontWeight: "500",
   },
   likeBtn: { padding: 6 },

@@ -9,6 +9,11 @@ export interface MusicTrack {
   art: string;
   url?: string;
   time?: string;
+  // Local Media Support
+  isLocal?: boolean;
+  localUri?: string;
+  mimeType?: string;
+  folderName?: string;
 }
 
 /**

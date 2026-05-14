@@ -6,11 +6,12 @@ export interface PlayerTrack {
   url: string;
   duration?: number;
   dominantColors?: string[];
+  isLocal?: boolean;
 }
 
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'error';
 
-export type RepeatMode = 'off' | 'track';
+export type RepeatMode = 'off' | 'track' | 'queue';
 
 export interface PlaybackState {
   currentTrack: PlayerTrack | null;

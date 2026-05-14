@@ -3,6 +3,8 @@ import { PlayerTrack } from "@/src/features/player/types/player";
 import { useSearch } from "@/src/hooks/use-search";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
 import { MusicTrack } from "@/src/types/music";
+import { useRecentSearchStore } from "@/src/features/search/store/recent-search.store";
+import { RecentSearchItem } from "@/src/features/search/types/recent-search";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
@@ -29,6 +31,7 @@ import {
     View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { CategoryTabs } from "@/src/components/CategoryTabs";
 
 const { width: SW, height: SH } = Dimensions.get("window");
 const isTablet = SW >= 768;
@@ -120,110 +123,6 @@ const h2r = (hex: string, a: number) => {
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${a})`;
 };
-
-// ── Data ───────────────────────────────────────────────────────────────────
-const ALL_SONGS = [
-  {
-    id: "3",
-    title: "Solar Wind",
-    artist: "Nova Ray",
-    time: "3:42",
-    art: "https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=400",
-  },
-  {
-    id: "4",
-    title: "Gravity Well",
-    artist: "Cosmic Resonance",
-    time: "4:15",
-    art: "https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?w=400",
-  },
-  {
-    id: "5",
-    title: "Supernova",
-    artist: "Astral Plane",
-    time: "5:01",
-    art: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=400",
-  },
-  {
-    id: "nebula",
-    title: "Nebula Drift",
-    artist: "Cosmic Resonance",
-    time: "4:30",
-    art: "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=400",
-  },
-  {
-    id: "s5",
-    title: "Crystal Tide",
-    artist: "Aurora Drift",
-    time: "3:55",
-    art: "https://picsum.photos/seed/ct/400",
-  },
-  {
-    id: "s6",
-    title: "Phase Shift",
-    artist: "The Voyagers",
-    time: "4:02",
-    art: "https://picsum.photos/seed/ps/400",
-  },
-];
-const ALL_ARTISTS = [
-  {
-    id: "6",
-    name: "Cosmic Resonance",
-    followers: "1.2M",
-    art: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400",
-  },
-  {
-    id: "7",
-    name: "The Voyagers",
-    followers: "850K",
-    art: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400",
-  },
-  {
-    id: "a3",
-    name: "Nova Ray",
-    followers: "620K",
-    art: "https://picsum.photos/seed/nr/400",
-  },
-];
-const ALL_ALBUMS = [
-  {
-    id: "8",
-    title: "Event Horizon",
-    art: "https://images.unsplash.com/photo-1502134249126-9f3755a50d78?w=400",
-  },
-  {
-    id: "9",
-    title: "Golden Void",
-    art: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=400",
-  },
-  {
-    id: "a10",
-    title: "Stellar Core",
-    art: "https://picsum.photos/seed/sc/400",
-  },
-];
-const TOP_RESULT = {
-  id: "nebula",
-  title: "Nebula Drift",
-  artist: "Cosmic Resonance",
-  label: "BEST MATCH  •  SONG",
-  art: "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=800",
-};
-const INIT_RECENT = [
-  {
-    id: "1",
-    title: "Neon Echoes",
-    artist: "Pulse Vector",
-    art: "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=400",
-  },
-  {
-    id: "2",
-    title: "Midnight City",
-    artist: "The Voyagers",
-    art: "https://images.unsplash.com/photo-1493225255756-d9584f8606e9?w=400",
-  },
-];
 
 // ── 4-Layer Liquid Glass card ──────────────────────────────────────────────
 const Glass = ({ children, style, r = 20, blur = 65 }: any) => (
@@ -538,7 +437,7 @@ const SectionHead = ({ title, accent = false }: any) => (
 );
 
 // ── Recent search item ──────────────────────────────────────────────────────
-const RecentItem = ({ item, onPlay, onDelete }: any) => {
+const RecentItem = ({ item, onPress, onDelete }: any) => {
   const p = useP();
   const W = (SW - PAD * 2 - 12) / 2;
   return (
@@ -548,13 +447,13 @@ const RecentItem = ({ item, onPlay, onDelete }: any) => {
           style={s.recentInner}
           onPressIn={p.onIn}
           onPressOut={p.onOut}
-          onPress={() => onPlay(item)}
+          onPress={() => onPress(item)}
           activeOpacity={1}
           onLongPress={() => onDelete(item.id)}
         >
           <Image
-            source={{ uri: item.art }}
-            style={s.recentArt}
+            source={{ uri: item.thumbnail }}
+            style={[s.recentArt, item.type === 'artist' && { borderRadius: 22 }]}
             contentFit="cover"
             transition={200}
           />
@@ -563,7 +462,7 @@ const RecentItem = ({ item, onPlay, onDelete }: any) => {
               {item.title}
             </Text>
             <Text style={s.recentArtist} numberOfLines={1}>
-              {item.artist}
+              {item.subtitle || item.type.toUpperCase()}
             </Text>
           </View>
           <TouchableOpacity
@@ -579,20 +478,262 @@ const RecentItem = ({ item, onPlay, onDelete }: any) => {
   );
 };
 
+// ── Top Result Card ────────────────────────────────────────────────────────
+const TopResultCard = ({ song, label, onPlay, goArtistByName, delay = 0 }: any) => {
+  const h = useHeart();
+  const p = useP();
+  const pb = useP();
+  
+  return (
+    <Mat delay={delay}>
+      <View style={s.section}>
+        <SectionHead title="Top Result" />
+        <Animated.View style={{ transform: [{ scale: p.sc }] }}>
+          <Glass style={s.topCard} r={28} blur={60}>
+            {/* accent tint */}
+            <LinearGradient
+              colors={[
+                h2r(C.primaryMid, 0.2),
+                h2r(C.primaryDp, 0.1),
+                "transparent",
+              ]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+            <TouchableOpacity
+              style={s.topInner}
+              onPressIn={p.onIn}
+              onPressOut={p.onOut}
+              onPress={() => onPlay(song)}
+              activeOpacity={1}
+              onLongPress={() => goArtistByName(song.artist)}
+              accessibilityRole="button"
+              accessibilityLabel={`Play ${song.title} by ${song.artist}`}
+            >
+              {/* art */}
+              <View style={s.topArtWrapper}>
+                <Image
+                  source={{ uri: song.art || song.thumbnail }}
+                  style={s.topArt}
+                  contentFit="cover"
+                  transition={300}
+                />
+                {/* glass ring */}
+                <View
+                  style={{
+                    ...StyleSheet.absoluteFillObject,
+                    borderRadius: 22,
+                    borderWidth: 1,
+                    borderColor: "rgba(255,255,255,0.15)",
+                  }}
+                />
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 20,
+                    right: 20,
+                    height: 1.5,
+                    backgroundColor: "rgba(255,255,255,0.22)",
+                  }}
+                />
+                {/* glow */}
+                <View style={s.topArtGlow} />
+              </View>
+
+              {/* info */}
+              <View style={s.topInfo}>
+                <View style={s.topLabelRow}>
+                  <View style={s.topLabelPill}>
+                    <BlurView
+                      intensity={40}
+                      tint="dark"
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <View
+                      style={{
+                        ...StyleSheet.absoluteFillObject,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: h2r(C.accent, 0.3),
+                        backgroundColor: h2r(C.accent, 0.08),
+                      }}
+                    />
+                    <Text style={s.topLabel}>{label || song.label || "BEST MATCH  •  SONG"}</Text>
+                  </View>
+                </View>
+                <Text style={s.topTitle}>{song.title}</Text>
+                <TouchableOpacity
+                  onPress={() => goArtistByName(song.artist)}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${song.artist}`}
+                >
+                  <Text style={s.topArtist}>{song.artist}</Text>
+                </TouchableOpacity>
+
+                {/* action row */}
+                <View style={s.topActions}>
+                  {/* play btn — full glass */}
+                  <Animated.View
+                    style={{
+                      transform: [{ scale: pb.sc }],
+                      flex: 1,
+                    }}
+                  >
+                    <TouchableOpacity
+                      style={s.topPlayBtn}
+                      onPressIn={pb.onIn}
+                      onPressOut={pb.onOut}
+                      onPress={() => onPlay(song)}
+                      activeOpacity={1}
+                    >
+                      <LinearGradient
+                        colors={[C.primary, C.primaryMid, C.primaryDp]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={StyleSheet.absoluteFill}
+                      />
+                      <View
+                        style={{
+                          position: "absolute",
+                          top: 3,
+                          left: 16,
+                          right: 16,
+                          height: 2.5,
+                          borderRadius: 2,
+                          backgroundColor: "rgba(255,255,255,0.28)",
+                        }}
+                      />
+                      <View
+                        style={{
+                          position: "absolute",
+                          left: 8,
+                          top: 6,
+                          width: 20,
+                          bottom: 6,
+                          borderRadius: 8,
+                          backgroundColor: "rgba(255,255,255,0.15)",
+                          transform: [{ skewX: "-8deg" }],
+                        }}
+                      />
+                      <View
+                        style={{
+                          ...StyleSheet.absoluteFillObject,
+                          borderRadius: 24,
+                          borderWidth: 1,
+                          borderColor: "rgba(255,255,255,0.18)",
+                        }}
+                      />
+                      <Ionicons
+                        name="play"
+                        size={18}
+                        color="#FFF"
+                        style={{ marginLeft: 3, zIndex: 2 }}
+                      />
+                      <Text style={s.topPlayText}>Play Now</Text>
+                    </TouchableOpacity>
+                  </Animated.View>
+
+                  {/* heart */}
+                  <Animated.View
+                    style={{ transform: [{ scale: h.sc }] }}
+                  >
+                    <TouchableOpacity
+                      style={s.topIconBtn}
+                      onPress={h.toggle}
+                    >
+                      <BlurView
+                        intensity={40}
+                        tint="dark"
+                        style={StyleSheet.absoluteFill}
+                      />
+                      <View
+                        style={{
+                          ...StyleSheet.absoluteFillObject,
+                          borderRadius: 24,
+                          borderWidth: 1,
+                          borderColor: h.liked
+                            ? h2r(C.primary, 0.45)
+                            : C.border,
+                        }}
+                      />
+                      <Ionicons
+                        name={
+                          h.liked ? "heart" : "heart-outline"
+                        }
+                        size={20}
+                        color={h.liked ? C.primary : C.text}
+                      />
+                    </TouchableOpacity>
+                  </Animated.View>
+
+                  {/* download */}
+                  <TouchableOpacity
+                    style={s.topIconBtn}
+                    onPress={() =>
+                      Haptics.impactAsync(
+                        Haptics.ImpactFeedbackStyle.Light,
+                      )
+                    }
+                  >
+                    <BlurView
+                      intensity={40}
+                      tint="dark"
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <View
+                      style={{
+                        ...StyleSheet.absoluteFillObject,
+                        borderRadius: 24,
+                        borderWidth: 1,
+                        borderColor: C.border,
+                      }}
+                    />
+                    <Ionicons
+                      name="download-outline"
+                      size={20}
+                      color={C.text}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </Glass>
+        </Animated.View>
+      </View>
+    </Mat>
+  );
+};
+
 // ── MAIN SCREEN ─────────────────────────────────────────────────────────────
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
   const { goNowPlaying, goArtist, goArtistByName, goAlbum } =
     useMusicNavigation("search");
-  const { setQueue } = useMusic();
+  const { setQueue, preloadTrack } = useMusic();
 
   const { query: initialQuery } = useLocalSearchParams<{ query?: string }>();
   const { query, setQuery, results, isLoading, error } = useSearch(
     initialQuery || "",
   );
 
-  const [recent, setRecent] = useState(INIT_RECENT);
+  const { 
+    recentSearches, 
+    loadRecentSearches, 
+    addRecentSearch, 
+    removeRecentSearch, 
+    clearRecentSearches 
+  } = useRecentSearchStore();
+
+  useEffect(() => {
+    loadRecentSearches();
+  }, [loadRecentSearches]);
+
   const [topLiked, setTopLiked] = useState(false);
+  const [activeCategory, setActiveCategory] = useState("All");
+  const SEARCH_CATEGORIES = ["All", "Songs", "Artists", "Albums"];
 
   // animated bg
   const bgP = useRef(new Animated.Value(0)).current;
@@ -634,11 +775,6 @@ export default function SearchScreen() {
     outputRange: [0, -20, 10],
   }); // Pulse translateY
 
-  // top result heart
-  const topHeart = useHeart();
-  const topP = useP();
-  const playBtnP = useP();
-
   const createPlayerTrack = (track: any): PlayerTrack => {
     const url =
       track.url ??
@@ -660,60 +796,195 @@ export default function SearchScreen() {
     async (track: MusicTrack) => {
       if (!track?.id) return;
       
-      // OPTIMISTIC NAVIGATION: Go to Now Playing instantly
-      goNowPlaying(track.id);
-      
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-      const trackList = results.length > 0 ? results : [track];
+      // PRELOAD: Resolve stream URL before navigation to avoid blank player
+      const playerTrack = createPlayerTrack(track);
+      await preloadTrack(playerTrack);
+      
+      // Navigate once resolved
+      goNowPlaying(track.id);
+
+      const trackList = (results?.songs?.length ?? 0) > 0 ? results.songs : [track];
       const playerTracks = trackList.map((t) => createPlayerTrack(t));
       const startIndex = playerTracks.findIndex((t) => t.id === track.id);
 
       console.log(
-        "[Player] Search selected track from list (Instant Nav):",
+        "[Player] Search selected track from list (Post-Preload Nav):",
         track.id,
         "Index:",
         startIndex
       );
 
-      // Start queue resolution in background
+      // Start queue resolution (will use the preloaded track)
       setQueue(playerTracks, startIndex !== -1 ? startIndex : 0).catch(err => {
         console.error("[Player] Background setQueue failed:", err);
       });
     },
-    [goNowPlaying, setQueue, results],
+    [goNowPlaying, setQueue, results, preloadTrack],
+  );
+
+  const handlePlaySong = useCallback(
+    async (song: any) => {
+      // Add to recent
+      addRecentSearch({
+        id: song.id,
+        type: "song",
+        title: song.title,
+        subtitle: song.artist,
+        thumbnail: song.art || song.thumbnail || "",
+        data: song,
+      });
+      
+      handlePlay({
+        id: song.id,
+        title: song.title,
+        artist: song.artist || "",
+        art: song.art || song.thumbnail || "",
+      });
+    },
+    [addRecentSearch, handlePlay],
+  );
+
+  const handlePressArtist = useCallback(
+    (artist: any) => {
+      addRecentSearch({
+        id: artist.id,
+        type: "artist",
+        title: artist.name || artist.title,
+        subtitle: "Artist",
+        thumbnail: artist.art || artist.thumbnail || "",
+        data: artist,
+      });
+      goArtist(artist.id);
+    },
+    [addRecentSearch, goArtist],
+  );
+
+  const handlePressAlbum = useCallback(
+    (album: any) => {
+      addRecentSearch({
+        id: album.id,
+        type: "album",
+        title: album.title,
+        subtitle: album.artist || "Album",
+        thumbnail: album.art || album.thumbnail || "",
+        data: album,
+      });
+      goAlbum(album.id);
+    },
+    [addRecentSearch, goAlbum],
+  );
+
+  const handleRecentPress = useCallback(
+    async (item: RecentSearchItem) => {
+      if (item.type === "song") {
+        handlePlay({
+          id: item.id,
+          title: item.title,
+          artist: item.subtitle || "",
+          art: item.thumbnail,
+        });
+      } else if (item.type === "artist") {
+        goArtist(item.id);
+      } else if (item.type === "album") {
+        goAlbum(item.id);
+      }
+    },
+    [handlePlay, goArtist, goAlbum],
   );
 
   const handleDeleteRecent = useCallback((id: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setRecent((prev) => prev.filter((r) => r.id !== id));
-  }, []);
+    removeRecentSearch(id);
+  }, [removeRecentSearch]);
 
-  // Filter local mock data for Artists/Albums as backend currently only provides songs
-  const filteredArtists = useMemo(
-    () =>
-      query
-        ? ALL_ARTISTS.filter((a) =>
-            a.name.toLowerCase().includes(query.toLowerCase()),
-          )
-        : ALL_ARTISTS,
-    [query],
-  );
-  const filteredAlbums = useMemo(
-    () =>
-      query
-        ? ALL_ALBUMS.filter((a) =>
-            a.title.toLowerCase().includes(query.toLowerCase()),
-          )
-        : ALL_ALBUMS,
-    [query],
+  const hasResults = !results?.isEmpty && (
+    (results?.songs?.length ?? 0) > 0 ||
+    (results?.artists?.length ?? 0) > 0 ||
+    (results?.albums?.length ?? 0) > 0 ||
+    (results?.playlists?.length ?? 0) > 0
   );
 
-  const hasResults =
-    results.length > 0 ||
-    filteredArtists.length > 0 ||
-    filteredAlbums.length > 0;
+  // Fuzzy match similarity function (Levenshtein-based)
+  const calculateSimilarity = (str1: string, str2: string): number => {
+    const s1 = str1.toLowerCase().trim();
+    const s2 = str2.toLowerCase().trim();
+    if (s1 === s2) return 1;
+    if (s1.includes(s2) || s2.includes(s1)) {
+      const longer = s1.length > s2.length ? s1 : s2;
+      const shorter = s1.length > s2.length ? s2 : s1;
+      return shorter.length / longer.length;
+    }
+    const len1 = s1.length;
+    const len2 = s2.length;
+    const matrix: number[][] = [];
+    for (let i = 0; i <= len1; i++) matrix[i] = [i];
+    for (let j = 0; j <= len2; j++) matrix[0][j] = j;
+    for (let i = 1; i <= len1; i++) {
+      for (let j = 1; j <= len2; j++) {
+        const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + cost
+        );
+      }
+    }
+    const distance = matrix[len1][len2];
+    const maxLen = Math.max(len1, len2);
+    return maxLen === 0 ? 1 : 1 - distance / maxLen;
+  };
+
+  // Use unified search results from hook - already has topResult calculated
+  const exactMatchSong = results?.topResult;
+  const remainingSongs = results?.songs || [];
+  const filteredArtists = results?.artists || [];
+  const filteredAlbums = results?.albums || [];
+  const filteredPlaylists = results?.playlists || [];
+
+  // Category-filtered results
+  const categoryFilteredSongs = useMemo(() => {
+    if (activeCategory === "All" || activeCategory === "Songs") {
+      // Remove top result from songs list if it's a song
+      if (exactMatchSong?.type === 'song') {
+        return remainingSongs.filter(s => s.id !== exactMatchSong.id);
+      }
+      return remainingSongs;
+    }
+    return [];
+  }, [activeCategory, remainingSongs, exactMatchSong]);
+
+  const categoryFilteredArtists = useMemo(() => {
+    if (activeCategory === "All" || activeCategory === "Artists") {
+      // Remove top result if it's an artist
+      if (exactMatchSong?.type === 'artist') {
+        return filteredArtists.filter(a => a.id !== exactMatchSong.id);
+      }
+      return filteredArtists;
+    }
+    return [];
+  }, [activeCategory, filteredArtists, exactMatchSong]);
+
+  const categoryFilteredAlbums = useMemo(() => {
+    if (activeCategory === "All" || activeCategory === "Albums") {
+      return filteredAlbums;
+    }
+    return [];
+  }, [activeCategory, filteredAlbums]);
+
+  const categoryFilteredPlaylists = useMemo(() => {
+    if (activeCategory === "All" || activeCategory === "Playlists") {
+      return filteredPlaylists;
+    }
+    return [];
+  }, [activeCategory, filteredPlaylists]);
+
+  // Show sections based on category
+  const showSongsSection = activeCategory === "All" || activeCategory === "Songs";
+  const showArtistsSection = activeCategory === "All" || activeCategory === "Artists";
+  const showAlbumsSection = activeCategory === "All" || activeCategory === "Albums";
 
   return (
     <View style={s.root}>
@@ -840,13 +1111,24 @@ export default function SearchScreen() {
           </Glass>
         </Mat>
 
+        {/* ── CATEGORY FILTER BAR ───────────────────────────────────── */}
+        {query.trim().length > 0 && (
+          <Mat delay={80}>
+            <CategoryTabs
+              categories={SEARCH_CATEGORIES}
+              activeCategory={activeCategory}
+              onCategoryChange={setActiveCategory}
+            />
+          </Mat>
+        )}
+
         {/* ═══════════════════════════════════════════════════════════
             EMPTY STATE (no query)
         ═══════════════════════════════════════════════════════════ */}
         {query.length === 0 && (
           <>
             {/* Recently Searched */}
-            {recent.length > 0 && (
+            {recentSearches.length > 0 ? (
               <Mat delay={120}>
                 <View style={s.section}>
                   <View style={s.secHeaderRow}>
@@ -854,301 +1136,35 @@ export default function SearchScreen() {
                     <TouchableOpacity
                       onPress={() => {
                         Haptics.selectionAsync();
-                        setRecent([]);
+                        clearRecentSearches();
                       }}
                     >
-                      <Text style={s.clearText}>Clear</Text>
+                      <Text style={s.clearText}>Clear All</Text>
                     </TouchableOpacity>
                   </View>
                   <View style={s.recentGrid}>
-                    {recent.map((item) => (
+                    {recentSearches.map((item) => (
                       <RecentItem
                         key={item.id}
                         item={item}
-                        onPlay={handlePlay}
+                        onPress={handleRecentPress}
                         onDelete={handleDeleteRecent}
                       />
                     ))}
                   </View>
                 </View>
               </Mat>
+            ) : (
+              <Mat delay={120}>
+                <View style={s.noResultsWrap}>
+                  <Ionicons name="time-outline" size={48} color={C.dim} />
+                  <Text style={s.noResultsTitle}>Search Memory</Text>
+                  <Text style={s.noResultsSub}>
+                    Your recent searches will appear here.
+                  </Text>
+                </View>
+              </Mat>
             )}
-
-            {/* Top Result */}
-            <Mat delay={180}>
-              <View style={s.section}>
-                <SectionHead title="Top Result" />
-                <Animated.View style={{ transform: [{ scale: topP.sc }] }}>
-                  <Glass style={s.topCard} r={28} blur={60}>
-                    {/* accent tint */}
-                    <LinearGradient
-                      colors={[
-                        h2r(C.primaryMid, 0.2),
-                        h2r(C.primaryDp, 0.1),
-                        "transparent",
-                      ]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={StyleSheet.absoluteFill}
-                    />
-                    <TouchableOpacity
-                      style={s.topInner}
-                      onPressIn={topP.onIn}
-                      onPressOut={topP.onOut}
-                      onPress={() => handlePlay(TOP_RESULT)}
-                      activeOpacity={1}
-                      onLongPress={() => goArtistByName(TOP_RESULT.artist)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Play ${TOP_RESULT.title} by ${TOP_RESULT.artist}`}
-                    >
-                      {/* art */}
-                      <View style={s.topArtWrapper}>
-                        <Image
-                          source={{ uri: TOP_RESULT.art }}
-                          style={s.topArt}
-                          contentFit="cover"
-                          transition={300}
-                        />
-                        {/* glass ring */}
-                        <View
-                          style={{
-                            ...StyleSheet.absoluteFillObject,
-                            borderRadius: 22,
-                            borderWidth: 1,
-                            borderColor: "rgba(255,255,255,0.15)",
-                          }}
-                        />
-                        <View
-                          style={{
-                            position: "absolute",
-                            top: 0,
-                            left: 20,
-                            right: 20,
-                            height: 1.5,
-                            backgroundColor: "rgba(255,255,255,0.22)",
-                          }}
-                        />
-                        {/* glow */}
-                        <View style={s.topArtGlow} />
-                      </View>
-
-                      {/* info */}
-                      <View style={s.topInfo}>
-                        <View style={s.topLabelRow}>
-                          <View style={s.topLabelPill}>
-                            <BlurView
-                              intensity={40}
-                              tint="dark"
-                              style={StyleSheet.absoluteFill}
-                            />
-                            <View
-                              style={{
-                                ...StyleSheet.absoluteFillObject,
-                                borderRadius: 10,
-                                borderWidth: 1,
-                                borderColor: h2r(C.accent, 0.3),
-                                backgroundColor: h2r(C.accent, 0.08),
-                              }}
-                            />
-                            <Text style={s.topLabel}>{TOP_RESULT.label}</Text>
-                          </View>
-                        </View>
-                        <Text style={s.topTitle}>{TOP_RESULT.title}</Text>
-                        <TouchableOpacity
-                          onPress={() => goArtistByName(TOP_RESULT.artist)}
-                          activeOpacity={0.75}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Open ${TOP_RESULT.artist}`}
-                        >
-                          <Text style={s.topArtist}>{TOP_RESULT.artist}</Text>
-                        </TouchableOpacity>
-
-                        {/* action row */}
-                        <View style={s.topActions}>
-                          {/* play btn — full glass */}
-                          <Animated.View
-                            style={{
-                              transform: [{ scale: playBtnP.sc }],
-                              flex: 1,
-                            }}
-                          >
-                            <TouchableOpacity
-                              style={s.topPlayBtn}
-                              onPressIn={playBtnP.onIn}
-                              onPressOut={playBtnP.onOut}
-                              onPress={() => handlePlay(TOP_RESULT)}
-                              activeOpacity={1}
-                            >
-                              <LinearGradient
-                                colors={[C.primary, C.primaryMid, C.primaryDp]}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={StyleSheet.absoluteFill}
-                              />
-                              <View
-                                style={{
-                                  position: "absolute",
-                                  top: 3,
-                                  left: 16,
-                                  right: 16,
-                                  height: 2.5,
-                                  borderRadius: 2,
-                                  backgroundColor: "rgba(255,255,255,0.28)",
-                                }}
-                              />
-                              <View
-                                style={{
-                                  position: "absolute",
-                                  left: 8,
-                                  top: 6,
-                                  width: 20,
-                                  bottom: 6,
-                                  borderRadius: 8,
-                                  backgroundColor: "rgba(255,255,255,0.15)",
-                                  transform: [{ skewX: "-8deg" }],
-                                }}
-                              />
-                              <View
-                                style={{
-                                  ...StyleSheet.absoluteFillObject,
-                                  borderRadius: 24,
-                                  borderWidth: 1,
-                                  borderColor: "rgba(255,255,255,0.18)",
-                                }}
-                              />
-                              <Ionicons
-                                name="play"
-                                size={18}
-                                color="#FFF"
-                                style={{ marginLeft: 3, zIndex: 2 }}
-                              />
-                              <Text style={s.topPlayText}>Play Now</Text>
-                            </TouchableOpacity>
-                          </Animated.View>
-
-                          {/* heart */}
-                          <Animated.View
-                            style={{ transform: [{ scale: topHeart.sc }] }}
-                          >
-                            <TouchableOpacity
-                              style={s.topIconBtn}
-                              onPress={topHeart.toggle}
-                            >
-                              <BlurView
-                                intensity={40}
-                                tint="dark"
-                                style={StyleSheet.absoluteFill}
-                              />
-                              <View
-                                style={{
-                                  ...StyleSheet.absoluteFillObject,
-                                  borderRadius: 24,
-                                  borderWidth: 1,
-                                  borderColor: topHeart.liked
-                                    ? h2r(C.primary, 0.45)
-                                    : C.border,
-                                }}
-                              />
-                              <Ionicons
-                                name={
-                                  topHeart.liked ? "heart" : "heart-outline"
-                                }
-                                size={20}
-                                color={topHeart.liked ? C.primary : C.text}
-                              />
-                            </TouchableOpacity>
-                          </Animated.View>
-
-                          {/* download */}
-                          <TouchableOpacity
-                            style={s.topIconBtn}
-                            onPress={() =>
-                              Haptics.impactAsync(
-                                Haptics.ImpactFeedbackStyle.Light,
-                              )
-                            }
-                          >
-                            <BlurView
-                              intensity={40}
-                              tint="dark"
-                              style={StyleSheet.absoluteFill}
-                            />
-                            <View
-                              style={{
-                                ...StyleSheet.absoluteFillObject,
-                                borderRadius: 24,
-                                borderWidth: 1,
-                                borderColor: C.border,
-                              }}
-                            />
-                            <Ionicons
-                              name="download-outline"
-                              size={20}
-                              color={C.text}
-                            />
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  </Glass>
-                </Animated.View>
-              </View>
-            </Mat>
-
-            {/* Recommended Songs */}
-            <Mat delay={260}>
-              <View style={s.section}>
-                <SectionHead title="Recommended Songs" />
-              </View>
-            </Mat>
-            <View style={[s.section, { marginTop: -8 }]}>
-              {ALL_SONGS.map((song, idx) => (
-                <View key={song.id} style={{ marginBottom: 10 }}>
-                  <SongRow
-                    song={song}
-                    onPlay={handlePlay}
-                    delay={280 + idx * 40}
-                  />
-                </View>
-              ))}
-            </View>
-
-            {/* Featured Artists */}
-            <Mat delay={460}>
-              <View style={s.section}>
-                <SectionHead title="Featured Artists" accent />
-              </View>
-            </Mat>
-            <View style={[s.section, { marginTop: -8 }]}>
-              {ALL_ARTISTS.map((artist, idx) => (
-                <View key={artist.id} style={{ marginBottom: 10 }}>
-                  <ArtistRow
-                    artist={artist}
-                    delay={480 + idx * 50}
-                    onPress={() => goArtist(artist.id)}
-                  />
-                </View>
-              ))}
-            </View>
-
-            {/* Albums */}
-            <Mat delay={600}>
-              <View style={s.section}>
-                <SectionHead title="Popular Albums" />
-              </View>
-            </Mat>
-            <Mat delay={620}>
-              <View style={[s.albumGrid, { marginBottom: 40 }]}>
-                {ALL_ALBUMS.map((album, idx) => (
-                  <AlbumCard
-                    key={album.id}
-                    album={album}
-                    delay={640 + idx * 50}
-                    onPress={() => goAlbum(album.id)}
-                  />
-                ))}
-              </View>
-            </Mat>
           </>
         )}
 
@@ -1211,20 +1227,31 @@ export default function SearchScreen() {
                   </Text>
                 </Mat>
 
-                {results.length > 0 && (
+                {/* Exact Match Top Result Card - only show for Songs/All category */}
+                {exactMatchSong && (activeCategory === "All" || activeCategory === "Songs") && (
+                  <TopResultCard
+                    song={exactMatchSong}
+                    onPlay={handlePlaySong}
+                    goArtistByName={goArtistByName}
+                    delay={40}
+                  />
+                )}
+
+                {/* Songs Section */}
+                {showSongsSection && categoryFilteredSongs.length > 0 && (
                   <>
-                    <Mat delay={40}>
-                      <View style={[s.section, { marginTop: 16 }]}>
-                        <SectionHead title="Songs" />
+                    <Mat delay={60}>
+                      <View style={[s.section, { marginTop: exactMatchSong && exactMatchSong.type === 'song' ? 20 : 16 }]}>
+                        <SectionHead title={exactMatchSong && exactMatchSong.type === 'song' ? "Related Songs" : "Songs"} />
                       </View>
                     </Mat>
                     <View style={[s.section, { marginTop: -8 }]}>
-                      {results.map((song: MusicTrack, idx: number) => (
-                        <View key={`${song.id}-${idx}`} style={{ marginBottom: 10 }}>
+                      {categoryFilteredSongs.map((song, idx) => (
+                        <View key={`song-${song.id}-${idx}`} style={{ marginBottom: 10 }}>
                           <SongRow
-                            song={song}
-                            onPlay={handlePlay}
-                            delay={60 + idx * 35}
+                            song={{ id: song.id, title: song.title, artist: song.artist || '', time: song.duration || '', art: song.art || '' }}
+                            onPlay={handlePlaySong}
+                            delay={80 + idx * 35}
                           />
                         </View>
                       ))}
@@ -1232,7 +1259,7 @@ export default function SearchScreen() {
                   </>
                 )}
 
-                {filteredArtists.length > 0 && query.length > 2 && (
+                {showArtistsSection && categoryFilteredArtists.length > 0 && (
                   <>
                     <Mat delay={80}>
                       <View style={s.section}>
@@ -1240,12 +1267,12 @@ export default function SearchScreen() {
                       </View>
                     </Mat>
                     <View style={[s.section, { marginTop: -8 }]}>
-                      {filteredArtists.map((artist, idx) => (
+                      {categoryFilteredArtists.map((artist, idx) => (
                         <View key={artist.id} style={{ marginBottom: 10 }}>
                           <ArtistRow
-                            artist={artist}
+                            artist={{ id: artist.id, name: artist.title, art: artist.art || '', followers: artist.subscribers || '' }}
                             delay={100 + idx * 50}
-                            onPress={() => goArtist(artist.id)}
+                            onPress={() => handlePressArtist(artist)}
                           />
                         </View>
                       ))}
@@ -1253,7 +1280,7 @@ export default function SearchScreen() {
                   </>
                 )}
 
-                {filteredAlbums.length > 0 && (
+                {showAlbumsSection && categoryFilteredAlbums.length > 0 && (
                   <>
                     <Mat delay={120}>
                       <View style={s.section}>
@@ -1262,12 +1289,12 @@ export default function SearchScreen() {
                     </Mat>
                     <Mat delay={140}>
                       <View style={[s.albumGrid, { marginBottom: 40 }]}>
-                        {filteredAlbums.map((album, idx) => (
+                        {categoryFilteredAlbums.map((album, idx) => (
                           <AlbumCard
                             key={album.id}
-                            album={album}
+                            album={{ id: album.id, title: album.title, art: album.art || '' }}
                             delay={160 + idx * 50}
-                            onPress={() => goAlbum(album.id)}
+                            onPress={() => handlePressAlbum(album)}
                           />
                         ))}
                       </View>

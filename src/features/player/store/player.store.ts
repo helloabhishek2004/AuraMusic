@@ -73,7 +73,8 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
 
       // 4. Optimization: ONLY skip resolution if it's a known direct stream URL
       // We check for 'googlevideo.com' or 'manifest' which are typical for resolved streams
-      const isAlreadyResolved = track.url && (track.url.includes("googlevideo.com") || track.url.includes("manifest"));
+      // OR if it's a local track
+      const isAlreadyResolved = track.isLocal || (track.url && (track.url.includes("googlevideo.com") || track.url.includes("manifest")));
 
       if (isAlreadyResolved) {
         console.log(`[Player] Using already resolved URL for ${track.id}`);
@@ -99,7 +100,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
       }
 
       // 7. Load into Engine
-      await PlaybackService.loadTrack(resolvedTrack);
+      await PlaybackService.loadTrack(resolvedTrack, get().queue, get().currentIndex);
       
       // 8. Finalize State
       set({ 
@@ -129,10 +130,32 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
     }
   },
 
-
+  preloadTrack: async (track: PlayerTrack) => {
+    if (get().preloadedTrack?.id === track.id) return;
+    
+    set({ isPreloading: true });
+    try {
+      let resolvedUrl: string;
+      if (track.isLocal) {
+        resolvedUrl = track.url;
+      } else {
+        const { streamUrl } = await musicService.resolveStream(track.id);
+        resolvedUrl = streamUrl;
+      }
+      
+      set({ 
+        preloadedTrack: { ...track, url: resolvedUrl },
+        isPreloading: false 
+      });
+      return resolvedUrl;
+    } catch (e) {
+      set({ isPreloading: false });
+      return null;
+    }
+  },
 
   fetchLyrics: async (track: PlayerTrack) => {
-    if (!track) return;
+    if (!track || track.isLocal) return;
     set({ isLyricsLoading: true, lyrics: null });
     try {
       const response = await musicService.resolveLyrics(track);
@@ -161,12 +184,19 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
     console.log(`[Player] Preloading: ${nextTrack.title}`);
     
     try {
-      const { streamUrl } = await musicService.resolveStream(nextTrack.id);
+      let preloadData: PlayerTrack;
+      
+      if (nextTrack.isLocal) {
+        preloadData = { ...nextTrack };
+      } else {
+        const { streamUrl } = await musicService.resolveStream(nextTrack.id);
+        preloadData = { ...nextTrack, url: streamUrl };
+      }
       
       // Check if we are still on the same context
       if (get().currentIndex === currentIndex) {
         set({ 
-          preloadedTrack: { ...nextTrack, url: streamUrl },
+          preloadedTrack: preloadData,
           isPreloading: false
         });
         console.log(`[Player] Preload ready: ${nextTrack.title}`);
@@ -250,20 +280,29 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
     // 1. If Repeat is ON (track mode), restart the current track IMMEDIATELY
     if (repeatMode === "track" && currentTrack) {
       console.log("[Player] Repeat One: High-speed loop restart.");
-      // Just seek to beginning and play for the most "enthusiastic" response
-      await PlaybackService.seek(0);
-      await PlaybackService.play();
-      // Ensure store reflects playing state if it moved to Ended/Idle
-      set({ status: "playing", isPlaying: true, position: 0 });
+      await get().seek(0);
+      await get().play();
       return;
     }
 
-    // 2. Otherwise (Repeat OFF), advance to next in queue
+    // 2. If it's a local track, we use native queue skipping for smoother transitions
+    if (currentTrack?.isLocal) {
+      console.log("[Player] Next (Local Mode)");
+      await PlaybackService.skipToNext();
+      return;
+    }
+
+    // 3. Otherwise (Online Mode or fallback), advance to next in queue
     let nextIndex = currentIndex + 1;
 
     if (nextIndex >= queue.length) {
-      console.log("[Player] End of queue reached.");
-      return; 
+      // Queue mode: loop back to start, otherwise stop
+      if (repeatMode === "queue") {
+        nextIndex = 0;
+      } else {
+        console.log("[Player] End of queue reached.");
+        return;
+      }
     }
 
     set({ currentIndex: nextIndex });
@@ -271,7 +310,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
   },
 
   previous: async () => {
-    const { queue, currentIndex, position, isTransitioning, repeatMode } = get();
+    const { queue, currentIndex, position, isTransitioning, repeatMode, currentTrack } = get();
     if (queue.length === 0 || isTransitioning) return;
 
     // If Repeat is ON or we are past 5s, just restart current track
@@ -280,12 +319,23 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
       return;
     }
 
+    // If it's a local track, use native queue skipping
+    if (currentTrack?.isLocal) {
+      console.log("[Player] Previous (Local Mode)");
+      await PlaybackService.skipToPrevious();
+      return;
+    }
+
     // Otherwise, move to previous track in queue
     let prevIndex = currentIndex - 1;
     if (prevIndex < 0) {
-      // Stay at first track if at beginning
-      await get().seek(0);
-      return;
+      // Queue mode: loop to last track
+      if (repeatMode === "queue" && queue.length > 0) {
+        prevIndex = queue.length - 1;
+      } else {
+        await get().seek(0);
+        return;
+      }
     }
 
     set({ currentIndex: prevIndex });

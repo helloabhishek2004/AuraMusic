@@ -11,10 +11,11 @@ from difflib import SequenceMatcher
 
 app = FastAPI(title="Aura Music Backend")
 
-# In-memory cache for stream URLs and lyrics
-# key: video_id, value: {"url": str, "expiry": float}
+# In-memory cache for stream URLs, lyrics, and artist metadata
+# key: video_id/query, value: {"data": Any, "expiry": float}
 stream_cache = {}
 lyrics_cache = {}
+artist_cache = {}
 CACHE_TTL = 1800  # 30 minutes
 
 # Add CORS middleware
@@ -28,6 +29,124 @@ app.add_middleware(
 
 # Initialize YTMusic (unauthenticated mode)
 yt = YTMusic()
+
+def get_high_res_thumbnail(thumbnails: List[Dict[str, Any]]) -> str:
+    """
+    Extracts the highest resolution thumbnail and upgrades it to 1200x1200px.
+    """
+    if not thumbnails:
+        return ""
+    url = thumbnails[-1].get("url", "")
+    # Upgrade thumbnail resolution if it follows the common pattern
+    if url and "=w" in url and "-h" in url:
+        return re.sub(r'=w\d+-h\d+', '=w1200-h1200', url)
+    return url
+
+def map_song(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Maps a YTMusic search result to a Song entity."""
+    video_id = item.get("videoId")
+    if not video_id:
+        return None
+    
+    artists = item.get("artists", [])
+    artist_name = "Unknown Artist"
+    if artists:
+        artist_name = artists[0].get("name", "Unknown Artist")
+    elif item.get("artist"):
+        artist_name = item.get("artist")
+        
+    return {
+        "id": video_id,
+        "videoId": video_id,
+        "title": item.get("title", "Unknown Title"),
+        "artist": artist_name,
+        "artists": artists,
+        "album": item.get("album"),
+        "thumbnail": get_high_res_thumbnail(item.get("thumbnails", [])),
+        "duration": item.get("duration"),
+        "type": "song"
+    }
+
+def map_artist(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Maps a YTMusic search result to an Artist entity safely."""
+    try:
+        # In artist search results, the name is often in 'artist', not 'title'
+        name = item.get("artist") or item.get("title")
+        browse_id = item.get("browseId") or item.get("channelId")
+        
+        if not browse_id or not name:
+            return None
+            
+        thumbnails = item.get("thumbnails", [])
+        if not isinstance(thumbnails, list):
+            thumbnails = []
+
+        return {
+            "id": browse_id,
+            "browseId": browse_id,
+            "title": name,
+            "artist": name,
+            "thumbnail": get_high_res_thumbnail(thumbnails),
+            "thumbnails": thumbnails,
+            "subscribers": item.get("subscribers") or item.get("subscriberCount"),
+            "type": "artist"
+        }
+    except Exception as e:
+        print(f"[Backend] Error mapping artist: {e}")
+        return None
+
+def map_album(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Maps a YTMusic search result to an Album entity."""
+    title = item.get("title")
+    browse_id = item.get("browseId") or item.get("albumId")
+    if not browse_id or not title:
+        return None
+        
+    artists = item.get("artists", [])
+    artist_name = "Unknown Artist"
+    if isinstance(artists, list) and artists:
+        artist_name = artists[0].get("name", "Unknown Artist")
+    elif isinstance(item.get("artist"), str):
+        artist_name = item.get("artist")
+    elif isinstance(item.get("artist"), list) and item.get("artist"):
+        artist_name = item.get("artist")[0].get("name", "Unknown Artist")
+
+    return {
+        "id": browse_id,
+        "browseId": browse_id,
+        "title": title,
+        "artist": artist_name,
+        "year": item.get("year"),
+        "thumbnail": get_high_res_thumbnail(item.get("thumbnails", [])),
+        "thumbnails": item.get("thumbnails", []),
+        "type": "album"
+    }
+
+def map_playlist(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Maps a YTMusic search result to a Playlist entity."""
+    playlist_id = item.get("playlistId") or item.get("browseId")
+    if not playlist_id:
+        return None
+        
+    author = item.get("author")
+    author_name = "Unknown"
+    if isinstance(author, list) and author:
+        author_name = author[0].get("name", "Unknown")
+    elif isinstance(author, dict):
+        author_name = author.get("name", "Unknown")
+    elif isinstance(author, str):
+        author_name = author
+
+    return {
+        "id": playlist_id,
+        "playlistId": playlist_id,
+        "title": item.get("title", "Unknown Playlist"),
+        "author": author_name,
+        "trackCount": item.get("trackCount"),
+        "thumbnail": get_high_res_thumbnail(item.get("thumbnails", [])),
+        "thumbnails": item.get("thumbnails", []),
+        "type": "playlist"
+    }
 
 def normalize_metadata(text: str):
     """
@@ -171,48 +290,106 @@ def root():
     return {"message": "Aura backend running", "engine": "ytmusicapi + yt-dlp"}
 
 @app.get("/search", response_model=List[Dict[str, Any]])
-def search_songs(q: str = Query(..., description="The search query for songs")):
+def search_entities(q: str = Query(..., description="The search query"), 
+                type: str = Query("songs", description="Search type: songs, artists, albums, playlists")):
     """
-    Search for songs using ytmusicapi and return a simplified JSON format.
+    Search using ytmusicapi with proper type filtering and specialized mappers.
+    Strictly filters by resultType to avoid entity pollution.
+    Returns empty list on failure rather than 500.
     """
-    # Search specifically for songs with a higher limit for better queue context
-    search_results = yt.search(q, filter="songs", limit=25)
-    
-    results = []
-    for item in search_results:
-        # Safely extract fields using .get()
-        title = item.get("title", "Unknown Title")
+    try:
+        print(f"[Backend] Search Request: q='{q}', type='{type}'")
         
-        # Artists can be a list of dicts
-        artists = item.get("artists", [])
-        artist_name = artists[0].get("name", "Unknown Artist") if artists else "Unknown Artist"
+        # 0. Check artist cache for enrichment lookups (case-insensitive)
+        cache_key = q.lower().strip()
+        if type == "artists" and cache_key in artist_cache:
+            cached = artist_cache[cache_key]
+            if time.time() < cached['expiry']:
+                print(f"[Backend] Artist cache hit for enrichment: {q}")
+                return cached['data']
+
+        # 1. Search Intent Detection (Prioritize Artist Search for Artist-like queries)
+        # SAFE: Wrapped in try-catch to prevent 500 errors
+        if type == "artists" or (type == "songs" and len(q) > 3):
+            try:
+                temp_artist_results = yt.search(query=q, filter="artists", limit=1)
+                if temp_artist_results and len(temp_artist_results) > 0:
+                    top_artist = temp_artist_results[0]
+                    artist_name = top_artist.get("artist") or top_artist.get("title")
+                    if artist_name and calculate_similarity(normalize_for_matching(q), normalize_for_matching(artist_name)) > 0.9:
+                        print(f"[Backend] Artist intent detected: '{artist_name}' matches query '{q}'")
+            except Exception as e:
+                print(f"[Backend] Intent detection failed (non-critical): {e}")
+
+        # 2. Map type to YTMusic filter
+        filter_map = {
+            "songs": "songs",
+            "artists": "artists", 
+            "albums": "albums",
+            "playlists": "playlists"
+        }
         
-        video_id = item.get("videoId", "")
-        if not video_id:
-            continue
-            
-        # Thumbnails are usually a list of dicts with url, width, height
-        thumbnails = item.get("thumbnails", [])
-        thumbnail_url = ""
-        if thumbnails:
-            # Pick the largest one
-            thumbnail_url = thumbnails[-1].get("url", "")
-            # Upgrade quality if it's a standard YTMusic resize URL
-            if "=w" in thumbnail_url and "-h" in thumbnail_url:
-                thumbnail_url = re.sub(r'=w\d+-h\d+', '=w1200-h1200', thumbnail_url)
-            elif "s90" in thumbnail_url:
-                thumbnail_url = thumbnail_url.replace("s90", "s1200")
+        yt_filter = filter_map.get(type, "songs")
+        limit = 25 if type == "songs" else 15
         
-        results.append({
-            "id": video_id, 
-            "title": title,
-            "artist": artist_name,
-            "videoId": video_id,
-            "thumbnail": thumbnail_url,
-            "duration": item.get("duration")
-        })
+        # 3. Perform REAL filtered search
+        search_results = []
+        try:
+            search_results = yt.search(q, filter=yt_filter, limit=limit)
+        except Exception as e:
+            print(f"[Backend] YTMusic.search failed for {type}: {e}")
+            return []
+
+        print(f"[Backend] Raw results count from YTMusic: {len(search_results)}")
         
-    return results
+        # 4. Filter and Map results using specialized mappers
+        results = []
+        
+        if type == "songs":
+            for item in search_results:
+                if item.get("resultType") not in ["song", "video"]:
+                    continue
+                mapped = map_song(item)
+                if mapped:
+                    results.append(mapped)
+        
+        elif type == "artists":
+            for item in search_results:
+                if item.get("resultType") != "artist":
+                    continue
+                mapped = map_artist(item)
+                if mapped:
+                    results.append(mapped)
+            # Store in cache (using normalized key)
+            if results:
+                artist_cache[cache_key] = {
+                    "data": results,
+                    "expiry": time.time() + (CACHE_TTL * 2) # 1 hour for artist metadata
+                }
+                    
+        elif type == "albums":
+            for item in search_results:
+                if item.get("resultType") != "album":
+                    continue
+                mapped = map_album(item)
+                if mapped:
+                    results.append(mapped)
+                    
+        elif type == "playlists":
+            for item in search_results:
+                if item.get("resultType") != "playlist":
+                    continue
+                mapped = map_playlist(item)
+                if mapped:
+                    results.append(mapped)
+
+        print(f"[Backend] Returning {len(results)} well-formed {type} results to frontend.")
+        return results
+        
+    except Exception as e:
+        print(f"[Backend] CRITICAL Search Error: {e}")
+        # Always return empty list instead of 500 to keep frontend stable
+        return []
 
 @app.get("/resolve/{video_id}")
 async def resolve_stream(video_id: str):
