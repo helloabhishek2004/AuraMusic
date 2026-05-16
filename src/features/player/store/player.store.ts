@@ -396,8 +396,8 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
 
   updateProgress: (position: number, duration: number, buffered: number) => {
     const s = get();
-    // Only update if changes are significant (> 500ms for position or any duration change)
-    if (Math.abs(s.position - position) > 500 || Math.abs(s.duration - duration) > 100) {
+    // More granular updates for smoother progress bar (100ms position delta)
+    if (Math.abs(s.position - position) > 100 || Math.abs(s.duration - duration) > 100) {
       set({ position, duration, bufferedPosition: buffered });
     }
   },

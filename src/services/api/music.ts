@@ -4,6 +4,7 @@ import {
   UnifiedSearchResult, 
   getBestThumbnail 
 } from "../../utils/search-utils";
+import { AlbumDetails, ArtistDetails, MusicTrack } from "../../types/music";
 
 /**
  * Map a song entity from API response
@@ -26,6 +27,22 @@ function mapSongResult(item: any): SearchEntity | null {
     artist: item.artist || item.artists?.[0]?.name || 'Unknown',
     art: item.thumbnail || getBestThumbnail(item.thumbnails),
     duration: item.duration || '--:--',
+    source: 'ytmusic',
+  };
+}
+
+/**
+ * Map a backend song to MusicTrack
+ */
+function mapBackendSongToMusicTrack(song: any): MusicTrack {
+  return {
+    id: song.id || song.videoId,
+    title: song.title,
+    artist: song.artist,
+    art: song.thumbnail,
+    duration: song.duration,
+    album: song.album,
+    source: song.source || 'ytmusic',
   };
 }
 
@@ -273,6 +290,142 @@ export const musicService = {
       }
       return null;
     } catch (error) {
+      return null;
+    }
+  },
+
+  /**
+   * Fetches detailed artist information including top songs, albums, and related artists.
+   */
+  getArtistDetails: async (browseId: string): Promise<ArtistDetails | null> => {
+    try {
+      if (!browseId) return null;
+
+      const response = await apiClient.get(`/artist/${browseId}`);
+      const data = response.data;
+
+      if (!data) return null;
+
+      return {
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        thumbnail: data.thumbnail,
+        subscribers: data.subscribers,
+        songs: (data.songs || []).map((s: any) => ({
+          ...mapBackendSongToMusicTrack(s),
+          artistId: data.id,
+          source: 'ytmusic',
+        })),
+        songs_params: data.songs_params,
+        albums: (data.albums || []).map((album: any) => ({
+          id: album.id,
+          title: album.title,
+          artist: album.artist,
+          year: album.year,
+          thumbnail: album.thumbnail,
+          type: 'album',
+        })),
+        albums_params: data.albums_params,
+        singles: (data.singles || []).map((single: any) => ({
+          id: single.id,
+          title: single.title,
+          artist: single.artist,
+          year: single.year,
+          thumbnail: single.thumbnail,
+          type: 'single',
+        })),
+        singles_params: data.singles_params,
+        related: (data.related || []).map((artist: any) => ({
+          id: artist.id,
+          title: artist.title,
+          thumbnail: artist.thumbnail,
+          subscribers: artist.subscribers,
+        })),
+      };
+    } catch (error) {
+      console.error('[Music Service] Error fetching artist details:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Fetches expanded artist tracks.
+   */
+  getArtistSongs: async (browseId: string, params?: string): Promise<MusicTrack[]> => {
+    try {
+      const response = await apiClient.get(`/artist/${browseId}/songs`, {
+        params: { params },
+      });
+      return (response.data || []).map((s: any) => ({
+        ...mapBackendSongToMusicTrack(s),
+        artistId: browseId,
+        source: 'ytmusic',
+      }));
+    } catch (error) {
+      console.error('[Music Service] Error fetching artist songs:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Fetches expanded artist albums or singles.
+   */
+  getArtistAlbums: async (browseId: string, params?: string): Promise<AlbumDetails[]> => {
+    try {
+      const response = await apiClient.get(`/artist/${browseId}/albums`, {
+        params: { params },
+      });
+      return (response.data || []).map((album: any) => ({
+        id: album.id,
+        title: album.title,
+        artist: album.artist,
+        year: album.year,
+        thumbnail: album.thumbnail,
+        type: album.type || 'album',
+      }));
+    } catch (error) {
+      console.error('[Music Service] Error fetching artist albums:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Fetches detailed album information including tracklist.
+   */
+  getAlbumDetails: async (browseId: string): Promise<AlbumDetails | null> => {
+    try {
+      if (!browseId) return null;
+
+      const response = await apiClient.get(`/album/${browseId}`);
+      const data = response.data;
+
+      if (!data) return null;
+
+      return {
+        id: data.id,
+        title: data.title,
+        artist: data.artist,
+        artistId: data.artistId,
+        year: data.year,
+        thumbnail: data.thumbnail,
+        description: data.description,
+        trackCount: data.trackCount,
+        duration: data.duration,
+        tracks: (data.tracks || []).map((track: any) => {
+          const mapped = mapBackendSongToMusicTrack(track);
+          return {
+            ...mapped,
+            art: mapped.art || data.thumbnail, // Fallback to album thumbnail
+            album: data.title,
+            albumId: data.id,
+            artistId: data.artistId,
+            source: 'ytmusic',
+          };
+        }),
+      };
+    } catch (error) {
+      console.error('[Music Service] Error fetching album details:', error);
       return null;
     }
   },

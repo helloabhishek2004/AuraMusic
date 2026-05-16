@@ -10,6 +10,7 @@ export interface SearchEntity {
   subscribers?: string;
   trackCount?: number;
   itemCount?: number;
+  source?: string;
 }
 
 export interface UnifiedSearchResult {

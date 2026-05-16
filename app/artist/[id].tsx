@@ -1,104 +1,128 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, {
-    memo,
-    useCallback,
-    useEffect,
-    useMemo,
-    useState
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
 import {
-    Animated,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    useWindowDimensions,
-    View
+  AccessibilityInfo,
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Easing,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from "react-native";
 
 // Core imports
 import { useMusicActions, usePlaybackState } from "@/src/context/MusicContext";
-import { getArtistById, getTrackById } from "@/src/data/music-catalog";
 import { useReducedMotionPreference } from "@/src/hooks/use-accessibility-preferences";
 import { useResponsiveMetrics } from "@/src/hooks/use-responsive-metrics";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
+import { musicService } from "@/src/services/api/music";
 
 // Design system
-import {
-    glass,
-    motion,
-    palette,
-    radius,
-    spacing
-} from "@/src/design/tokens";
+import { glass, motion, palette, radius, spacing } from "@/src/design/tokens";
+
+// Utils
+import { parseDuration } from "@/src/utils/time";
 
 // Components
 import { AtmosphericBackground } from "@/src/components/ui/atmospheric-background";
 import {
-    AuraText,
-    MediaListItem,
-    MotionReveal,
-    SectionHeader,
-    SkeletonBlock,
+  AuraText,
+  MediaListItem,
+  MotionReveal,
+  SectionHeader,
+  SkeletonBlock,
 } from "@/src/components/ui/aura-primitives";
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { PressScale } from "@/src/components/ui/press-scale";
 
 // Types
-import { CatalogArtist, CatalogTrack } from "@/src/data/music-catalog";
+import {
+  AlbumDetails,
+  ArtistBasicInfo,
+  ArtistDetails,
+  MusicTrack,
+} from "@/src/types/music";
 
-// Extended artist data for the page
-interface ArtistPageData extends CatalogArtist {
-  monthlyListeners?: string;
-  verified?: boolean;
-  genres?: string[];
-  tagline?: string;
-  biography?: string;
-  origin?: string;
-  influences?: string[];
-  topTracks?: CatalogTrack[];
-  popularReleases?: any[];
-  relatedArtists?: CatalogArtist[];
-  collaborators?: string[];
-  fanInsights?: {
-    trendGraph?: any;
-    listenerHeatmap?: any;
-    genreOverlap?: number;
-    popularityScore?: number;
-  };
-  musicVideos?: any[];
-  liveEvents?: any[];
-}
+const CACHE_PREFIX = "artist_cache_";
+const IN_MEMORY_CACHE: Record<string, ArtistDetails> = {};
 
-// Mock extended data - in production this would come from API
-const getExtendedArtistData = (artist: CatalogArtist): ArtistPageData => ({
-  ...artist,
-  monthlyListeners: "12.4M",
-  verified: true,
-  genres: ["Synthwave", "Electronic", "Ambient"],
-  tagline: "Pioneering the future of electronic music",
-  biography: `Elara Vance emerged from the underground synthwave scene in 2018 with her debut EP "Neon Dreams". Her unique blend of retro-futuristic aesthetics and modern production techniques quickly garnered attention from both critics and fans alike. Known for her immersive live performances and innovative use of technology in music creation, Elara has become a leading voice in the electronic music renaissance.`,
-  origin: "Los Angeles, CA",
-  influences: ["Kavinsky", "The Midnight", "Timecop1983"],
-  topTracks: [
-    getTrackById("nebula"),
-    getTrackById("neon"),
-    getTrackById("solar"),
-    getTrackById("nightcall"),
-  ].filter(Boolean) as CatalogTrack[],
-  popularReleases: [],
-  relatedArtists: [],
-  collaborators: ["Synthwave Collective", "Cosmic Echo"],
-  fanInsights: {
-    popularityScore: 92,
+// ─── Haptic-safe press helper ───────────────────────────────────────────────
+// Wraps Pressable with a spring scale for Android (no haptics dependency)
+const SpringButton = memo(
+  ({
+    onPress,
+    style,
+    accessibilityLabel,
+    accessibilityRole = "button",
+    hitSlop,
+    disabled,
+    children,
+  }: {
+    onPress?: () => void;
+    style?: any;
+    accessibilityLabel?: string;
+    accessibilityRole?: any;
+    hitSlop?: any;
+    disabled?: boolean;
+    children: React.ReactNode;
+  }) => {
+    const scale = useRef(new Animated.Value(1)).current;
+
+    const onPressIn = () => {
+      Animated.spring(scale, {
+        toValue: 0.94,
+        useNativeDriver: true,
+        speed: 50,
+        bounciness: 2,
+      }).start();
+    };
+
+    const onPressOut = () => {
+      Animated.spring(scale, {
+        toValue: 1,
+        useNativeDriver: true,
+        speed: 40,
+        bounciness: 6,
+      }).start();
+    };
+
+    return (
+      <Pressable
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        disabled={disabled}
+        hitSlop={hitSlop}
+        accessibilityLabel={accessibilityLabel}
+        accessibilityRole={accessibilityRole}
+        accessible
+      >
+        <Animated.View style={[style, { transform: [{ scale }] }]}>
+          {children}
+        </Animated.View>
+      </Pressable>
+    );
   },
-  musicVideos: [],
-  liveEvents: [],
-});
+);
 
+// ─── Main Page ───────────────────────────────────────────────────────────────
 function ArtistPage() {
   const params = useLocalSearchParams();
   const router = useRouter();
@@ -109,134 +133,326 @@ function ArtistPage() {
   const { currentTrack, isPlaying } = usePlaybackState();
   const { play, setQueue } = useMusicActions();
 
-  const [pageOpacity] = useState(() => new Animated.Value(0));
-  const [isLeaving, setIsLeaving] = useState(false);
+  const artistId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const [artist, setArtist] = useState<ArtistDetails | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isFollowing, setIsFollowing] = useState(false);
 
+  // Animation values
+  const pageOpacity = useRef(new Animated.Value(0)).current;
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const [isLeaving, setIsLeaving] = useState(false);
+  const [showSticky, setShowSticky] = useState(false);
+
+  // Bottom Sheet State
+  const [bottomSheetVisible, setBottomSheetVisible] = useState(false);
+  const [bottomSheetTitle, setBottomSheetTitle] = useState("");
+  const [bottomSheetData, setBottomSheetData] = useState<any[]>([]);
+  const [bottomSheetType, setBottomSheetType] = useState<
+    "tracks" | "albums" | "artists"
+  >("tracks");
+  const [isModalLoadingMore, setIsModalLoadingMore] = useState(false);
+  const [isModalFetching, setIsModalFetching] = useState(false);
+
+  // Expanded Content Cache
+  const expandedCache = useRef<Record<string, any[]>>({});
+
+  // Sticky header threshold
+  useEffect(() => {
+    const id = scrollY.addListener(({ value }) => {
+      const threshold = height * 0.25;
+      if (value > threshold) {
+        if (!showSticky) setShowSticky(true);
+      } else {
+        if (showSticky) setShowSticky(false);
+      }
+    });
+    return () => scrollY.removeListener(id);
+  }, [height, scrollY, showSticky]);
+
+  // Derived data
+  const latestTracks = useMemo(() => {
+    if (!artist?.songs?.length) return [];
+    const timestamp = (track: MusicTrack) => {
+      const value = track.time ? Date.parse(track.time) : NaN;
+      return Number.isNaN(value) ? 0 : value;
+    };
+    return [...artist.songs]
+      .sort((a, b) => timestamp(b) - timestamp(a))
+      .slice(0, 4);
+  }, [artist?.songs]);
+
+  const allReleases = useMemo(() => {
+    if (!artist) return [];
+    return [...artist.singles, ...artist.albums].sort(
+      (a, b) => parseInt(b.year || "0", 10) - parseInt(a.year || "0", 10),
+    );
+  }, [artist?.albums, artist?.singles]);
+
+  const releaseItems = useMemo(() => allReleases.slice(0, 6), [allReleases]);
+
+  // Page enter animation
   useEffect(() => {
     if (reduceMotion) {
       pageOpacity.setValue(1);
       return;
     }
-
     Animated.timing(pageOpacity, {
       toValue: 1,
       duration: motion.duration.base,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
   }, [pageOpacity, reduceMotion]);
 
+  // Data Fetching
+  const fetchArtistData = useCallback(async (id: string, useCache = true) => {
+    if (!id) return;
+
+    if (useCache && IN_MEMORY_CACHE[id]) {
+      setArtist(IN_MEMORY_CACHE[id]);
+      setIsLoading(false);
+      refreshArtistData(id);
+      return;
+    }
+
+    if (useCache) {
+      try {
+        const cachedData = await AsyncStorage.getItem(CACHE_PREFIX + id);
+        if (cachedData) {
+          const parsed = JSON.parse(cachedData);
+          setArtist(parsed);
+          IN_MEMORY_CACHE[id] = parsed;
+          setIsLoading(false);
+          refreshArtistData(id);
+          return;
+        }
+      } catch (e) {
+        console.warn("[Artist Page] Cache read failed:", e);
+      }
+    }
+
+    setIsLoading(true);
+    await refreshArtistData(id);
+    setIsLoading(false);
+  }, []);
+
+  const refreshArtistData = async (id: string) => {
+    setIsRefreshing(true);
+    setError(null);
+    try {
+      const data = await musicService.getArtistDetails(id);
+      if (data) {
+        const enriched = {
+          ...data,
+          tagline: data.tagline || "Pioneering the future of electronic music",
+          genres: data.genres || ["Synthwave", "Electronic", "Ambient"],
+        };
+        setArtist(enriched);
+        IN_MEMORY_CACHE[id] = enriched;
+        await AsyncStorage.setItem(CACHE_PREFIX + id, JSON.stringify(enriched));
+      } else {
+        setError("Artist details not found.");
+      }
+    } catch (e: any) {
+      console.error("[Artist Page] Fetch failed:", e);
+      setError(
+        e?.message || "Unable to load artist. Please check your connection.",
+      );
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchArtistData(artistId);
+  }, [artistId, fetchArtistData]);
+
   const handleBackPress = useCallback(() => {
     if (isLeaving) return;
     setIsLeaving(true);
+    if (reduceMotion) {
+      router.back();
+      return;
+    }
     Animated.timing(pageOpacity, {
       toValue: 0,
       duration: motion.duration.fast,
+      easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
     }).start(() => router.back());
-  }, [isLeaving, pageOpacity, router]);
+  }, [isLeaving, pageOpacity, router, reduceMotion]);
 
-  // Artist data
-  const artistId = Array.isArray(params.id) ? params.id[0] : params.id;
-  const baseArtist = getArtistById(artistId);
-  const artist = useMemo(
-    () => (baseArtist ? getExtendedArtistData(baseArtist) : null),
-    [baseArtist],
-  );
-
-  // Loading state
-  const [isLoading, setIsLoading] = useState(!artist);
-  const [scrollY] = useState(() => new Animated.Value(0));
-
-  // Simulate loading
-  useEffect(() => {
-    if (!artist) {
-      const timer = setTimeout(() => setIsLoading(false), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [artist]);
-
-  // Animation values
-  const heroOpacity = scrollY.interpolate({
-    inputRange: [0, height * 0.4],
-    outputRange: [1, 0],
-    extrapolate: "clamp",
-  });
-
-  const heroScale = scrollY.interpolate({
-    inputRange: [0, height * 0.6],
-    outputRange: [1, 0.8],
-    extrapolate: "clamp",
-  });
-
-  const stickyHeaderOpacity = scrollY.interpolate({
-    inputRange: [height * 0.3, height * 0.5],
-    outputRange: [0, 1],
-    extrapolate: "clamp",
-  });
-
-  const blurIntensity = scrollY.interpolate({
-    inputRange: [0, height * 0.4],
-    outputRange: [glass.surfaceBlur, glass.denseBlur],
-    extrapolate: "clamp",
-  });
-
-  // Actions
-  const handlePlayArtist = useCallback(async () => {
-    if (!artist?.topTracks?.length) return;
-    await setQueue(
-      artist.topTracks.map((track) => ({
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        art: track.art,
-        url: track.art, // Placeholder - would be actual audio URL
-        duration: track.durationSec,
-        dominantColors: track.dominantColors,
-      })),
-      0,
-    );
-  }, [artist, setQueue]);
-
-  const handleShuffleArtist = useCallback(async () => {
-    if (!artist?.topTracks?.length) return;
-    const shuffled = [...artist.topTracks].sort(() => Math.random() - 0.5);
-    await setQueue(
-      shuffled.map((track) => ({
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        art: track.art,
-        url: track.art,
-        duration: track.durationSec,
-        dominantColors: track.dominantColors,
-      })),
-      0,
-    );
-  }, [artist, setQueue]);
-
-  const handleTrackPress = useCallback(
-    (track: CatalogTrack) => {
-      navigation.goNowPlaying(track.id);
+  const handleArtistPress = useCallback(
+    (artistId?: string, artistName?: string) => {
+      if (artistId) navigation.goArtist(artistId);
+      else if (artistName) navigation.goArtistByName(artistName);
     },
     [navigation],
   );
 
-  const handleFollowPress = useCallback(() => {
-    // TODO: Implement follow functionality
-    console.log("Follow artist:", artist?.name);
-  }, [artist]);
+  // Header interpolations
+  const headerOverlayOpacity = scrollY.interpolate({
+    inputRange: [height * 0.1, height * 0.22],
+    outputRange: [1, 0],
+    extrapolate: "clamp",
+  });
 
-  const handleSharePress = useCallback(() => {
-    // TODO: Implement share functionality
-    console.log("Share artist:", artist?.name);
-  }, [artist]);
+  const stickyHeaderOpacity = scrollY.interpolate({
+    inputRange: [height * 0.28, height * 0.38],
+    outputRange: [0, 1],
+    extrapolate: "clamp",
+  });
 
-  const handleLikePress = useCallback(() => {
-    // TODO: Implement like functionality
-    console.log("Like artist:", artist?.name);
-  }, [artist]);
+  const stickyHeaderTranslateY = scrollY.interpolate({
+    inputRange: [height * 0.28, height * 0.38],
+    outputRange: [-10, 0],
+    extrapolate: "clamp",
+  });
 
-  // Loading skeleton
+  // Playback actions
+  const handlePlayArtist = useCallback(async () => {
+    if (!artist?.songs?.length) return;
+    const tracks = artist.songs.map((track) => ({
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      art: track.art,
+      url: "",
+      duration: parseDuration(track.duration),
+    }));
+    await setQueue(tracks, 0);
+    // Removed navigation to goNowPlaying
+  }, [artist, setQueue]);
+
+  const handleShuffleArtist = useCallback(async () => {
+    if (!artist?.songs?.length) return;
+    const shuffled = [...artist.songs].sort(() => Math.random() - 0.5);
+    const tracks = shuffled.map((track) => ({
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      art: track.art,
+      url: "",
+      duration: parseDuration(track.duration),
+    }));
+    await setQueue(tracks, 0);
+    // Removed navigation to goNowPlaying
+  }, [artist, setQueue]);
+
+  const handleTrackPress = useCallback(
+    async (track: MusicTrack) => {
+      const index = artist?.songs.findIndex((t) => t.id === track.id) ?? 0;
+      await setQueue(
+        artist?.songs.map((t) => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          art: t.art,
+          url: "",
+          duration: parseDuration(t.duration),
+        })) ?? [],
+        index,
+      );
+      // Removed navigation to goNowPlaying
+    },
+    [artist, setQueue],
+  );
+
+  const openSeeAll = useCallback(
+    async (
+      title: string,
+      initialData: any[],
+      type: "tracks" | "albums" | "artists",
+      params?: string,
+    ) => {
+      setBottomSheetTitle(title);
+      setBottomSheetType(type);
+      setBottomSheetVisible(true);
+
+      const cacheKey = `${artistId}_${type}_${title}`;
+
+      if (expandedCache.current[cacheKey]) {
+        setBottomSheetData(expandedCache.current[cacheKey]);
+        return;
+      }
+
+      // Show initial data while fetching
+      setBottomSheetData(initialData);
+
+      // Only fetch if we have params (except for artists which we don't have expanded endpoint yet)
+      if (!params || type === "artists") return;
+
+      setIsModalFetching(true);
+      try {
+        let expandedData: (MusicTrack | AlbumDetails | ArtistBasicInfo)[] = [];
+        if (type === "tracks") {
+          expandedData = await musicService.getArtistSongs(artistId, params);
+        } else if (type === "albums") {
+          expandedData = await musicService.getArtistAlbums(artistId, params);
+        }
+
+        if (expandedData && expandedData.length > 0) {
+          setBottomSheetData(expandedData);
+          expandedCache.current[cacheKey] = expandedData;
+        }
+      } catch (e) {
+        console.error("[Artist Page] See All fetch failed:", e);
+      } finally {
+        setIsModalFetching(false);
+      }
+    },
+    [artistId],
+  );
+
+  const handleModalScroll = (e: any) => {
+    const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+    const isCloseToBottom =
+      layoutMeasurement.height + contentOffset.y >= contentSize.height - 20;
+    if (isCloseToBottom && !isModalLoadingMore && !isModalFetching) {
+      // Future: add pagination if backend supports it
+    }
+  };
+
+  // ─── Error State ──────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <StatusBar style="light" />
+        <AtmosphericBackground />
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle-outline" size={64} color={palette.coral} />
+          <AuraText variant="title" style={styles.errorTitle}>
+            Connection Error
+          </AuraText>
+          <AuraText variant="body" style={styles.errorText}>
+            {error}
+          </AuraText>
+          <SpringButton
+            onPress={() => fetchArtistData(artistId, false)}
+            style={styles.retryButton}
+            accessibilityLabel="Retry loading artist"
+          >
+            <AuraText variant="headline" style={styles.retryText}>
+              Try Again
+            </AuraText>
+          </SpringButton>
+          <TouchableOpacity
+            onPress={handleBackPress}
+            style={styles.errorBack}
+            accessibilityLabel="Go back"
+            accessibilityRole="button"
+          >
+            <AuraText variant="caption">Go Back</AuraText>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ─── Loading State ────────────────────────────────────────────────────────
   if (isLoading || !artist) {
     return (
       <View style={styles.container}>
@@ -255,32 +471,68 @@ function ArtistPage() {
     );
   }
 
+  // ─── Main Render ──────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
       <AtmosphericBackground />
 
-      {/* Sticky Header */}
+      {/* Floating Back / Like header (visible when near top) */}
       <Animated.View
-        style={[styles.stickyHeader, { opacity: stickyHeaderOpacity }]}
+        style={[styles.headerOverlay, { opacity: headerOverlayOpacity }]}
+        pointerEvents={showSticky ? "none" : "auto"}
+      >
+        <SpringButton
+          onPress={handleBackPress}
+          style={styles.headerGlassButton}
+          accessibilityLabel="Go back"
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Ionicons name="chevron-back" size={20} color={palette.ink} />
+        </SpringButton>
+        <SpringButton
+          onPress={() => { }}
+          style={styles.headerGlassButton}
+          accessibilityLabel="Like artist"
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Ionicons name="heart-outline" size={18} color={palette.ink} />
+        </SpringButton>
+      </Animated.View>
+
+      {/* Sticky Header (visible after scroll) */}
+      <Animated.View
+        style={[
+          styles.stickyHeader,
+          {
+            opacity: stickyHeaderOpacity,
+            transform: [{ translateY: stickyHeaderTranslateY }],
+          },
+        ]}
+        pointerEvents={showSticky ? "auto" : "none"}
       >
         <LiquidGlass
           intensity={glass.navBlur}
-          borderRadius={0}
+          borderRadius={radius.xl}
+          gradient
           style={styles.stickyHeaderGlass}
           contentStyle={styles.stickyHeaderContent}
         >
-          <PressScale
+          <SpringButton
             onPress={handleBackPress}
-            accessibilityRole="button"
+            style={styles.stickyBackButton}
             accessibilityLabel="Go back"
-            wrapperStyle={styles.backButtonWrapper}
-            style={styles.backButton}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Ionicons name="chevron-back" size={18} color={palette.ink} />
-          </PressScale>
+          </SpringButton>
 
-          <View style={styles.stickyTitleGroup}>
+          <View style={styles.stickyHeaderInfo}>
+            <Image
+              source={{ uri: artist.thumbnail }}
+              style={styles.stickyAvatar}
+              contentFit="cover"
+            />
             <AuraText
               variant="headline"
               numberOfLines={1}
@@ -288,14 +540,21 @@ function ArtistPage() {
             >
               {artist.name}
             </AuraText>
-            <AuraText variant="caption" style={styles.stickySubtitle}>
-              {artist.monthlyListeners} monthly listeners
-            </AuraText>
           </View>
+
+          <SpringButton
+            onPress={handleShuffleArtist}
+            style={styles.stickyPlayButton}
+            accessibilityLabel="Shuffle all tracks"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="shuffle" size={16} color={palette.ink} />
+          </SpringButton>
         </LiquidGlass>
       </Animated.View>
 
-      <Animated.View style={[styles.pageTransition, { opacity: pageOpacity }]}> 
+      {/* Page content */}
+      <Animated.View style={[styles.pageTransition, { opacity: pageOpacity }]}>
         <Animated.ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.content}
@@ -305,295 +564,376 @@ function ArtistPage() {
             { useNativeDriver: true },
           )}
           showsVerticalScrollIndicator={false}
+          overScrollMode="never"
         >
-          {/* Hero Section */}
-          <Animated.View
-            style={[
-              styles.heroContainer,
-              { opacity: heroOpacity, transform: [{ scale: heroScale }] },
-            ]}
-          >
-            <HeroSection
-              artist={artist}
-              onBack={handleBackPress}
-              onFollow={handleFollowPress}
-            />
-          </Animated.View>
+          <HeroSection artist={artist} scrollY={scrollY} />
 
-          {/* Floating Controls */}
-          <MotionReveal delay={200}>
-            <FloatingControls
+          <MotionReveal delay={80}>
+            <FloatingControlPanel
               onPlay={handlePlayArtist}
               onShuffle={handleShuffleArtist}
-              onFollow={handleFollowPress}
-              onShare={handleSharePress}
-              onLike={handleLikePress}
+              isFollowing={isFollowing}
+              onFollow={() => setIsFollowing((v) => !v)}
             />
           </MotionReveal>
 
-          {/* Quick Stats */}
-        <MotionReveal delay={400}>
-          <QuickStats artist={artist} />
-        </MotionReveal>
+          <MotionReveal delay={180}>
+            <QuickStats artist={artist} />
+          </MotionReveal>
 
-        {/* Top Tracks */}
-        <MotionReveal delay={600}>
-          <TopTracksSection
-            tracks={artist.topTracks || []}
-            currentTrack={currentTrack}
-            isPlaying={isPlaying}
-            onTrackPress={handleTrackPress}
-          />
-        </MotionReveal>
+          {latestTracks.length > 0 && (
+            <MotionReveal delay={260}>
+              <TopTracksSection
+                title="Top Tracks"
+                tracks={latestTracks}
+                allTracks={artist.songs}
+                currentTrack={currentTrack}
+                isPlaying={isPlaying}
+                onTrackPress={handleTrackPress}
+                onSeeAll={() =>
+                  openSeeAll(
+                    "Top Tracks",
+                    artist.songs,
+                    "tracks",
+                    artist.songs_params,
+                  )
+                }
+              />
+            </MotionReveal>
+          )}
 
-        {/* Popular Releases */}
-        <MotionReveal delay={800}>
-          <PopularReleasesSection />
-        </MotionReveal>
+          {releaseItems.length > 0 ? (
+            <MotionReveal delay={340}>
+              <PopularReleasesSection
+                releases={releaseItems}
+                onSeeAll={() =>
+                  openSeeAll(
+                    "Popular Releases",
+                    allReleases,
+                    "albums",
+                    artist.singles_params || artist.albums_params,
+                  )
+                }
+                onAlbumPress={(albumId) => navigation.goAlbum(albumId)}
+              />
+            </MotionReveal>
+          ) : (
+            <MotionReveal delay={340}>
+              <SectionWithPlaceholder title="Popular Releases" />
+            </MotionReveal>
+          )}
 
-        {/* Visual Album Showcase */}
-        <MotionReveal delay={1000}>
-          <AlbumShowcaseSection />
-        </MotionReveal>
+          {artist.albums && artist.albums.length > 0 && (
+            <MotionReveal delay={420}>
+              <AlbumShowcaseSection
+                title="Albums"
+                albums={artist.albums}
+                onAlbumPress={(albumId) => navigation.goAlbum(albumId)}
+                onSeeAll={() =>
+                  openSeeAll(
+                    "Albums",
+                    artist.albums,
+                    "albums",
+                    artist.albums_params,
+                  )
+                }
+              />
+            </MotionReveal>
+          )}
 
-        {/* About Artist */}
-        <MotionReveal delay={1200}>
-          <AboutArtistSection artist={artist} />
-        </MotionReveal>
+          <MotionReveal delay={500}>
+            <AboutArtistSection artist={artist} />
+          </MotionReveal>
 
-        {/* Collaborators */}
-        <MotionReveal delay={1400}>
-          <CollaboratorsSection collaborators={artist.collaborators || []} />
-        </MotionReveal>
+          {artist.related && artist.related.length > 0 && (
+            <MotionReveal delay={580}>
+              <RelatedArtistsSection
+                artists={artist.related}
+                onSeeAll={() =>
+                  openSeeAll("Related Artists", artist.related, "artists")
+                }
+                onArtistPress={handleArtistPress}
+              />
+            </MotionReveal>
+          )}
 
-        {/* Related Artists */}
-        <MotionReveal delay={1600}>
-          <RelatedArtistsSection />
-        </MotionReveal>
+          <View style={styles.bottomSpacing} />
+        </Animated.ScrollView>
+      </Animated.View>
 
-        {/* Fan Insights */}
-        <MotionReveal delay={1800}>
-          <FanInsightsSection insights={artist.fanInsights} />
-        </MotionReveal>
-
-        {/* Music Videos */}
-        <MotionReveal delay={2000}>
-          <MusicVideosSection />
-        </MotionReveal>
-
-        {/* Live Events */}
-        <MotionReveal delay={2200}>
-          <LiveEventsSection />
-        </MotionReveal>
-
-        {/* Bottom Spacing */}
-        <View style={styles.bottomSpacing} />
-      </Animated.ScrollView>
-    </Animated.View>
+      {/* Bottom Sheet */}
+      <SeeAllBottomSheet
+        visible={bottomSheetVisible}
+        title={bottomSheetTitle}
+        data={bottomSheetData}
+        type={bottomSheetType}
+        currentTrack={currentTrack}
+        isPlaying={isPlaying}
+        isLoadingMore={isModalLoadingMore}
+        isFetching={isModalFetching}
+        onClose={() => setBottomSheetVisible(false)}
+        onScroll={handleModalScroll}
+        onTrackPress={(track) => {
+          setBottomSheetVisible(false);
+          handleTrackPress(track);
+        }}
+        onAlbumPress={(albumId) => {
+          setBottomSheetVisible(false);
+          navigation.goAlbum(albumId);
+        }}
+        onArtistPress={(artistId) => {
+          setBottomSheetVisible(false);
+          handleArtistPress(artistId);
+        }}
+      />
     </View>
   );
 }
 
-// Hero Section Component
+// ─── Hero Section ─────────────────────────────────────────────────────────────
 const HeroSection = memo(
   ({
     artist,
-    onBack,
-    onFollow,
+    scrollY,
   }: {
-    artist: ArtistPageData;
-    onBack: () => void;
-    onFollow: () => void;
+    artist: ArtistDetails;
+    scrollY: Animated.Value;
   }) => {
-    const responsive = useResponsiveMetrics();
+    const imageScale = scrollY.interpolate({
+      inputRange: [-120, 0, 120],
+      outputRange: [1.12, 1, 0.94],
+      extrapolate: "clamp",
+    });
+
+    const imageTranslateY = scrollY.interpolate({
+      inputRange: [0, 200],
+      outputRange: [0, 50],
+      extrapolate: "clamp",
+    });
+
+    const contentOpacity = scrollY.interpolate({
+      inputRange: [0, 160],
+      outputRange: [1, 0],
+      extrapolate: "clamp",
+    });
+
+    const contentTranslateY = scrollY.interpolate({
+      inputRange: [0, 160],
+      outputRange: [0, -20],
+      extrapolate: "clamp",
+    });
 
     return (
-      <View
-        style={[
-          styles.heroSection,
-          { paddingHorizontal: responsive.horizontalPadding },
-        ]}
-      >
-      <View style={styles.heroContent}>
-        <View style={styles.heroTopBar}>
-          <PressScale
-            onPress={onBack}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            style={styles.heroNavButton}
-          >
-            <Ionicons name="chevron-back" size={18} color={palette.ink} />
-          </PressScale>
-          <PressScale
-            onPress={onFollow}
-            accessibilityRole="button"
-            accessibilityLabel="Follow artist"
-            style={styles.heroFollowButton}
-          >
-            <Ionicons name="heart-outline" size={18} color={palette.ink} />
-            <AuraText variant="caption" style={styles.heroFollowText}>
-              Follow
-            </AuraText>
-          </PressScale>
-        </View>
-
-        {/* Artist Image */}
-        <View style={styles.heroImageContainer}>
+      <View style={styles.heroSection}>
+        <Animated.View
+          style={[
+            styles.heroImageContainer,
+            {
+              transform: [
+                { scale: imageScale },
+                { translateY: imageTranslateY },
+              ],
+            },
+          ]}
+        >
           <Image
-            source={{ uri: artist.image }}
+            source={{ uri: artist.thumbnail }}
             style={styles.heroImage}
             contentFit="cover"
-            transition={300}
-            placeholder={palette.backgroundRaised}
+            transition={500}
+            accessibilityLabel={`${artist.name} artist photo`}
           />
-          <LinearGradient
-            colors={["transparent", "rgba(7,7,12,0.8)"]}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            style={styles.heroImageOverlay}
-          />
-        </View>
+          {/* subtle inner shadow rim */}
+          <View style={styles.heroImageRim} pointerEvents="none" />
+        </Animated.View>
 
-        {/* Artist Info */}
-        <View style={styles.heroInfo}>
-          {artist.verified && (
-            <View style={styles.verifiedBadge}>
-              <Ionicons
-                name="checkmark-circle"
-                size={16}
-                color={palette.primary}
-              />
-              <AuraText variant="caption" style={styles.verifiedText}>
-                Verified Artist
-              </AuraText>
-            </View>
-          )}
+        <Animated.View
+          style={[
+            styles.heroInfo,
+            {
+              opacity: contentOpacity,
+              transform: [{ translateY: contentTranslateY }],
+            },
+          ]}
+        >
+          <View style={styles.verifiedBadge}>
+            <Ionicons name="checkmark-circle" size={13} color={palette.primary} />
+            <AuraText variant="caption" style={styles.verifiedText}>
+              Verified Artist
+            </AuraText>
+          </View>
 
           <AuraText
             variant="display"
             style={styles.artistName}
-            numberOfLines={2}
+            accessibilityRole="header"
           >
             {artist.name}
           </AuraText>
 
-          <AuraText variant="body" style={styles.monthlyListeners}>
-            {artist.monthlyListeners} monthly listeners
+          <AuraText variant="body" style={styles.listenersText}>
+            {artist.subscribers} monthly listeners
           </AuraText>
 
-          {artist.genres && (
-            <View style={styles.genresContainer}>
-              {artist.genres.map((genre, index) => (
-                <AuraText key={genre} variant="caption" style={styles.genre}>
-                  {genre}
-                  {index < artist.genres!.length - 1 ? " • " : ""}
-                </AuraText>
+          {artist.genres && artist.genres.length > 0 && (
+            <View style={styles.genreRow}>
+              {artist.genres.map((g: string, i: number) => (
+                <View key={i} style={styles.genrePill}>
+                  <AuraText variant="caption" style={styles.genrePillText}>
+                    {g}
+                  </AuraText>
+                </View>
               ))}
             </View>
           )}
 
-          {artist.tagline && (
-            <AuraText
-              variant="headline"
-              style={styles.tagline}
-              numberOfLines={2}
-            >
-              {artist.tagline}
-            </AuraText>
-          )}
-        </View>
+          <AuraText variant="headline" style={styles.taglineText}>
+            {artist.tagline}
+          </AuraText>
+        </Animated.View>
       </View>
-    </View>
-  );
-});
+    );
+  },
+);
 
-// Floating Controls Component
-const FloatingControls = memo(
+// ─── Liquid Glass Control Panel ───────────────────────────────────────────────
+// iOS liquid glass concept: frosted glass card, primary play/shuffle pills,
+// icon action row with individual glass capsules
+const FloatingControlPanel = memo(
   ({
     onPlay,
     onShuffle,
+    isFollowing,
     onFollow,
-    onShare,
-    onLike,
   }: {
     onPlay: () => void;
     onShuffle: () => void;
+    isFollowing: boolean;
     onFollow: () => void;
-    onShare: () => void;
-    onLike: () => void;
   }) => {
-    const responsive = useResponsiveMetrics();
+    const followScale = useRef(new Animated.Value(1)).current;
+
+    const animateFollow = () => {
+      Animated.sequence([
+        Animated.spring(followScale, {
+          toValue: 1.18,
+          useNativeDriver: true,
+          speed: 60,
+          bounciness: 12,
+        }),
+        Animated.spring(followScale, {
+          toValue: 1,
+          useNativeDriver: true,
+          speed: 40,
+          bounciness: 4,
+        }),
+      ]).start();
+      onFollow();
+    };
+
+    const secondaryActions = [
+      {
+        icon: isFollowing ? "person-remove-outline" : "person-add-outline",
+        label: isFollowing ? "Unfollow" : "Follow",
+        onPress: animateFollow,
+        animated: true,
+        active: isFollowing,
+      },
+
+      {
+        icon: "share-social-outline",
+        label: "Share",
+        onPress: () => { },
+        active: false,
+      },
+      {
+        icon: "ellipsis-horizontal",
+        label: "More",
+        onPress: () => { },
+        active: false,
+      },
+    ];
 
     return (
-      <View
-        style={[
-          styles.floatingControls,
-          { paddingHorizontal: responsive.horizontalPadding },
-        ]}
-      >
+      <View style={styles.controlPanelContainer}>
         <LiquidGlass
-          borderRadius={radius.xl}
-          style={styles.controlsContainer}
-          contentStyle={styles.controlsStack}
+          borderRadius={28}
+          intensity={glass.denseBlur ?? 60}
+          gradient
+          style={styles.controlPanelGlass}
+          contentStyle={styles.controlPanelInner}
         >
-          <View style={styles.primaryControls}>
-            <PressScale
-              scaleTo={0.94}
+          {/* ── Primary row: Play + Shuffle ── */}
+          <View style={styles.primaryRow}>
+            {/* Play pill – solid, primary coloured */}
+            <SpringButton
               onPress={onPlay}
-              accessibilityRole="button"
-              accessibilityLabel="Play artist"
-              style={[styles.controlButton, styles.primaryButton]}
+              style={styles.playPill}
+              accessibilityLabel="Play all tracks"
             >
-              <Ionicons name="play" size={18} color={palette.ink} />
-              <AuraText variant="headline" style={styles.controlText}>
-                Play
-              </AuraText>
-            </PressScale>
+              <View style={styles.playPillContent}>
+                <View style={styles.playIconCircle}>
+                  <Ionicons name="play" size={15} color="#fff" />
+                </View>
+                <AuraText variant="headline" style={styles.playPillText}>
+                  Play
+                </AuraText>
+              </View>
+            </SpringButton>
 
-            <PressScale
-              scaleTo={0.94}
+            {/* Shuffle pill – glass */}
+            <SpringButton
               onPress={onShuffle}
-              accessibilityRole="button"
-              accessibilityLabel="Shuffle artist"
-              style={[styles.controlButton, styles.primaryButton]}
+              style={styles.shufflePill}
+              accessibilityLabel="Shuffle all tracks"
             >
-              <Ionicons name="shuffle" size={18} color={palette.ink} />
-              <AuraText variant="headline" style={styles.controlText}>
-                Shuffle
-              </AuraText>
-            </PressScale>
+              <View style={styles.shufflePillContent}>
+                <Ionicons name="shuffle" size={18} color={palette.primary} />
+                <AuraText variant="headline" style={styles.shufflePillText}>
+                  Shuffle
+                </AuraText>
+              </View>
+            </SpringButton>
           </View>
 
-          <View style={styles.secondaryControls}>
-            <PressScale
-              scaleTo={0.92}
-              onPress={onFollow}
-              accessibilityRole="button"
-              accessibilityLabel="Follow artist"
-              style={styles.iconButton}
-            >
-              <Ionicons name="person-add" size={18} color={palette.ink} />
-            </PressScale>
+          {/* ── Divider ── */}
+          <View style={styles.panelDivider} />
 
-            <PressScale
-              scaleTo={0.92}
-              onPress={onShare}
-              accessibilityRole="button"
-              accessibilityLabel="Share artist"
-              style={styles.iconButton}
-            >
-              <Ionicons name="share-social" size={18} color={palette.ink} />
-            </PressScale>
-
-            <PressScale
-              scaleTo={0.92}
-              onPress={onLike}
-              accessibilityRole="button"
-              accessibilityLabel="Like artist"
-              style={styles.iconButton}
-            >
-              <Ionicons name="heart" size={18} color={palette.primary} />
-            </PressScale>
+          {/* ── Secondary row: icon capsules ── */}
+          <View style={styles.secondaryRow}>
+            {secondaryActions.map((action, i) => (
+              <View key={i} style={styles.actionCapsuleWrapper}>
+                <SpringButton
+                  onPress={action.onPress}
+                  style={[
+                    styles.actionCapsule,
+                    action.active && styles.actionCapsuleActive,
+                  ]}
+                  accessibilityLabel={action.label}
+                >
+                  {action.animated ? (
+                    <Animated.View
+                      style={{ transform: [{ scale: followScale }] }}
+                    >
+                      <Ionicons
+                        name={action.icon as any}
+                        size={20}
+                        color={action.active ? palette.primary : palette.inkDim}
+                      />
+                    </Animated.View>
+                  ) : (
+                    <Ionicons
+                      name={action.icon as any}
+                      size={20}
+                      color={action.active ? palette.primary : palette.inkDim}
+                    />
+                  )}
+                </SpringButton>
+                <AuraText variant="caption" style={styles.actionCapsuleLabel}>
+                  {action.label}
+                </AuraText>
+              </View>
+            ))}
           </View>
         </LiquidGlass>
       </View>
@@ -601,763 +941,969 @@ const FloatingControls = memo(
   },
 );
 
-// Quick Stats Component
-const QuickStats = memo(({ artist }: { artist: ArtistPageData }) => {
-  const responsive = useResponsiveMetrics();
-
+// ─── Quick Stats ──────────────────────────────────────────────────────────────
+const QuickStats = memo(({ artist }: { artist: ArtistDetails }) => {
   const stats = [
-    { label: "Monthly Listeners", value: artist.monthlyListeners || "0" },
-    { label: "Total Plays", value: "2.1B" },
-    { label: "Followers", value: artist.followers || "0" },
-    { label: "Trending", value: "#12" },
-    { label: "Match", value: "98%" },
+    { label: "Listeners", value: artist.subscribers || "12.4M", icon: "headset-outline" },
+    { label: "Total Plays", value: "2.1B", icon: "play-circle-outline" },
+    { label: "Followers", value: "840K", icon: "people-outline" },
   ];
 
   return (
-    <View
-      style={[
-        styles.statsSection,
-        { paddingHorizontal: responsive.horizontalPadding },
-      ]}
-    >
+    <View style={styles.statsSection}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.statsContainer}
+        contentContainerStyle={styles.statsScroll}
+        decelerationRate="fast"
+        snapToInterval={164}
+        snapToAlignment="start"
       >
-        {stats.map((stat, index) => (
-          <MotionReveal key={stat.label} delay={index * 100}>
-            <LiquidGlass
-              borderRadius={radius.lg}
-              style={styles.statCard}
-              contentStyle={styles.statContent}
-            >
-              <AuraText variant="caption" style={styles.statLabel}>
-                {stat.label}
-              </AuraText>
-              <AuraText variant="title" style={styles.statValue}>
-                {stat.value}
-              </AuraText>
-            </LiquidGlass>
-          </MotionReveal>
+        {stats.map((stat, i) => (
+          <LiquidGlass
+            key={i}
+            borderRadius={radius.lg}
+            style={styles.statCard}
+            contentStyle={styles.statInner}
+          >
+            <Ionicons
+              name={stat.icon as any}
+              size={16}
+              color={palette.primary}
+              style={{ marginBottom: 8 }}
+            />
+            <AuraText variant="caption" muted style={styles.statLabel}>
+              {stat.label}
+            </AuraText>
+            <AuraText variant="title" style={styles.statValue}>
+              {stat.value}
+            </AuraText>
+          </LiquidGlass>
         ))}
       </ScrollView>
     </View>
   );
 });
 
-// Top Tracks Section
+// ─── Top Tracks ───────────────────────────────────────────────────────────────
+interface TopTracksSectionProps {
+  title: string;
+  tracks: MusicTrack[];
+  allTracks: MusicTrack[];
+  currentTrack: any;
+  isPlaying: boolean;
+  onTrackPress: (track: MusicTrack) => void;
+  onSeeAll: () => void;
+}
+
 const TopTracksSection = memo(
   ({
+    title,
     tracks,
+    allTracks,
     currentTrack,
     isPlaying,
     onTrackPress,
-  }: {
-    tracks: CatalogTrack[];
-    currentTrack: any;
-    isPlaying: boolean;
-    onTrackPress: (track: CatalogTrack) => void;
-  }) => {
-    const responsive = useResponsiveMetrics();
-
-    return (
-      <View
-        style={[
-          styles.section,
-          { paddingHorizontal: responsive.horizontalPadding },
-        ]}
-      >
-        <SectionHeader title="Top Tracks" actionLabel="See all" />
-
-        <View style={styles.tracksList}>
-          {tracks.map((track, index) => (
-            <MotionReveal key={track.id} delay={index * 50}>
-              <MediaListItem
-                title={track.title}
-                subtitle={track.artist}
-                image={track.art}
-                meta={track.duration}
-                active={currentTrack?.id === track.id}
-                onPress={() => onTrackPress(track)}
-                style={styles.trackItem}
-              />
-            </MotionReveal>
-          ))}
-        </View>
+    onSeeAll,
+  }: TopTracksSectionProps) => (
+    <View style={styles.section}>
+      <SectionHeader title={title} actionLabel="See all" onActionPress={onSeeAll} />
+      <View style={styles.tracksList}>
+        {tracks.map((track: MusicTrack) => (
+          <MediaListItem
+            key={track.id}
+            title={track.title}
+            subtitle={track.artist}
+            image={track.art}
+            meta={track.duration}
+            active={currentTrack?.id === track.id}
+            onPress={() => onTrackPress(track)}
+            rightIcon={
+              currentTrack?.id === track.id && isPlaying
+                ? "stats-chart"
+                : "ellipsis-vertical"
+            }
+          />
+        ))}
       </View>
-    );
-  },
+    </View>
+  ),
 );
 
-// Popular Releases Section
-const PopularReleasesSection = memo(() => {
-  const responsive = useResponsiveMetrics();
+// ─── Popular Releases ─────────────────────────────────────────────────────────
+interface PopularReleasesSectionProps {
+  releases: AlbumDetails[];
+  onSeeAll: () => void;
+  onAlbumPress: (albumId: string) => void;
+}
 
-  return (
-    <View
-      style={[
-        styles.section,
-        { paddingHorizontal: responsive.horizontalPadding },
-      ]}
-    >
-      <SectionHeader title="Popular Releases" actionLabel="See all" />
-
-      {/* Placeholder for popular releases */}
-      <View style={styles.placeholder}>
-        <AuraText variant="body" muted>
-          Popular releases will appear here
-        </AuraText>
-      </View>
+const PopularReleasesSection = memo(
+  ({ releases, onSeeAll, onAlbumPress }: PopularReleasesSectionProps) => (
+    <View style={styles.section}>
+      <SectionHeader
+        title="Popular Releases"
+        actionLabel="See all"
+        onActionPress={onSeeAll}
+      />
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.horizontalScroll}
+        decelerationRate="fast"
+      >
+        {releases.map((release) => (
+          <SpringButton
+            key={release.id}
+            style={styles.releaseItem}
+            onPress={() => onAlbumPress(release.id)}
+            accessibilityLabel={`${release.title} by ${release.artist}, ${release.type === "single" ? "Single" : "Album"}, ${release.year || "2024"}`}
+          >
+            <Image
+              source={{ uri: release.thumbnail }}
+              style={styles.releaseArt}
+              contentFit="cover"
+            />
+            <AuraText variant="headline" numberOfLines={1} style={styles.releaseTitle}>
+              {release.title}
+            </AuraText>
+            <AuraText variant="caption" muted>
+              {release.type === "single" ? "Single" : "Album"} · {release.year || "2024"}
+            </AuraText>
+          </SpringButton>
+        ))}
+      </ScrollView>
     </View>
-  );
-});
+  ),
+);
 
-// Album Showcase Section
-const AlbumShowcaseSection = memo(() => {
-  const responsive = useResponsiveMetrics();
+// ─── Album Showcase ───────────────────────────────────────────────────────────
+interface AlbumShowcaseSectionProps {
+  title: string;
+  albums: AlbumDetails[];
+  onSeeAll: () => void;
+  onAlbumPress: (albumId: string) => void;
+}
 
-  return (
-    <View
-      style={[
-        styles.section,
-        { paddingHorizontal: responsive.horizontalPadding },
-      ]}
-    >
-      <SectionHeader title="Albums" actionLabel="See all" />
-
-      {/* Placeholder for album showcase */}
-      <View style={styles.placeholder}>
-        <AuraText variant="body" muted>
-          Album showcase will appear here
-        </AuraText>
-      </View>
+const AlbumShowcaseSection = memo(
+  ({ title, albums, onSeeAll, onAlbumPress }: AlbumShowcaseSectionProps) => (
+    <View style={styles.section}>
+      <SectionHeader title={title} actionLabel="See all" onActionPress={onSeeAll} />
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.horizontalScroll}
+        decelerationRate="fast"
+      >
+        {albums.slice(0, 6).map((album: AlbumDetails) => (
+          <SpringButton
+            key={album.id}
+            style={styles.albumItem}
+            onPress={() => onAlbumPress(album.id)}
+            accessibilityLabel={`${album.title}, ${album.year || "2024"}`}
+          >
+            <Image
+              source={{ uri: album.thumbnail }}
+              style={styles.albumArt}
+              contentFit="cover"
+            />
+            <AuraText variant="headline" numberOfLines={1} style={styles.albumTitle}>
+              {album.title}
+            </AuraText>
+            <AuraText variant="caption" muted>
+              {album.year || "2024"}
+            </AuraText>
+          </SpringButton>
+        ))}
+      </ScrollView>
     </View>
-  );
-});
+  ),
+);
 
-// About Artist Section
-const AboutArtistSection = memo(({ artist }: { artist: ArtistPageData }) => {
-  const responsive = useResponsiveMetrics();
+// ─── Placeholder Section ──────────────────────────────────────────────────────
+interface SectionWithPlaceholderProps {
+  title: string;
+  onSeeAll?: () => void;
+}
+
+const SectionWithPlaceholder = memo(
+  ({ title, onSeeAll }: SectionWithPlaceholderProps) => (
+    <View style={styles.section}>
+      <SectionHeader
+        title={title}
+        actionLabel={onSeeAll ? "See all" : undefined}
+        onActionPress={onSeeAll}
+      />
+      <AuraText variant="body" muted style={styles.placeholderText}>
+        {title} will appear here
+      </AuraText>
+    </View>
+  ),
+);
+
+// ─── About Artist ─────────────────────────────────────────────────────────────
+const AboutArtistSection = memo(({ artist }: { artist: ArtistDetails }) => {
   const [expanded, setExpanded] = useState(false);
+  const contentHeight = useRef(new Animated.Value(0)).current;
+
+  const toggleExpand = () => {
+    setExpanded((v) => !v);
+  };
 
   return (
-    <View
-      style={[
-        styles.section,
-        { paddingHorizontal: responsive.horizontalPadding },
-      ]}
-    >
+    <View style={styles.section}>
       <SectionHeader title="About" />
-
       <LiquidGlass
         borderRadius={radius.lg}
         style={styles.aboutCard}
-        contentStyle={styles.aboutContent}
+        contentStyle={styles.aboutInner}
       >
-        <AuraText variant="body" style={styles.biography}>
-          {expanded
-            ? artist.biography
-            : `${artist.biography?.slice(0, 150)}...`}
+        <AuraText variant="body" style={styles.aboutText}>
+          {expanded ? artist.description : `${artist.description?.slice(0, 200)}...`}
         </AuraText>
-
-        <PressScale scaleTo={0.98} onPress={() => setExpanded(!expanded)}>
+        <TouchableOpacity
+          onPress={toggleExpand}
+          accessibilityLabel={expanded ? "Show less about artist" : "Show more about artist"}
+          accessibilityRole="button"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <AuraText variant="caption" style={styles.expandText}>
             {expanded ? "Show less" : "Show more"}
           </AuraText>
-        </PressScale>
+        </TouchableOpacity>
 
-        <View style={styles.aboutDetails}>
-          {artist.origin && (
-            <View style={styles.detailRow}>
-              <Ionicons
-                name="location-outline"
-                size={16}
-                color={palette.inkDim}
-              />
-              <AuraText variant="caption" style={styles.detailText}>
-                {artist.origin}
-              </AuraText>
-            </View>
-          )}
-
-          {artist.influences && (
-            <View style={styles.detailRow}>
-              <Ionicons
-                name="musical-notes-outline"
-                size={16}
-                color={palette.inkDim}
-              />
-              <AuraText variant="caption" style={styles.detailText}>
-                Influences: {artist.influences.join(", ")}
-              </AuraText>
-            </View>
-          )}
+        <View style={styles.aboutMeta}>
+          <View style={styles.metaRow}>
+            <Ionicons name="location-outline" size={14} color={palette.inkDim} />
+            <AuraText variant="caption" muted>
+              Los Angeles, CA
+            </AuraText>
+          </View>
+          <View style={styles.metaRow}>
+            <Ionicons name="musical-notes-outline" size={14} color={palette.inkDim} />
+            <AuraText variant="caption" muted>
+              Influences: Kavinsky, The Midnight
+            </AuraText>
+          </View>
         </View>
       </LiquidGlass>
     </View>
   );
 });
 
-// Collaborators Section
-const CollaboratorsSection = memo(
-  ({ collaborators }: { collaborators: string[] }) => {
-    const responsive = useResponsiveMetrics();
+// ─── Related Artists ──────────────────────────────────────────────────────────
+interface RelatedArtistsSectionProps {
+  artists: ArtistBasicInfo[];
+  onSeeAll: () => void;
+  onArtistPress: (artistId?: string, artistName?: string) => void;
+}
 
-    if (!collaborators.length) return null;
-
-    return (
-      <View
-        style={[
-          styles.section,
-          { paddingHorizontal: responsive.horizontalPadding },
-        ]}
+const RelatedArtistsSection = memo(
+  ({ artists, onSeeAll, onArtistPress }: RelatedArtistsSectionProps) => (
+    <View style={styles.section}>
+      <SectionHeader
+        title="Related Artists"
+        actionLabel="See all"
+        onActionPress={onSeeAll}
+      />
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.horizontalScroll}
+        decelerationRate="fast"
       >
-        <SectionHeader title="Collaborators" />
-
-        <LiquidGlass
-          borderRadius={radius.lg}
-          style={styles.collaboratorsCard}
-          contentStyle={styles.collaboratorsContent}
-        >
-          {collaborators.map((collaborator, index) => (
+        {artists.slice(0, 6).map((item: ArtistBasicInfo) => (
+          <SpringButton
+            key={item.id}
+            style={styles.relatedItem}
+            onPress={() => onArtistPress(item.id, item.title)}
+            accessibilityLabel={item.title}
+          >
+            <Image
+              source={{ uri: item.thumbnail }}
+              style={styles.relatedArt}
+              contentFit="cover"
+            />
             <AuraText
-              key={collaborator}
-              variant="body"
-              style={styles.collaborator}
+              variant="headline"
+              numberOfLines={1}
+              style={styles.relatedName}
             >
-              {collaborator}
-              {index < collaborators.length - 1 ? ", " : ""}
+              {item.title}
             </AuraText>
-          ))}
-        </LiquidGlass>
-      </View>
-    );
-  },
+          </SpringButton>
+        ))}
+      </ScrollView>
+    </View>
+  ),
 );
 
-// Related Artists Section
-const RelatedArtistsSection = memo(() => {
-  const responsive = useResponsiveMetrics();
+// ─── See All Bottom Sheet ─────────────────────────────────────────────────────
+interface SeeAllBottomSheetProps {
+  visible: boolean;
+  title: string;
+  data: any[];
+  type: "tracks" | "albums" | "artists";
+  currentTrack: any;
+  isPlaying: boolean;
+  isLoadingMore: boolean;
+  onClose: () => void;
+  onScroll: (e: any) => void;
+  onTrackPress: (track: MusicTrack) => void;
+  onAlbumPress: (albumId: string) => void;
+  onArtistPress: (artistId: string) => void;
+}
 
-  return (
-    <View
-      style={[
-        styles.section,
-        { paddingHorizontal: responsive.horizontalPadding },
-      ]}
-    >
-      <SectionHeader title="Related Artists" actionLabel="See all" />
+const SeeAllBottomSheet = memo(
+  ({
+    visible,
+    title,
+    data,
+    type,
+    currentTrack,
+    isPlaying,
+    isLoadingMore,
+    isFetching,
+    onClose,
+    onScroll,
+    onTrackPress,
+    onAlbumPress,
+    onArtistPress,
+  }: SeeAllBottomSheetProps & { isFetching: boolean }) => {
+    const { height, width } = useWindowDimensions();
 
-      {/* Placeholder for related artists */}
-      <View style={styles.placeholder}>
-        <AuraText variant="body" muted>
-          Related artists will appear here
-        </AuraText>
-      </View>
-    </View>
-  );
-});
-
-// Fan Insights Section
-const FanInsightsSection = memo(
-  ({ insights }: { insights?: ArtistPageData["fanInsights"] }) => {
-    const responsive = useResponsiveMetrics();
-
-    if (!insights) return null;
+    const renderItem = useCallback(
+      ({ item }: { item: any }) => {
+        if (type === "tracks") {
+          return (
+            <MediaListItem
+              key={item.id}
+              title={item.title}
+              subtitle={item.artist}
+              image={item.art}
+              meta={item.duration}
+              active={currentTrack?.id === item.id}
+              onPress={() => onTrackPress(item)}
+              rightIcon={
+                currentTrack?.id === item.id && isPlaying
+                  ? "stats-chart"
+                  : "ellipsis-vertical"
+              }
+            />
+          );
+        }
+        return (
+          <SpringButton
+            key={item.id}
+            style={styles.modalGridItem}
+            onPress={() =>
+              type === "albums" ? onAlbumPress(item.id) : onArtistPress(item.id)
+            }
+            accessibilityLabel={item.title}
+          >
+            <Image
+              source={{ uri: item.thumbnail || item.art }}
+              style={[
+                styles.modalGridArt,
+                type === "artists" && { borderRadius: width * 0.2 },
+              ]}
+              contentFit="cover"
+            />
+            <AuraText
+              variant="headline"
+              numberOfLines={1}
+              style={[
+                styles.modalGridTitle,
+                type === "artists" && { textAlign: "center" },
+              ]}
+            >
+              {item.title}
+            </AuraText>
+          </SpringButton>
+        );
+      },
+      [type, currentTrack, isPlaying, onTrackPress, onAlbumPress, onArtistPress, width],
+    );
 
     return (
-      <View
-        style={[
-          styles.section,
-          { paddingHorizontal: responsive.horizontalPadding },
-        ]}
+      <Modal
+        visible={visible}
+        animationType="slide"
+        transparent
+        onRequestClose={onClose}
+        statusBarTranslucent
       >
-        <SectionHeader title="Fan Insights" />
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={onClose}
+            accessibilityLabel="Close panel"
+            accessibilityRole="button"
+          />
+          <LiquidGlass
+            intensity={glass.denseBlur}
+            borderRadius={radius.xl}
+            gradient
+            style={[styles.modalContent, { height: height * 0.85 }]}
+            contentStyle={styles.modalContentInner}
+          >
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHandle} />
+              <View style={styles.modalHeaderRow}>
+                <AuraText variant="title" style={styles.modalTitle}>
+                  {title}
+                </AuraText>
+                <TouchableOpacity
+                  onPress={onClose}
+                  style={styles.modalClose}
+                  accessibilityLabel="Close"
+                  accessibilityRole="button"
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Ionicons name="close-circle" size={28} color={palette.inkDim} />
+                </TouchableOpacity>
+              </View>
+            </View>
 
-        <LiquidGlass
-          borderRadius={radius.lg}
-          style={styles.insightsCard}
-          contentStyle={styles.insightsContent}
-        >
-          <View style={styles.insightRow}>
-            <AuraText variant="headline" style={styles.insightLabel}>
-              Popularity Score
-            </AuraText>
-            <AuraText variant="title" style={styles.insightValue}>
-              {insights.popularityScore}%
-            </AuraText>
-          </View>
-        </LiquidGlass>
-      </View>
+            {isFetching && data.length === 0 ? (
+              <View style={styles.modalLoading}>
+                <ActivityIndicator color={palette.primary} size="large" />
+                <AuraText variant="caption" style={{ marginTop: 12 }}>
+                  Fetching collection...
+                </AuraText>
+              </View>
+            ) : (
+              <Animated.FlatList
+                data={data}
+                renderItem={renderItem}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.modalScrollContent}
+                showsVerticalScrollIndicator={false}
+                numColumns={type === "tracks" ? 1 : 2}
+                columnWrapperStyle={type !== "tracks" ? styles.modalGrid : undefined}
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                removeClippedSubviews
+                ListHeaderComponent={isFetching ? (
+                  <ActivityIndicator color={palette.primary} style={{ marginVertical: 10 }} />
+                ) : null}
+                ListFooterComponent={
+                  isLoadingMore ? (
+                    <View style={styles.modalLoading}>
+                      <ActivityIndicator color={palette.primary} />
+                      <AuraText variant="caption" style={{ marginTop: 8 }}>
+                        Loading more...
+                      </AuraText>
+                    </View>
+                  ) : (
+                    <View style={{ height: 40 }} />
+                  )
+                }
+              />
+            )}
+          </LiquidGlass>
+        </View>
+      </Modal>
     );
   },
 );
 
-// Music Videos Section
-const MusicVideosSection = memo(() => {
-  const responsive = useResponsiveMetrics();
-
-  return (
-    <View
-      style={[
-        styles.section,
-        { paddingHorizontal: responsive.horizontalPadding },
-      ]}
-    >
-      <SectionHeader title="Music Videos" actionLabel="See all" />
-
-      {/* Placeholder for music videos */}
-      <View style={styles.placeholder}>
-        <AuraText variant="body" muted>
-          Music videos will appear here
-        </AuraText>
-      </View>
-    </View>
-  );
-});
-
-// Live Events Section
-const LiveEventsSection = memo(() => {
-  const responsive = useResponsiveMetrics();
-
-  return (
-    <View
-      style={[
-        styles.section,
-        { paddingHorizontal: responsive.horizontalPadding },
-      ]}
-    >
-      <SectionHeader title="Live Events" actionLabel="See all" />
-
-      {/* Placeholder for live events */}
-      <View style={styles.placeholder}>
-        <AuraText variant="body" muted>
-          Live events will appear here
-        </AuraText>
-      </View>
-    </View>
-  );
-});
-
-// Skeleton Components
-const HeroSkeleton = memo(() => (
+// ─── Skeleton States ──────────────────────────────────────────────────────────
+const HeroSkeleton = () => (
   <View style={styles.heroSkeleton}>
     <SkeletonBlock style={styles.heroImageSkeleton} />
-    <View style={styles.heroInfoSkeleton}>
-      <SkeletonBlock style={styles.verifiedSkeleton} />
-      <SkeletonBlock style={styles.nameSkeleton} />
-      <SkeletonBlock style={styles.listenersSkeleton} />
-      <SkeletonBlock style={styles.genresSkeleton} />
-    </View>
+    <SkeletonBlock style={{ width: 100, height: 20, borderRadius: 10, marginBottom: 12 }} />
+    <SkeletonBlock style={{ width: 220, height: 40, borderRadius: 12, marginBottom: 8 }} />
+    <SkeletonBlock style={{ width: 160, height: 16, borderRadius: 8 }} />
   </View>
-));
+);
 
-const ControlsSkeleton = memo(() => (
-  <View style={styles.controlsSkeleton}>
-    <SkeletonBlock style={styles.controlsSkeletonBlock} />
+const ControlsSkeleton = () => (
+  <View style={{ paddingHorizontal: 20, marginBottom: 28 }}>
+    <SkeletonBlock style={{ height: 148, borderRadius: 28 }} />
   </View>
-));
+);
 
-const StatsSkeleton = memo(() => (
-  <View style={styles.statsSkeleton}>
-    {Array.from({ length: 5 }).map((_, i) => (
-      <SkeletonBlock key={i} style={styles.statSkeleton} />
+const StatsSkeleton = () => (
+  <View style={{ flexDirection: "row", paddingHorizontal: 20, gap: 12, marginBottom: 28 }}>
+    {Array.from({ length: 3 }).map((_, i) => (
+      <SkeletonBlock key={i} style={{ width: 130, height: 94, borderRadius: radius.lg }} />
     ))}
   </View>
-));
+);
 
-const TracksSkeleton = memo(() => (
-  <View style={styles.tracksSkeleton}>
+const TracksSkeleton = () => (
+  <View style={{ paddingHorizontal: 20, gap: 8 }}>
     {Array.from({ length: 4 }).map((_, i) => (
-      <SkeletonBlock key={i} style={styles.trackSkeleton} />
+      <SkeletonBlock key={i} style={{ height: 70, borderRadius: radius.md }} />
     ))}
   </View>
-));
+);
 
 export default memo(ArtistPage);
 
-// Styles
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: palette.background,
+  // ── Layout
+  container: { flex: 1, backgroundColor: palette.background },
+  scrollView: { flex: 1 },
+  content: { paddingTop: 0 },
+  loadingContent: { paddingTop: 40 },
+  bottomSpacing: { height: 140 },
+  pageTransition: { flex: 1 },
+
+  // ── Floating header overlay (top of page)
+  headerOverlay: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 52 : 32,
+    left: 20,
+    right: 20,
+    zIndex: 120,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  scrollView: {
-    flex: 1,
-  },
-  content: {
-    paddingTop: 0,
-  },
-  loadingContent: {
-    paddingTop: 0,
+  headerGlassButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.38)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+    // Android elevation
+    elevation: 4,
   },
 
-  // Sticky Header
+  // ── Sticky header
   stickyHeader: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     zIndex: 100,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === "ios" ? 12 : 8,
   },
   stickyHeaderGlass: {
-    borderTopWidth: 0,
-    borderLeftWidth: 0,
-    borderRightWidth: 0,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    elevation: 10,
   },
   stickyHeaderContent: {
-    paddingTop: Platform.OS === "ios" ? 50 : 30,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
+    paddingTop: Platform.OS === "ios" ? 44 : 30,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
   },
-  backButtonWrapper: {
-    marginRight: spacing.sm,
-  },
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.xl,
+  stickyBackButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.07)",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
   },
-  stickyTitleGroup: {
+  stickyHeaderInfo: {
     flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  stickyAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  stickyTitle: { fontSize: 15, fontWeight: "700", letterSpacing: -0.3 },
+  stickyPlayButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: palette.primary,
+    alignItems: "center",
     justifyContent: "center",
-  },
-  stickyTitle: {
-    flex: 1,
-  },
-  stickySubtitle: {
-    color: palette.inkMuted,
+    elevation: 4,
+    shadowColor: palette.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
   },
 
-  // Hero Section
-  heroSection: {
-    paddingTop: Platform.OS === "ios" ? 60 : 40,
-    paddingBottom: spacing.xxl,
-  },
-  heroContainer: {
-    alignItems: "center",
-  },
-  pageTransition: {
-    flex: 1,
-  },
-  heroTopBar: {
-    position: "absolute",
-    top: 12,
-    left: 0,
-    right: 0,
-    zIndex: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.lg,
-  },
-  heroNavButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.xl,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  heroFollowButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.xl,
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  heroFollowText: {
-    color: palette.ink,
-  },
-  heroContent: {
-    alignItems: "center",
-  },
+  // ── Hero
+  heroSection: { paddingTop: 56, alignItems: "center", marginBottom: 28 },
   heroImageContainer: {
-    position: "relative",
-    marginBottom: spacing.xl,
-  },
-  heroImage: {
-    width: 280,
-    height: 280,
+    width: 256,
+    height: 256,
     borderRadius: radius.xl,
+    overflow: "hidden",
+    marginBottom: 24,
     backgroundColor: palette.backgroundRaised,
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.55,
+    shadowRadius: 28,
   },
-  heroImageOverlay: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 140,
+  heroImage: { width: "100%", height: "100%" },
+  heroImageRim: {
+    ...StyleSheet.absoluteFillObject,
     borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
-  heroInfo: {
-    alignItems: "center",
-    maxWidth: 320,
-  },
+  heroInfo: { alignItems: "center", paddingHorizontal: 20 },
   verifiedBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs,
-    marginBottom: spacing.md,
+    gap: 5,
+    marginBottom: 10,
+    backgroundColor: "rgba(191,90,242,0.12)",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "rgba(191,90,242,0.18)",
   },
   verifiedText: {
     color: palette.primary,
+    fontWeight: "700",
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
   artistName: {
+    fontSize: 38,
+    fontWeight: "800",
     textAlign: "center",
-    marginBottom: spacing.sm,
+    marginBottom: 6,
+    letterSpacing: -0.8,
+    lineHeight: 44,
   },
-  monthlyListeners: {
-    color: palette.inkMuted,
-    marginBottom: spacing.md,
-  },
-  genresContainer: {
+  listenersText: { color: palette.inkMuted, marginBottom: 12, fontSize: 15 },
+  genreRow: {
     flexDirection: "row",
     flexWrap: "wrap",
+    gap: 6,
     justifyContent: "center",
-    marginBottom: spacing.md,
+    marginBottom: 14,
   },
-  genre: {
-    color: palette.inkDim,
+  genrePill: {
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  tagline: {
-    textAlign: "center",
+  genrePillText: { fontSize: 12, color: palette.inkDim, fontWeight: "500" },
+  taglineText: {
+    fontSize: 14,
+    lineHeight: 20,
     color: palette.inkMuted,
-    fontStyle: "italic",
+    textAlign: "center",
+    paddingHorizontal: 24,
+    opacity: 0.85,
   },
 
-  // Floating Controls
-  floatingControls: {
-    marginBottom: spacing.xxl,
+  // ── Liquid Glass Control Panel
+  controlPanelContainer: {
+    paddingHorizontal: 20,
+    marginBottom: 30,
   },
-  controlsContainer: {
-    marginHorizontal: spacing.md,
+  controlPanelGlass: {
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.10)",
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
   },
-  controlsStack: {
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    gap: spacing.md,
+  controlPanelInner: {
+    padding: 16,
+    gap: 14,
   },
-  primaryControls: {
+
+  // Primary row
+  primaryRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    gap: spacing.md,
+    gap: 12,
   },
-  secondaryControls: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: spacing.sm,
+  playPill: {
+    flex: 1,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: palette.primary,
+    overflow: "hidden",
+    elevation: 4,
+    shadowColor: palette.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
   },
-  controlButton: {
+  playPillContent: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
     justifyContent: "center",
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.xl,
-    minHeight: 48,
+    gap: 10,
+    paddingHorizontal: 20,
+  },
+  playIconCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "rgba(255,255,255,0.22)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  playPillText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 17,
+    letterSpacing: -0.2,
+  },
+  shufflePill: {
+    flex: 1,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.13)",
+    overflow: "hidden",
+  },
+  shufflePillContent: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+    paddingHorizontal: 20,
+  },
+  shufflePillText: {
+    color: palette.ink,
+    fontWeight: "700",
+    fontSize: 17,
+    letterSpacing: -0.2,
+  },
+
+  // Divider
+  panelDivider: {
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    marginHorizontal: -16,
+  },
+
+  // Secondary row
+  secondaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "flex-start",
+    paddingTop: 2,
+  },
+  actionCapsuleWrapper: {
+    alignItems: "center",
+    gap: 6,
     flex: 1,
   },
-  primaryButton: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-  },
-  iconButton: {
+  actionCapsule: {
     width: 52,
     height: 52,
-    borderRadius: radius.xl,
+    borderRadius: 26,
+    backgroundColor: "rgba(255,255,255,0.06)",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
-  controlText: {
-    fontSize: 15,
+  actionCapsuleActive: {
+    backgroundColor: "rgba(191,90,242,0.12)",
+    borderColor: "rgba(191,90,242,0.22)",
   },
-  controlDivider: {
-    width: 1,
-    height: 24,
-    backgroundColor: palette.border,
+  actionCapsuleLabel: {
+    fontSize: 11,
+    color: palette.inkDim,
+    textAlign: "center",
+    fontWeight: "500",
   },
 
-  // Stats Section
-  statsSection: {
-    marginBottom: spacing.xxl,
+  // ── Stats
+  statsSection: { marginBottom: 32 },
+  statsScroll: {
+    paddingHorizontal: 20,
+    gap: 12,
+    paddingRight: 32,
   },
-  statsContainer: {
-    paddingHorizontal: spacing.md,
-    gap: spacing.md,
-  },
-  statCard: {
-    minWidth: 120,
-    height: 80,
-  },
-  statContent: {
-    padding: spacing.md,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  statCard: { width: 152, height: 96 },
+  statInner: { padding: 14, justifyContent: "center" },
   statLabel: {
-    color: palette.inkDim,
-    marginBottom: spacing.xs,
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 2,
   },
   statValue: {
+    fontSize: 22,
+    fontWeight: "800",
     color: palette.primary,
+    letterSpacing: -0.5,
   },
 
-  // Section
-  section: {
-    marginBottom: spacing.xxl,
-  },
-  tracksList: {
-    gap: spacing.xs,
-  },
-  trackItem: {
-    marginHorizontal: spacing.md,
-  },
+  // ── Sections
+  section: { marginBottom: 36, paddingHorizontal: 20 },
+  tracksList: { gap: 10 },
+  horizontalScroll: { gap: 16, paddingRight: 36 },
 
-  // About Section
-  aboutCard: {
-    marginHorizontal: spacing.md,
-  },
-  aboutContent: {
-    padding: spacing.lg,
-  },
-  biography: {
-    lineHeight: 22,
-    marginBottom: spacing.md,
-  },
-  expandText: {
-    color: palette.primary,
-    marginBottom: spacing.lg,
-  },
-  aboutDetails: {
-    gap: spacing.sm,
-  },
-  detailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  detailText: {
-    color: palette.inkMuted,
-  },
-
-  // Collaborators
-  collaboratorsCard: {
-    marginHorizontal: spacing.md,
-  },
-  collaboratorsContent: {
-    padding: spacing.lg,
-  },
-  collaborator: {
-    color: palette.inkMuted,
-  },
-
-  // Insights
-  insightsCard: {
-    marginHorizontal: spacing.md,
-  },
-  insightsContent: {
-    padding: spacing.lg,
-  },
-  insightRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  insightLabel: {
-    color: palette.inkMuted,
-  },
-  insightValue: {
-    color: palette.primary,
-  },
-
-  // Placeholder
-  placeholder: {
-    marginHorizontal: spacing.md,
-    padding: spacing.lg,
-    alignItems: "center",
-  },
-
-  // Bottom Spacing
-  bottomSpacing: {
-    height: spacing.xxl * 2,
-  },
-
-  // Skeletons
-  heroSkeleton: {
-    paddingTop: Platform.OS === "ios" ? 60 : 40,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xxl,
-    alignItems: "center",
-  },
-  heroImageSkeleton: {
-    width: 280,
-    height: 280,
-    borderRadius: radius.xl,
-    marginBottom: spacing.xl,
-  },
-  heroInfoSkeleton: {
-    alignItems: "center",
-    maxWidth: 320,
-  },
-  verifiedSkeleton: {
-    width: 100,
-    height: 20,
-    marginBottom: spacing.md,
-  },
-  nameSkeleton: {
-    width: 200,
-    height: 42,
-    marginBottom: spacing.sm,
-  },
-  listenersSkeleton: {
-    width: 150,
-    height: 16,
-    marginBottom: spacing.md,
-  },
-  genresSkeleton: {
-    width: 120,
-    height: 14,
-  },
-
-  controlsSkeleton: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.xxl,
-  },
-  controlsSkeletonBlock: {
-    height: 60,
-    borderRadius: radius.pill,
-  },
-
-  statsSkeleton: {
-    flexDirection: "row",
-    paddingHorizontal: spacing.md,
-    gap: spacing.md,
-    marginBottom: spacing.xxl,
-  },
-  statSkeleton: {
-    width: 120,
-    height: 80,
+  albumItem: { width: 158 },
+  albumArt: {
+    width: 158,
+    height: 158,
     borderRadius: radius.lg,
+    marginBottom: 10,
+    backgroundColor: palette.backgroundRaised,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.05)",
   },
+  albumTitle: { fontSize: 14, fontWeight: "600", marginBottom: 2 },
 
-  tracksSkeleton: {
-    marginHorizontal: spacing.md,
-    gap: spacing.xs,
-    marginBottom: spacing.xxl,
+  releaseItem: { width: 158, marginRight: 2 },
+  releaseArt: {
+    width: 158,
+    height: 158,
+    borderRadius: radius.lg,
+    marginBottom: 10,
+    backgroundColor: palette.backgroundRaised,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.05)",
   },
-  trackSkeleton: {
-    height: 70,
-    borderRadius: radius.md,
+  releaseTitle: { fontSize: 14, fontWeight: "600", marginBottom: 2 },
+
+  relatedItem: { width: 136, alignItems: "center" },
+  relatedArt: {
+    width: 136,
+    height: 136,
+    borderRadius: 68,
+    marginBottom: 10,
+    backgroundColor: palette.backgroundRaised,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  relatedName: { fontSize: 13, fontWeight: "600", textAlign: "center" },
+
+  placeholderText: { marginTop: 12, textAlign: "center", opacity: 0.45 },
+
+  // ── About
+  aboutCard: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+  },
+  aboutInner: { padding: 20 },
+  aboutText: { lineHeight: 22, color: palette.inkMuted, fontSize: 15 },
+  expandText: { color: palette.primary, marginTop: 14, fontWeight: "700" },
+  aboutMeta: {
+    marginTop: 18,
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
+    paddingTop: 16,
+  },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+
+  // ── Modal / Bottom Sheet
+  modalOverlay: { flex: 1, justifyContent: "flex-end" },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.72)",
+  },
+  modalContent: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    overflow: "hidden",
+  },
+  modalContentInner: { flex: 1 },
+  modalHeader: {
+    alignItems: "center",
+    paddingTop: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  modalHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    marginBottom: 16,
+  },
+  modalHeaderRow: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  modalTitle: { fontSize: 22, fontWeight: "800" },
+  modalClose: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalScrollContent: { padding: 20, paddingBottom: 100 },
+  modalGrid: { justifyContent: "space-between", gap: 16, marginBottom: 16 },
+  modalGridItem: {
+    width: (SCREEN_WIDTH - 56) / 2,
+    marginBottom: 8,
+  },
+  modalGridArt: {
+    width: "100%",
+    aspectRatio: 1,
+    borderRadius: radius.lg,
+    marginBottom: 10,
+    backgroundColor: palette.backgroundRaised,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.05)",
+  },
+  modalGridTitle: { fontSize: 14, fontWeight: "600", paddingHorizontal: 4 },
+  modalLoading: { paddingVertical: 30, alignItems: "center" },
+
+  // ── Error
+  errorContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 40,
+  },
+  errorTitle: { marginTop: 20, marginBottom: 10 },
+  errorText: { textAlign: "center", marginBottom: 30, lineHeight: 20 },
+  retryButton: {
+    backgroundColor: palette.primary,
+    paddingHorizontal: 36,
+    paddingVertical: 14,
+    borderRadius: radius.pill,
+    marginBottom: 20,
+    elevation: 4,
+    shadowColor: palette.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+  },
+  retryText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  errorBack: { padding: 10 },
+
+  // ── Skeletons
+  heroSkeleton: { paddingTop: 56, alignItems: "center", marginBottom: 28 },
+  heroImageSkeleton: {
+    width: 256,
+    height: 256,
+    borderRadius: radius.xl,
+    marginBottom: 24,
   },
 });

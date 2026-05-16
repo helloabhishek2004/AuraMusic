@@ -8,6 +8,8 @@ import {
   ScrollViewProps,
 } from "react-native";
 import { FlashList } from "@shopify/flash-list";
+ 
+
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -18,6 +20,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { GestureDetector, Gesture } from "react-native-gesture-handler";
 import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
 import { palette, spacing, radius, typography } from "@/src/design/tokens";
 
 const { width, height } = Dimensions.get("window");
@@ -187,7 +190,7 @@ export const LyricsDisplay = memo(
     isLoading = false,
     error = null,
   }: LyricsDisplayProps) => {
-    const flashListRef = useRef<FlashList<any>>(null);
+    const flashListRef = useRef<any>(null);
     const scrollOffsetY = useSharedValue(0);
     const lastScrollTime = useRef<number>(0);
     const isAutoScrolling = useRef<boolean>(false);
@@ -326,23 +329,24 @@ export const LyricsDisplay = memo(
           />
 
           {/* Gradient overlay for premium feel */}
-          <View
+          <LinearGradient
+            colors={["rgba(7,7,12,0.8)", "rgba(7,7,12,0)"]}
             style={{
               position: "absolute",
               top: 0,
               left: 0,
               right: 0,
               height: 80,
-              background: "linear-gradient(180deg, rgba(7,7,12,0.8) 0%, rgba(7,7,12,0) 100%)",
             }}
           />
 
           {/* Lyrics List */}
           <FlashList
+            // @ts-ignore
             ref={flashListRef}
             data={renderData}
             renderItem={renderLyricLine}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item: any) => item.id}
             estimatedItemSize={LINE_HEIGHT}
             onScroll={handleScroll}
             scrollEventThrottle={16}

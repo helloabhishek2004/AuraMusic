@@ -22,7 +22,7 @@ export class PlaybackService {
         contentType: "music",
         handleAudioBecomingNoisy: true,
         progressSync: {
-          intervalSeconds: 0.5, // Sync progress every 500ms
+          intervalSeconds: 0.2, // Sync progress every 200ms
         },
       });
 

@@ -33,13 +33,31 @@ yt = YTMusic()
 def get_high_res_thumbnail(thumbnails: List[Dict[str, Any]]) -> str:
     """
     Extracts the highest resolution thumbnail and upgrades it to 1200x1200px.
+    Supports standard YTMusic and LH3 patterns.
     """
     if not thumbnails:
         return ""
-    url = thumbnails[-1].get("url", "")
-    # Upgrade thumbnail resolution if it follows the common pattern
-    if url and "=w" in url and "-h" in url:
+    
+    # Sort by width if available to get the best original
+    sorted_thumbnails = sorted(thumbnails, key=lambda x: x.get('width', 0), reverse=True)
+    url = sorted_thumbnails[0].get("url", "")
+    
+    if not url:
+        return ""
+
+    # Upgrade thumbnail resolution if it follows the common YT patterns
+    # Pattern 1: =w...-h...
+    if "=w" in url and "-h" in url:
         return re.sub(r'=w\d+-h\d+', '=w1200-h1200', url)
+    
+    # Pattern 2: =s... (lh3.googleusercontent.com)
+    if "=s" in url and not ("=w" in url):
+        return re.sub(r'=s\d+', '=s1200', url)
+
+    # Pattern 3: /w...-h.../
+    if re.search(r'/w\d+-h\d+/', url):
+        return re.sub(r'/w\d+-h\d+/', '/w1200-h1200/', url)
+
     return url
 
 def map_song(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -288,6 +306,241 @@ def root():
     Root endpoint to verify the backend is running.
     """
     return {"message": "Aura backend running", "engine": "ytmusicapi + yt-dlp"}
+
+@app.get("/artist/{browse_id}")
+async def get_artist_details(browse_id: str):
+    """
+    Fetch detailed artist information including top songs, albums, and related artists.
+    Uses YTMusic.get_artist.
+    """
+    try:
+        print(f"[Backend] Artist Details Request: browse_id='{browse_id}'")
+        
+        # Check if it's a search fallback request (not a browseId)
+        if not (browse_id.startswith("UC") or browse_id.startswith("F")):
+            print(f"[Backend] ID '{browse_id}' looks like a name. Searching for artist browseId...")
+            search_results = yt.search(browse_id, filter="artists", limit=1)
+            if search_results and 'browseId' in search_results[0]:
+                browse_id = search_results[0]['browseId']
+                print(f"[Backend] Resolved browseId: {browse_id}")
+            else:
+                # Still try it as a browseId just in case
+                print(f"[Backend] Could not resolve browseId, trying raw ID: {browse_id}")
+
+        # Check cache
+        cache_key = f"artist_details_{browse_id}"
+        if cache_key in artist_cache:
+            cached = artist_cache[cache_key]
+            if time.time() < cached['expiry']:
+                print(f"[Backend] Artist details cache hit: {browse_id}")
+                return cached['data']
+
+        # Fetch from YTMusic
+        artist_data = yt.get_artist(browse_id)
+        
+        if not artist_data:
+            raise HTTPException(status_code=404, detail="Artist not found")
+
+        # Process and simplify the data for the frontend
+        # Extract top songs
+        songs = []
+        songs_params = None
+        if "songs" in artist_data:
+            songs_params = artist_data["songs"].get("params")
+            if "results" in artist_data["songs"]:
+                for item in artist_data["songs"]["results"]:
+                    mapped = map_song(item)
+                    if mapped:
+                        songs.append(mapped)
+            elif isinstance(artist_data["songs"], list):
+                 for item in artist_data["songs"]:
+                    mapped = map_song(item)
+                    if mapped:
+                        songs.append(mapped)
+
+        # Extract albums
+        albums = []
+        albums_params = None
+        if "albums" in artist_data:
+            albums_params = artist_data["albums"].get("params")
+            if "results" in artist_data["albums"]:
+                for item in artist_data["albums"]["results"]:
+                    mapped = map_album(item)
+                    if mapped:
+                        albums.append(mapped)
+
+        # Extract singles
+        singles = []
+        singles_params = None
+        if "singles" in artist_data:
+            singles_params = artist_data["singles"].get("params")
+            if "results" in artist_data["singles"]:
+                for item in artist_data["singles"]["results"]:
+                    mapped = map_album(item)
+                    if mapped:
+                        singles.append(mapped)
+
+        # Extract related artists
+        related = []
+        if "related" in artist_data and "results" in artist_data["related"]:
+            for item in artist_data["related"]["results"]:
+                mapped = map_artist(item)
+                if mapped:
+                    related.append(mapped)
+
+        result = {
+            "id": browse_id,
+            "name": artist_data.get("name"),
+            "description": artist_data.get("description"),
+            "thumbnails": artist_data.get("thumbnails"),
+            "thumbnail": get_high_res_thumbnail(artist_data.get("thumbnails", [])),
+            "songs": songs[:10], # Limit preview to 10
+            "songs_params": songs_params,
+            "albums": albums[:6],
+            "albums_params": albums_params,
+            "singles": singles[:6],
+            "singles_params": singles_params,
+            "related": related,
+            "subscribers": artist_data.get("subscribers"),
+        }
+
+        # Cache the result
+        artist_cache[cache_key] = {
+            "data": result,
+            "expiry": time.time() + (CACHE_TTL * 2) # 1 hour cache
+        }
+
+        return result
+    except Exception as e:
+        print(f"[Backend] Artist Details Error: {e}")
+        # If it's already an HTTPException, re-raise it
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Failed to fetch artist details: {str(e)}")
+
+@app.get("/artist/{browse_id}/songs")
+async def get_artist_songs(browse_id: str, params: Optional[str] = None):
+    """
+    Fetch expanded list of artist songs.
+    """
+    try:
+        print(f"[Backend] Artist Songs Request: browse_id='{browse_id}', params='{params}'")
+        
+        # If no params, we get them from get_artist first
+        if not params:
+            artist_data = yt.get_artist(browse_id)
+            if "songs" in artist_data:
+                params = artist_data["songs"].get("params")
+        
+        if not params:
+            print("[Backend] No params available for expanded songs")
+            return []
+
+        # Fetch expanded items
+        # Note: get_artist_albums can sometimes be used for other lists depending on params
+        results = yt.get_artist_albums(browse_id, params)
+        songs = []
+        for item in results:
+            mapped = map_song(item)
+            if mapped:
+                songs.append(mapped)
+        
+        return songs
+    except Exception as e:
+        print(f"[Backend] Artist Songs Error: {e}")
+        # Return empty list instead of 500 to keep UI stable
+        return []
+
+@app.get("/artist/{browse_id}/albums")
+async def get_artist_albums(browse_id: str, params: Optional[str] = None):
+    """
+    Fetch expanded list of artist albums or singles.
+    """
+    try:
+        print(f"[Backend] Artist Albums Request: browse_id='{browse_id}', params='{params}'")
+        
+        if not params:
+            artist_data = yt.get_artist(browse_id)
+            if "albums" in artist_data:
+                params = artist_data["albums"].get("params")
+            elif "singles" in artist_data:
+                params = artist_data["singles"].get("params")
+        
+        if not params:
+            print("[Backend] No params available for expanded albums")
+            return []
+
+        # Fetch expanded albums
+        results = yt.get_artist_albums(browse_id, params)
+        albums = []
+        for item in results:
+            mapped = map_album(item)
+            if mapped:
+                albums.append(mapped)
+        
+        return albums
+    except Exception as e:
+        print(f"[Backend] Artist Albums Error: {e}")
+        # Return empty list instead of 500 to keep UI stable
+        return []
+
+@app.get("/album/{browse_id}")
+async def get_album_details(browse_id: str):
+    """
+    Fetch detailed album information including tracklist.
+    Uses YTMusic.get_album.
+    """
+    try:
+        print(f"[Backend] Album Details Request: browse_id='{browse_id}'")
+        
+        # Check cache (sharing artist_cache for now or create album_cache)
+        cache_key = f"album_details_{browse_id}"
+        if cache_key in artist_cache:
+            cached = artist_cache[cache_key]
+            if time.time() < cached['expiry']:
+                print(f"[Backend] Album details cache hit: {browse_id}")
+                return cached['data']
+
+        # Fetch from YTMusic
+        album_data = yt.get_album(browse_id)
+        
+        if not album_data:
+            raise HTTPException(status_code=404, detail="Album not found")
+
+        # Process tracks
+        tracks = []
+        if "tracks" in album_data:
+            for item in album_data["tracks"]:
+                mapped = map_song(item)
+                if mapped:
+                    tracks.append(mapped)
+
+        result = {
+            "id": browse_id,
+            "title": album_data.get("title"),
+            "artist": album_data.get("artist") or (album_data.get("artists", [{}])[0].get("name") if album_data.get("artists") else "Unknown Artist"),
+            "artistId": album_data.get("artists", [{}])[0].get("browseId") if album_data.get("artists") else None,
+            "year": album_data.get("year"),
+            "thumbnails": album_data.get("thumbnails"),
+            "thumbnail": get_high_res_thumbnail(album_data.get("thumbnails", [])),
+            "description": album_data.get("description"),
+            "trackCount": len(tracks),
+            "duration": album_data.get("duration"),
+            "tracks": tracks
+        }
+
+        # Cache the result
+        artist_cache[cache_key] = {
+            "data": result,
+            "expiry": time.time() + (CACHE_TTL * 2) # 1 hour cache
+        }
+
+        return result
+    except Exception as e:
+        print(f"[Backend] Album Details Error: {e}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Failed to fetch album details: {str(e)}")
 
 @app.get("/search", response_model=List[Dict[str, Any]])
 def search_entities(q: str = Query(..., description="The search query"), 

@@ -7,6 +7,11 @@ export interface PlayerTrack {
   duration?: number;
   dominantColors?: string[];
   isLocal?: boolean;
+  album?: string;
+  year?: string;
+  source?: string;
+  artistId?: string;
+  albumId?: string;
 }
 
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'error';
@@ -40,6 +45,7 @@ export interface PlaybackActions {
   fetchLyrics: (track: PlayerTrack) => Promise<void>;
   setQueue: (tracks: PlayerTrack[], startIndex?: number) => Promise<void>;
   preloadNext: () => Promise<void>;
+  preloadTrack: (track: PlayerTrack) => Promise<void>;
   play: () => Promise<void>;
   pause: () => Promise<void>;
   togglePlayback: () => Promise<void>;

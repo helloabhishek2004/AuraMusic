@@ -17,17 +17,24 @@ export function openNowPlaying(router: AuraRouter, trackId?: string, origin?: st
 }
 
 export function openArtist(router: AuraRouter, artistId?: string, origin?: RouteOrigin) {
+  // If artistId is missing, try to get it from catalog or fallback to title (name)
+  // The backend will resolve the name if it's not a valid browseId.
+  const targetId = artistId ?? origin?.title;
+  
+  if (!targetId) return;
+
   router.push({
     pathname: '/artist/[id]',
     params: {
-      id: artistId ?? getArtistIdForName(origin?.title),
+      id: targetId,
       origin: origin?.origin ?? '',
     },
   });
 }
 
 export function openArtistByName(router: AuraRouter, artistName?: string, origin?: RouteOrigin) {
-  openArtist(router, getArtistIdForName(artistName), { ...origin, title: artistName });
+  if (!artistName) return;
+  openArtist(router, undefined, { ...origin, title: artistName });
 }
 
 export function openPlaylist(router: AuraRouter, playlistId: string, origin?: string) {

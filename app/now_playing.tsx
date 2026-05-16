@@ -8,7 +8,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState, memo } from "react";
+import React, { useEffect, useState, memo, useMemo } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -270,6 +270,16 @@ export default function NowPlayingScreen() {
 
   const c0 = currentTrack.dominantColors?.[0] || "#BF5AF2";
 
+  // Artwork Fallback Chain
+  const artworkUri = useMemo(() => {
+    // 1. Explicit track art
+    if (currentTrack.art) return currentTrack.art;
+    
+    // 2. Fallback to a placeholder based on title/artist if absolutely nothing exists
+    // (In a real app, you might have albumArt or artistArt as separate fields in PlayerTrack)
+    return `https://picsum.photos/seed/${encodeURIComponent(currentTrack.title)}/800`;
+  }, [currentTrack.art, currentTrack.title]);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <Animated.View style={[styles.container, containerStyle]}>
@@ -333,12 +343,29 @@ export default function NowPlayingScreen() {
               <Animated.View style={[styles.artOuterGlow, { shadowColor: c0 }]} />
               <Animated.View style={[styles.artGlassContainer, artStyle]}>
                 <Image
-                  source={{ uri: currentTrack.art }}
+                  source={{ uri: artworkUri }}
                   style={styles.albumImage}
                   contentFit="cover"
-                  transition={300}
+                  transition={400}
+                  priority="high"
+                  cachePolicy="memory-disk"
                   onLoad={() => setIsImageLoading(false)}
+                  onError={() => {
+                    // Final fallback if loading failed
+                    setIsImageLoading(false);
+                  }}
                 />
+                
+                {/* Fallback Art Card if image definitely failed */}
+                {(!artworkUri || status === 'error') && (
+                  <View style={[StyleSheet.absoluteFill, styles.fallbackArtContainer]}>
+                    <LinearGradient
+                      colors={[c0, "#1a1a1a"]}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <Ionicons name="musical-note" size={80} color="rgba(255,255,255,0.2)" />
+                  </View>
+                )}
                 
                 {/* Error Overlay */}
                 {status === 'error' && (
@@ -349,7 +376,7 @@ export default function NowPlayingScreen() {
                 )}
 
                 {/* Loading Overlay */}
-                {isBuffering && (
+                {(isBuffering || isImageLoading) && (
                    <View style={[StyleSheet.absoluteFill, styles.loadingOverlay]}>
                      <ActivityIndicator size="large" color={c0} />
                    </View>
@@ -542,7 +569,8 @@ const PlaybackScrubber = memo(({ accentColor }: { accentColor: string }) => {
 
   useEffect(() => {
     if (!isScrubbing.value && scrubberWidth.value > 0) {
-      scrubberX.value = withTiming(progress * scrubberWidth.value, { duration: 500 });
+      // Duration matches polling interval for smooth movement
+      scrubberX.value = withTiming(progress * scrubberWidth.value, { duration: 250 });
     }
   }, [progress]);
 
@@ -726,20 +754,25 @@ const styles = StyleSheet.create({
   },
   albumImage: { flex: 1 },
   errorOverlay: {
-    backgroundColor: "rgba(0,0,0,0.7)",
+    backgroundColor: "rgba(0,0,0,0.75)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 20,
+    padding: 24,
   },
   errorText: {
     color: "#FFF",
     fontSize: 14,
-    fontFamily: "Inter_500Medium",
+    fontWeight: "600",
     textAlign: "center",
-    marginTop: 12,
+    marginTop: 16,
+    opacity: 0.9,
+  },
+  fallbackArtContainer: {
+    justifyContent: "center",
+    alignItems: "center",
   },
   loadingOverlay: {
-    backgroundColor: "rgba(0,0,0,0.3)",
+    backgroundColor: "rgba(0,0,0,0.25)",
     justifyContent: "center",
     alignItems: "center",
   },

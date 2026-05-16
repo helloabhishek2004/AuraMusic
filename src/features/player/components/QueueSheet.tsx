@@ -19,6 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { usePlayerStore } from '../store/player.store';
 import { PlayerTrack } from '../types/player';
+ 
+
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -145,9 +147,10 @@ export const QueueSheet = ({ isVisible, onClose, accentColor }: QueueSheetProps)
 
         <View style={{ flex: 1 }}>
           <FlashList
+            // @ts-ignore
             data={queue}
             renderItem={renderItem}
-            keyExtractor={(item, index) => `${item.id}-${index}`}
+            keyExtractor={(item: any, index: number) => `${item.id}-${index}`}
             estimatedItemSize={72}
             contentContainerStyle={styles.listContent}
             ListHeaderComponent={() => (

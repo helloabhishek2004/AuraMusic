@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Dimensions,
   Animated,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -216,11 +217,19 @@ export default function PlaylistScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id }  = useLocalSearchParams();
-  const { setQueue, toggleShuffle, isShuffle } = useMusic();
+  const { setQueue, toggleShuffle, isShuffle, isPlaying, currentTrack, pause, play } = useMusic();
 
   const [downloadStatus, setDownloadStatus] = useState<'none' | 'checking' | 'updated'>('none');
   const downloadSpin  = useRef(new Animated.Value(0)).current;
   const scrollY       = useRef(new Animated.Value(0)).current;
+
+  // Check if this playlist is active
+  const isPlaylistActive = useMemo(() => {
+    if (!currentTrack) return false;
+    return PLAYLIST_DATA.tracks.some(t => t.id === currentTrack.id);
+  }, [currentTrack]);
+
+  const isCurrentPlaylistPlaying = isPlaylistActive && isPlaying;
 
   // Glow pulse for play button
   const glowPulse  = useRef(new Animated.Value(0.5)).current;
@@ -272,6 +281,11 @@ export default function PlaylistScreen() {
   const handlePlayAll = async (shuffle = false) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     
+    if (isPlaylistActive && !shuffle) {
+      isPlaying ? await pause() : await play();
+      return;
+    }
+
     const playerTracks: PlayerTrack[] = PLAYLIST_DATA.tracks.map(t => ({
       id: t.id,
       title: t.title,
@@ -287,12 +301,16 @@ export default function PlaylistScreen() {
     }
 
     await setQueue(playerTracks, 0);
-    openNowPlaying(router, playerTracks[0].id, 'playlist');
   };
 
   const handlePlayTrack = async (track: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
+    if (currentTrack?.id === track.id) {
+      isPlaying ? await pause() : await play();
+      return;
+    }
+
     const playerTracks: PlayerTrack[] = PLAYLIST_DATA.tracks.map(t => ({
       id: t.id,
       title: t.title,
@@ -305,7 +323,6 @@ export default function PlaylistScreen() {
 
     const idx = playerTracks.findIndex(t => t.id === track.id);
     await setQueue(playerTracks, idx !== -1 ? idx : 0);
-    openNowPlaying(router, track.id, 'playlist');
   };
 
   return (
@@ -345,8 +362,11 @@ export default function PlaylistScreen() {
             </TouchableOpacity>
           </Animated.View>
           <Text style={styles.stickyTitle} numberOfLines={1}>{PLAYLIST_DATA.title}</Text>
-          <TouchableOpacity style={styles.headerBtn}>
-            <Ionicons name="ellipsis-vertical" size={22} color="rgba(255,255,255,0.8)" />
+          <TouchableOpacity 
+            style={[styles.headerBtn, isCurrentPlaylistPlaying && { backgroundColor: hexToRgba(COLORS.primary, 0.2), borderRadius: 22 }]}
+            onPress={() => handlePlayAll(false)}
+          >
+            <Ionicons name={isCurrentPlaylistPlaying ? "pause" : "play"} size={22} color={isCurrentPlaylistPlaying ? COLORS.primary : "#FFF"} />
           </TouchableOpacity>
         </View>
       </Animated.View>
@@ -391,7 +411,7 @@ export default function PlaylistScreen() {
             {/* Album art with parallax */}
             <Animated.View style={[styles.artWrapper, { transform: [{ translateY: artParallax }] }]}>
               {/* Ambient glow behind art */}
-              <View style={styles.artAmbientGlow} />
+              <View style={[styles.artAmbientGlow, isCurrentPlaylistPlaying && { shadowOpacity: 0.8, shadowRadius: 50 }]} />
               <View style={styles.artAmbientGlowInner} />
 
               {/* Art glass frame — 4 layers */}
@@ -470,15 +490,20 @@ export default function PlaylistScreen() {
             {/* Shuffle — full liquid glass gradient pill */}
             <Animated.View style={[styles.shuffleBtnOuter, { transform: [{ scale: shufflePress.scale }] }]}>
               <TouchableOpacity
-                onPress={() => handlePlayAll(true)}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  toggleShuffle();
+                }}
                 onPressIn={shufflePress.onIn} onPressOut={shufflePress.onOut}
                 activeOpacity={1}
                 style={{ flex: 1 }}
               >
                 <LinearGradient
-                  colors={[COLORS.primary, COLORS.primaryMid, COLORS.primaryDeep]}
+                  colors={isShuffle 
+                    ? [COLORS.primary, COLORS.primaryMid, COLORS.primaryDeep] 
+                    : ['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.04)', 'rgba(255,255,255,0.02)']}
                   start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                  style={styles.shuffleGradient}
+                  style={[styles.shuffleGradient, isShuffle && { elevation: 12, shadowOpacity: 0.5 }]}
                 >
                   {/* specular top */}
                   <View style={{ position: 'absolute', top: 3, left: 20, right: 20, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.28)' }} />
@@ -486,8 +511,8 @@ export default function PlaylistScreen() {
                   <View style={{ position: 'absolute', left: 10, top: 8, bottom: 8, width: 28, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.15)', transform: [{ skewX: '-8deg' }] }} />
                   {/* refraction border */}
                   <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 32, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', backgroundColor: 'rgba(255,255,255,0.04)' }} />
-                  <Ionicons name="shuffle" size={28} color="#FFF" style={{ zIndex: 2 }} />
-                  <Text style={styles.shuffleLabel}>Shuffle All</Text>
+                  <Ionicons name="shuffle" size={28} color={isShuffle ? "#FFF" : "rgba(255,255,255,0.4)"} style={{ zIndex: 2 }} />
+                  <Text style={[styles.shuffleLabel, !isShuffle && { color: 'rgba(255,255,255,0.4)' }]}>Shuffle All</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </Animated.View>
@@ -530,7 +555,7 @@ export default function PlaylistScreen() {
                   <View style={{ position: 'absolute', left: 8, top: 10, width: 22, bottom: 10, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.16)', transform: [{ skewX: '-8deg' }], zIndex: 4 }} />
                   {/* refraction */}
                   <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 32, borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)', backgroundColor: 'rgba(255,255,255,0.04)', zIndex: 3 }} />
-                  <Ionicons name="play" size={34} color="#FFF" style={{ marginLeft: 4, zIndex: 5 }} />
+                  <Ionicons name={isCurrentPlaylistPlaying ? "pause" : "play"} size={34} color="#FFF" style={{ marginLeft: isCurrentPlaylistPlaying ? 0 : 4, zIndex: 5 }} />
                 </TouchableOpacity>
               </Animated.View>
             </View>
@@ -539,9 +564,18 @@ export default function PlaylistScreen() {
 
         {/* ── TRACK LIST ───────────────────────────────────────────────────── */}
         <View style={styles.trackListSection}>
-          {PLAYLIST_DATA.tracks.map((item, index) => (
-            <TrackRow key={item.id} item={item} index={index} router={router} onPlay={handlePlayTrack} />
-          ))}
+          {PLAYLIST_DATA.tracks.map((item, index) => {
+            const isActive = currentTrack?.id === item.id;
+            return (
+              <TrackRow 
+                key={item.id} 
+                item={{...item, active: isActive}} 
+                index={index} 
+                router={router} 
+                onPlay={handlePlayTrack} 
+              />
+            );
+          })}
         </View>
 
         {/* ── SUGGESTED SONGS ──────────────────────────────────────────────── */}
@@ -585,6 +619,31 @@ export default function PlaylistScreen() {
               </GlassPane>
             </Materialise>
           ))}
+        </View>
+
+        {/* ── SIMILAR PLAYLISTS ────────────────────────────────────────────── */}
+        <Materialise delay={650}>
+          <View style={[styles.suggestedHeader, { marginTop: 32 }]}>
+            <View style={styles.suggestedTitleRow}>
+              <View style={styles.suggestedAccentBar} />
+              <Text style={styles.suggestedTitle}>Similar Playlists</Text>
+            </View>
+          </View>
+        </Materialise>
+
+        <View style={styles.similarPlaylistsList}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
+            {['1', '2', '3', '4'].map((i) => (
+              <TouchableOpacity key={i} activeOpacity={0.8} style={styles.similarCard}>
+                <Image 
+                  source={{ uri: `https://picsum.photos/seed/playlist${i}/400` }} 
+                  style={styles.similarArt} 
+                />
+                <Text style={styles.similarTitle} numberOfLines={1}>Mix {i}: Synth Essentials</Text>
+                <Text style={styles.similarAuthor} numberOfLines={1}>Aura Curated</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
 
       </Animated.ScrollView>
@@ -870,4 +929,29 @@ const styles = StyleSheet.create({
   miniArtist: { color: COLORS.onSurfaceVariant, fontSize: 11, marginTop: 2 },
   miniControls: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   miniCtrlBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+
+  // Similar playlists
+  similarPlaylistsList: {
+    marginBottom: 40,
+  },
+  similarCard: {
+    width: 160,
+  },
+  similarArt: {
+    width: 160,
+    height: 160,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    marginBottom: 10,
+  },
+  similarTitle: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  similarAuthor: {
+    color: 'rgba(170,170,185,0.6)',
+    fontSize: 12,
+  },
 });

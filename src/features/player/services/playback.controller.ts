@@ -174,7 +174,8 @@ export class PlaybackController {
         const bufMs = progress.buffered * 1000;
         
         // Use shallow checks to reduce store updates
-        if (Math.abs(store.position - posMs) > 300 || Math.abs(store.duration - durMs) > 1000) {
+        // 200ms threshold matches interval for fluid tracking
+        if (Math.abs(store.position - posMs) > 200 || Math.abs(store.duration - durMs) > 500) {
           store.updateProgress(posMs, durMs, bufMs);
         }
 
@@ -186,7 +187,7 @@ export class PlaybackController {
       } catch (e) {
         // Silent catch for JSI read failures during transitions
       }
-    }, 500);
+    }, 250);
   }
 
   private static stopManualPolling() {
