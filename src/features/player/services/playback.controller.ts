@@ -1,10 +1,15 @@
 import TrackPlayer, { Event, PlaybackState } from "@rntp/player";
 import { usePlayerStore } from "../store/player.store";
 import { PlayerTrack } from "../types/player";
+import { transitionManager } from "./transition-manager";
+
+let _controllerInitialized = false;
+let _listenersRegistered = false;
 
 /**
  * PlaybackController - The authoritative bridge between native RNTP and Zustand store.
  * Implemented as a singleton to ensure event listeners are registered exactly once.
+ * Uses module-level flags to prevent duplicate registration across hot-reloads.
  */
 export class PlaybackController {
   private static isInitialized = false;
@@ -12,44 +17,28 @@ export class PlaybackController {
   private static lastState: PlaybackState | null = null;
 
   static initialize() {
-    if (this.isInitialized) {
-      console.log("[Player] PlaybackController already initialized, skipping.");
-      return;
-    }
+    if (_controllerInitialized && this.isInitialized) return;
+    _controllerInitialized = true;
 
-    console.log("[Player] PlaybackController initializing (Singleton)...");
+    if (this.isInitialized) return;
 
     // 1. Playback State Changed
     TrackPlayer.addEventListener(Event.PlaybackStateChanged, (data) => {
       const store = usePlayerStore.getState();
       const newState = data.state;
       
-      if (this.lastState === newState) return; // Deduplicate
-      const previousState = this.lastState;
+      if (this.lastState === newState) return;
       this.lastState = newState;
-
-      console.log("[Player] Playback state:", newState);
-
-      // Deep diagnostics for local playback
-      if (store.currentTrack?.isLocal) {
-        const progress = TrackPlayer.getProgress();
-        const activeItem = TrackPlayer.getActiveMediaItem();
-        console.log(`[LocalPlayer Diagnostic] State: ${previousState} -> ${newState}`, {
-          activeTrack: activeItem?.title,
-          activeId: activeItem?.mediaId,
-          pos: progress.position.toFixed(2),
-          dur: progress.duration.toFixed(2),
-        });
-
-        if (previousState === PlaybackState.Buffering && newState === PlaybackState.Idle) {
-          console.error("[LocalPlayer] Native preparation failed: buffering -> idle transition detected.");
-        }
-      }
 
       switch (newState) {
         case PlaybackState.Ready:
           if (TrackPlayer.isPlaying()) {
-            store.setStatus("playing");
+            usePlayerStore.setState({
+              status: "playing",
+              isPlaying: true,
+              isTransitioning: false,
+              isBuffering: false
+            });
             this.startManualPolling();
           } else {
             store.setStatus("paused");
@@ -60,19 +49,16 @@ export class PlaybackController {
           store.setStatus("buffering");
           break;
         case PlaybackState.Ended:
-          if (store.isTransitioning) {
-            console.log("[Player] Ignoring Ended event during active transition.");
-            return;
-          }
-          console.log("[Player] Track ended naturally.");
+          if (store.isTransitioning) return;
+          
           store.updateProgress(0, store.duration, 0);
           this.stopManualPolling();
-          
-          // Use store.next() to handle the transition safely
           store.next();
           break;
         case PlaybackState.Idle:
-          store.setStatus("idle");
+          if (store.status !== "idle") {
+            store.setStatus("idle");
+          }
           this.stopManualPolling();
           break;
         case PlaybackState.Error:
@@ -87,9 +73,7 @@ export class PlaybackController {
       const store = usePlayerStore.getState();
       const playing = data.playing;
       
-      // Only update if there is a divergence to prevent event storms
       if (store.isPlaying !== playing) {
-        console.log("[Player] IsPlaying sync:", playing);
         store.setStatus(playing ? "playing" : "paused");
         
         if (playing) {
@@ -100,6 +84,22 @@ export class PlaybackController {
       }
     });
 
+    // 2.5. Player Error Handling
+    TrackPlayer.addEventListener(Event.PlaybackError, (error) => {
+      console.error("[Player] Native Error:", error.message, error.code);
+      const store = usePlayerStore.getState();
+      
+      store.setStatus("error");
+      usePlayerStore.setState({ 
+        error: error.message || "Native playback error",
+        isBuffering: false,
+        isTransitioning: false,
+        isPlaying: false
+      });
+      
+      this.stopManualPolling();
+    });
+
     // 3. Media Item Transition (Sync currentIndex)
     TrackPlayer.addEventListener(Event.MediaItemTransition, (data) => {
       const store = usePlayerStore.getState();
@@ -107,39 +107,47 @@ export class PlaybackController {
 
       const newIndex = store.queue.findIndex((t: PlayerTrack) => t.id === data.item?.mediaId);
       if (newIndex !== -1 && newIndex !== store.currentIndex) {
-        console.log(`[Player] Native transition sync: ${newIndex}`);
-        
         const nextTrack = store.queue[newIndex];
+        if (!nextTrack) return;
+        
         const preloaded = store.preloadedTrack;
-
+        const cachedFromManager = transitionManager.getCachedTrack(nextTrack.id);
+        
+        const trackToUse = (preloaded && preloaded.id === nextTrack.id) ? 
+          preloaded : (cachedFromManager || nextTrack);
+        
+        const validTrack = transitionManager.validatePreload(trackToUse) ? trackToUse : nextTrack;
+        
         usePlayerStore.setState({ 
           currentIndex: newIndex, 
-          currentTrack: (preloaded && preloaded.id === nextTrack.id) ? preloaded : nextTrack,
-          preloadedTrack: null
+          currentTrack: validTrack,
+          preloadedTrack: null,
+          isTransitioning: false,
+          status: "playing",
+          isPlaying: true
         });
-
+        
+        transitionManager.setTransitioning(false);
+        transitionManager.clearCache([validTrack.id]);
+        
         store.preloadNext();
       }
     });
 
-    // 4. Remote Control Events (Deduplicated - No logic in service.js)
+    // 4. Remote Control Events - silent execution
     TrackPlayer.addEventListener(Event.RemotePlay, () => {
-      console.log("[Player] Remote Play");
       TrackPlayer.play();
     });
 
     TrackPlayer.addEventListener(Event.RemotePause, () => {
-      console.log("[Player] Remote Pause");
       TrackPlayer.pause();
     });
 
     TrackPlayer.addEventListener(Event.RemoteNext, () => {
-      console.log("[Player] Remote Next");
       usePlayerStore.getState().next();
     });
 
     TrackPlayer.addEventListener(Event.RemotePrevious, () => {
-      console.log("[Player] Remote Previous");
       usePlayerStore.getState().previous();
     });
 
@@ -158,7 +166,6 @@ export class PlaybackController {
     });
 
     this.isInitialized = true;
-    console.log("[Player] PlaybackController initialized successfully.");
   }
 
   private static startManualPolling() {
@@ -173,20 +180,15 @@ export class PlaybackController {
         const durMs = progress.duration * 1000;
         const bufMs = progress.buffered * 1000;
         
-        // Use shallow checks to reduce store updates
-        // 200ms threshold matches interval for fluid tracking
         if (Math.abs(store.position - posMs) > 200 || Math.abs(store.duration - durMs) > 500) {
           store.updateProgress(posMs, durMs, bufMs);
         }
 
-        // Sync Volume with threshold
         const nativeVolume = await TrackPlayer.getVolume();
         if (Math.abs(store.volume - nativeVolume) > 0.05) {
            usePlayerStore.setState({ volume: nativeVolume });
         }
-      } catch (e) {
-        // Silent catch for JSI read failures during transitions
-      }
+      } catch (e) {}
     }, 250);
   }
 
@@ -197,19 +199,8 @@ export class PlaybackController {
     }
   }
 
-  static logNativeState(context: string) {
-    try {
-      const state = TrackPlayer.getPlaybackState();
-      const activeTrack = TrackPlayer.getActiveMediaItem();
-      const progress = TrackPlayer.getProgress();
-
-      console.log(`[Playback Diagnostics] @ ${context}:`, {
-        state,
-        track: activeTrack?.title ?? "None",
-        pos: progress.position.toFixed(1),
-        dur: progress.duration.toFixed(1),
-      });
-    } catch (e) {}
+  static logNativeState(_context: string) {
+    // Diagnostics disabled for production - can be enabled for debugging
   }
 }
 

@@ -726,6 +726,7 @@ export default function LocalLibraryScreen() {
                 url: t.url || t.localUri || "",
                 isLocal: true,
                 duration: 0,
+                mimeType: t.mimeType,
             }));
             const startIndex = playerTracks.findIndex((t) => t.id === track.id);
             setQueue(playerTracks, startIndex !== -1 ? startIndex : 0);

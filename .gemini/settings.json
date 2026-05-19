@@ -1,0 +1,11 @@
+{
+  "agents": {
+    "overrides": {
+      "codebase_investigator": {
+        "modelConfig": {
+          "model": "gemini-3-pro"
+        }
+      }
+    }
+  }
+}

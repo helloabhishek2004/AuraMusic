@@ -75,7 +75,8 @@ export function useSearch(initialQuery: string = '') {
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const performSearch = useCallback(async (searchQuery: string) => {
-    if (!searchQuery.trim()) {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
       setResults(EMPTY_RESULT);
       setIsLoading(false);
       return;
@@ -85,128 +86,91 @@ export function useSearch(initialQuery: string = '') {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    abortControllerRef.current = new AbortController();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setIsLoading(true);
     setError(null);
 
     try {
-      // STEP 1: Search songs first
-      console.log('[Search] Step 1: Searching songs for:', searchQuery);
-      const songsData = await musicService.searchSongs(searchQuery);
+      // 1. PRIMARY SEARCH: Songs
+      console.log('[Search] PRIMARY: Searching songs for:', trimmed);
+      const songsData = await musicService.searchSongs(trimmed);
       
-      // Check if request was aborted
-      if (abortControllerRef.current?.signal.aborted) {
-        return;
-      }
+      if (controller.signal.aborted) return;
 
-      // If no songs found, return empty
       if (songsData.length === 0) {
         setResults(EMPTY_RESULT);
         setIsLoading(false);
         return;
       }
 
-      // STEP 2: Extract context from songs for enrichment
+      // 2. PARALLEL ENRICHMENT: Contextual Extraction
       const uniqueArtists = extractUniqueArtists(songsData);
-      const uniqueAlbums = extractUniqueAlbums(songsData);
       
-      console.log('[Search] Step 2: Context extracted - Artists:', uniqueArtists.length, 'Albums:', uniqueAlbums.length);
+      // Update intermediate results with songs to reduce perceived delay
+      setResults(prev => ({
+        ...prev,
+        songs: songsData.slice(0, 15),
+        topResult: songsData[0],
+        isEmpty: false
+      }));
 
-      // STEP 3: Fetch artist entities contextually
-      const enrichedArtists: SearchEntity[] = [];
       setIsEnriching(true);
-      
-      if (uniqueArtists.length > 0) {
-        console.log('[Search] Step 3: Fetching artist entities...');
-        
-        // Fetch artists in parallel, limit to 5
-        const artistPromises = uniqueArtists.slice(0, 5).map(async (artistName) => {
+
+      // Fetch artists and albums in parallel
+      const [artistResults, albumResults] = await Promise.all([
+        // Artists Enrichment
+        Promise.all(uniqueArtists.slice(0, 5).map(async (name) => {
           try {
-            const artist = await musicService.lookupArtistByName(artistName);
-            return artist;
-          } catch (e) {
-            console.error('[Search] Error fetching artist:', artistName, e);
-            return null;
-          }
-        });
+            return await musicService.lookupArtistByName(name);
+          } catch (e) { return null; }
+        })),
+        // Albums Enrichment (Artist-based)
+        Promise.all(uniqueArtists.slice(0, 3).map(async (name) => {
+          try {
+            const albums = await musicService.searchAlbums(`${name} albums`);
+            return albums.slice(0, 2);
+          } catch (e) { return []; }
+        }))
+      ]);
 
-        const artistResults = await Promise.all(artistPromises);
-        
-        // Filter out nulls and duplicates
-        const seenArtistIds = new Set<string>();
-        artistResults.forEach(artist => {
-          if (artist && !seenArtistIds.has(artist.id)) {
-            seenArtistIds.add(artist.id);
-            enrichedArtists.push(artist);
-          }
-        });
+      if (controller.signal.aborted) return;
 
-        console.log('[Search] Enriched artists:', enrichedArtists.length);
-      }
+      // Filter and Deduplicate
+      const enrichedArtists: SearchEntity[] = [];
+      const seenArtistIds = new Set<string>();
+      artistResults.forEach(artist => {
+        if (artist && !seenArtistIds.has(artist.id)) {
+          seenArtistIds.add(artist.id);
+          enrichedArtists.push(artist);
+        }
+      });
 
-      // STEP 4: Fetch album entities based on artist names
       const enrichedAlbums: SearchEntity[] = [];
-      
-      if (uniqueArtists.length > 0) {
-        console.log('[Search] Step 4: Fetching album entities...');
-        
-        // For each artist, search their albums
-        const albumPromises = uniqueArtists.slice(0, 3).map(async (artistName) => {
-          try {
-            // Search for "artistName albums" to get their albums
-            const albums = await musicService.searchAlbums(`${artistName} albums`);
-            return albums.slice(0, 2); // Limit 2 albums per artist
-          } catch (e) {
-            console.error('[Search] Error fetching albums for:', artistName, e);
-            return [];
-          }
-        });
-
-        const albumResults = await Promise.all(albumPromises);
-        
-        // Flatten and deduplicate
-        const seenAlbumIds = new Set<string>();
-        albumResults.flat().forEach(album => {
-          if (album && !seenAlbumIds.has(album.id)) {
-            seenAlbumIds.add(album.id);
-            enrichedAlbums.push(album);
-          }
-        });
-
-        console.log('[Search] Enriched albums:', enrichedAlbums.length);
-      }
-
-      setIsEnriching(false);
-
-      // Determine top result (song only)
-      const topResult = songsData.length > 0 ? songsData[0] : null;
+      const seenAlbumIds = new Set<string>();
+      albumResults.flat().forEach(album => {
+        if (album && !seenAlbumIds.has(album.id)) {
+          seenAlbumIds.add(album.id);
+          enrichedAlbums.push(album);
+        }
+      });
 
       setResults({
-        songs: songsData.slice(0, 10),
+        songs: songsData.slice(0, 15),
         artists: enrichedArtists.slice(0, 6),
-        albums: enrichedAlbums.slice(0, 6),
-        playlists: [], // Could enhance later
-        topResult,
-        isEmpty: songsData.length === 0 && enrichedArtists.length === 0 && enrichedAlbums.length === 0,
+        albums: enrichedAlbums.slice(0, 8),
+        playlists: [],
+        topResult: songsData[0],
+        isEmpty: false,
       });
 
-      console.log('[Search] Final results:', {
-        query: searchQuery,
-        songs: songsData.length,
-        artists: enrichedArtists.length,
-        albums: enrichedAlbums.length,
-        topResult: topResult?.title,
-      });
     } catch (err: any) {
-      if (err.name === 'AbortError' || err.name === 'CanceledError') {
-        return;
-      }
+      if (err.name === 'AbortError' || err.name === 'CanceledError') return;
       console.error('[Search] Error:', err);
-      setError('Failed to search. Please try again.');
-      setResults(EMPTY_RESULT);
+      setError('Search temporarily unavailable. Please try again.');
     } finally {
-      if (!abortControllerRef.current?.signal.aborted) {
+      if (!controller.signal.aborted) {
         setIsLoading(false);
         setIsEnriching(false);
       }
@@ -214,15 +178,17 @@ export function useSearch(initialQuery: string = '') {
   }, []);
 
   useEffect(() => {
-    // Debounce logic - 300ms debounce
+    // 350ms debounce for typing responsiveness
     const timer = setTimeout(() => {
-      if (query !== lastQueryRef.current) {
+      if (query.trim() !== lastQueryRef.current.trim()) {
         lastQueryRef.current = query;
         performSearch(query);
       }
-    }, 300);
+    }, 350);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+    };
   }, [query, performSearch]);
 
   return {

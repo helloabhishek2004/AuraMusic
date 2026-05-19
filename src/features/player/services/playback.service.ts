@@ -1,32 +1,83 @@
 import TrackPlayer, { PlayerCommand } from "@rntp/player";
 import { Platform } from "react-native";
 import { PlayerTrack } from "../types/player";
+import {
+  getPlaybackSourceType,
+  getUriScheme,
+  normalizePlaybackUri,
+} from "../utils/track-resolver";
+
+function validateTrack(track: PlayerTrack): boolean {
+  return !!(track && track.id && track.title);
+}
+
+function validateQueue(queue: PlayerTrack[]): boolean {
+  return queue.every(validateTrack);
+}
+
+function isPlayableUri(uri?: string): boolean {
+  const scheme = getUriScheme(normalizePlaybackUri(uri));
+  return scheme === "file" || scheme === "content" || scheme === "http" || scheme === "https";
+}
+
+function toMediaItem(track: PlayerTrack) {
+  return {
+    mediaId: track.id,
+    url: normalizePlaybackUri(track.url),
+    title: track.title,
+    artist: track.artist || "Local",
+    type: "default" as const,
+    artworkUrl: track.art || undefined,
+    duration: track.duration,
+    mimeType: track.mimeType,
+  };
+}
+
+function logSourceDiagnostics(track: PlayerTrack, queueSize: number, targetIndex: number) {
+  if (typeof __DEV__ === "undefined" || !__DEV__) return;
+
+  const uri = normalizePlaybackUri(track.url);
+  console.info("[PlaybackSource]", {
+    trackId: track.id,
+    sourceType: getPlaybackSourceType({ ...track, url: uri }),
+    scheme: getUriScheme(uri),
+    uri,
+    queueSize,
+    targetIndex,
+  });
+}
 
 /**
  * PlaybackService - Decoupled wrapper for @rntp/player v5.
  * @rntp/player v5 exports named functions (not a default class).
  * All playback methods are synchronous (fire-and-forget to native layer).
  */
+let _playerSetup = false;
+
 export class PlaybackService {
   private static isSetup = false;
+  private static isReordering = false;
+
+  static isReorderingQueue(): boolean {
+    return this.isReordering;
+  }
 
   static setupPlayer() {
-    if (this.isSetup) return;
+    if (_playerSetup || this.isSetup) return;
     if (Platform.OS === "web") return;
 
-    console.log("[Player] Initializing TrackPlayer...");
-
     try {
-      // setupPlayer is synchronous in @rntp/player v5
+      _playerSetup = true;
+      this.isSetup = true;
+      
       TrackPlayer.setupPlayer({
         contentType: "music",
         handleAudioBecomingNoisy: true,
         progressSync: {
-          intervalSeconds: 0.2, // Sync progress every 200ms
+          intervalSeconds: 0.2,
         },
       });
 
-      // Configure remote control capabilities using setCommands
       TrackPlayer.setCommands({
         capabilities: [
           PlayerCommand.PlayPause,
@@ -41,20 +92,18 @@ export class PlaybackService {
         forwardInterval: 30,
         backwardInterval: 15,
       });
-
-      this.isSetup = true;
-      console.log("[Player] TrackPlayer initialized successfully.");
     } catch (error) {
-
       if (
         error instanceof Error &&
         error.message.includes("already")
       ) {
         this.isSetup = true;
-        console.log("[Player] TrackPlayer already initialized.");
+        _playerSetup = true;
         return;
       }
-      console.error("[Player] Failed to setup TrackPlayer:", error);
+      console.error("[Player] Setup failed:", error);
+      _playerSetup = false;
+      this.isSetup = false;
       throw error;
     }
   }
@@ -67,88 +116,121 @@ export class PlaybackService {
     this.setupPlayer();
     if (Platform.OS === "web") return;
 
-    if (!track.url) {
-      console.error("[LocalPlayer] Track URL is missing.");
+    const normalizedTrack: PlayerTrack = {
+      ...track,
+      url: normalizePlaybackUri(track.url),
+    };
+
+    if (!normalizedTrack.url) {
       return;
     }
 
-    const isLocal = !!track.isLocal;
+    const isLocal = !!normalizedTrack.isLocal;
 
     try {
       if (isLocal) {
-        console.log(`[LocalPlayer] Loading local track: ${track.title}`);
-        console.log("[LocalPlayer] FINAL URI:", track.url);
+        const isSupportedLocalUri = normalizedTrack.url.startsWith("file://") || normalizedTrack.url.startsWith("content://");
 
-        // Hard validation against file:// URIs
-        if (track.url.startsWith("file://")) {
-          console.error("[LocalPlayer] INVALID FILE URI DETECTED");
-          throw new Error("Invalid local file URI: Scoped storage content URI required.");
+        if (!isSupportedLocalUri) {
+          throw new Error("Invalid local file URI: must be file:// or content://");
         }
         
-        // Optimization: Check if this track is already at the correct index in native queue
         const activeItem = await TrackPlayer.getActiveMediaItem();
-        if (activeItem && activeItem.mediaId === track.id) {
-          console.log("[LocalPlayer] Track already active, just playing.");
+        if (activeItem && activeItem.mediaId === normalizedTrack.id) {
           await TrackPlayer.play();
           return;
         }
 
-        // Diagnostic simplification for local tracks ONLY
-        const mediaItems = queue.length > 0 ? queue.map(t => {
-          const item = {
-            mediaId: t.id,
-            url: t.url,
-            title: t.title,
-            artist: t.artist || "Local",
-            type: "default" as const
-          };
-          if (t.id === track.id) {
-            console.log("[LocalPlayer] MediaItem Payload:", JSON.stringify(item, null, 2));
-          }
-          return item;
-        }) : [{
-          mediaId: track.id,
-          url: track.url,
-          title: track.title,
-          artist: track.artist || "Local",
-          type: "default" as const
-        }];
+        const { resolveTrack } = await import("../utils/track-resolver");
+        const queueContainsTrack = queue.some(t => t.id === normalizedTrack.id);
+        const queueForNative = queueContainsTrack ? queue : [normalizedTrack];
+        const resolvedQueue = await Promise.all(
+          queueForNative.map(t => t.id === normalizedTrack.id ? Promise.resolve(normalizedTrack) : resolveTrack(t))
+        );
+        const playableQueue = resolvedQueue
+          .map(t => ({ ...t, url: normalizePlaybackUri(t.url) }))
+          .filter(t => validateTrack(t) && isPlayableUri(t.url));
 
-        if (queue.length === 0) {
-          console.log("[LocalPlayer] Single MediaItem Payload:", JSON.stringify(mediaItems[0], null, 2));
+        if (!playableQueue.some(t => t.id === normalizedTrack.id)) {
+          playableQueue.unshift(normalizedTrack);
         }
 
-        const targetIndex = startIndex !== -1 ? startIndex : 0;
+        const targetIndex = Math.max(0, playableQueue.findIndex(t => t.id === normalizedTrack.id));
+        const mediaItems = playableQueue.map(toMediaItem);
+        logSourceDiagnostics(normalizedTrack, mediaItems.length, targetIndex);
         
-        // Directly call setMediaItems without stop/clear for local
         await TrackPlayer.setMediaItems(mediaItems, targetIndex);
 
-        // Extended compatibility delay for local URIs
         await new Promise(resolve => setTimeout(resolve, 300));
         
         await TrackPlayer.play();
-        console.log("[LocalPlayer] Play command issued");
       } else {
-        // Preserved online flow
         TrackPlayer.clear();
+        logSourceDiagnostics(normalizedTrack, 1, 0);
         
         const mediaItem: any = {
-          mediaId: track.id,
-          url: track.url,
-          title: track.title,
-          artist: track.artist,
+          mediaId: normalizedTrack.id,
+          url: normalizedTrack.url,
+          title: normalizedTrack.title,
+          artist: normalizedTrack.artist,
         };
 
-        if (track.art && track.art.trim().length > 0) {
-          mediaItem.artworkUrl = track.art;
+        if (normalizedTrack.art && normalizedTrack.art.trim().length > 0) {
+          mediaItem.artworkUrl = normalizedTrack.art;
         }
 
         TrackPlayer.setMediaItem(mediaItem);
         TrackPlayer.play();
       }
     } catch (error) {
-      console.error("[LocalPlayer] Failed:", error);
+      console.error("[Player] loadTrack failed:", error);
       throw error;
+    }
+  }
+
+  static async updateQueue(queue: PlayerTrack[], startIndex: number): Promise<void> {
+    if (Platform.OS === "web") return;
+    
+    if (!validateQueue(queue)) {
+      console.warn("[Player] Invalid track in queue, skipping native sync");
+      return;
+    }
+
+    try {
+      const activeItem = await TrackPlayer.getActiveMediaItem();
+      const isCurrentlyPlaying = await TrackPlayer.isPlaying();
+      
+      const { resolveTrack } = await import("../utils/track-resolver");
+      const resolvedQueue = await Promise.all(queue.map(t => resolveTrack(t)));
+
+      const mediaItems = resolvedQueue
+        .map(t => ({ ...t, url: normalizePlaybackUri(t.url) }))
+        .filter(t => validateTrack(t) && isPlayableUri(t.url))
+        .map(toMediaItem);
+      
+      const targetIndex = startIndex !== -1 ? startIndex : 0;
+      
+      if (this.isReordering) {
+        return;
+      }
+      
+      this.isReordering = true;
+      
+      await TrackPlayer.setMediaItems(mediaItems, targetIndex);
+      
+      if (activeItem && isCurrentlyPlaying) {
+        try {
+          await TrackPlayer.play();
+        } catch (e) {}
+      }
+      
+      setTimeout(() => {
+        this.isReordering = false;
+      }, 100);
+      
+    } catch (e) {
+      console.error("[Player] Native queue update failed:", e);
+      this.isReordering = false;
     }
   }
 
@@ -187,20 +269,17 @@ export class PlaybackService {
 
   static seek(positionMillis: number): void {
     if (Platform.OS === "web") return;
-    console.log("[Player] PlaybackService.seek(", positionMillis, ")");
     // seekTo takes seconds in v5
     TrackPlayer.seekTo(positionMillis / 1000);
   }
 
   static setVolume(volume: number): void {
     if (Platform.OS === "web") return;
-    console.log("[Player] PlaybackService.setVolume(", volume, ")");
     TrackPlayer.setVolume(volume);
   }
 
   static setRepeatMode(mode: string): void {
     if (Platform.OS === "web") return;
-    console.log("[Player] PlaybackService.setRepeatMode(", mode, ")");
     // v5 setRepeatMode takes 'off', 'track', or 'queue'
     TrackPlayer.setRepeatMode(mode as any);
   }

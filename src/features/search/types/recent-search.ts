@@ -9,4 +9,6 @@ export interface RecentSearchItem {
     timestamp: number;
     // Data needed for navigation or playback
     data: any;
+    // Optional queue context for restoration
+    queueTracks?: any[];
 }

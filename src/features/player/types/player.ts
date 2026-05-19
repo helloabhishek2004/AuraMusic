@@ -12,6 +12,7 @@ export interface PlayerTrack {
   source?: string;
   artistId?: string;
   albumId?: string;
+  mimeType?: string;
 }
 
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'error';
@@ -20,6 +21,7 @@ export type RepeatMode = 'off' | 'track' | 'queue';
 
 export interface PlaybackState {
   currentTrack: PlayerTrack | null;
+  previousTrack: PlayerTrack | null;
   originalQueue: PlayerTrack[];
   queue: PlayerTrack[];
   currentIndex: number;
@@ -36,6 +38,8 @@ export interface PlaybackState {
   lastResolutionId: number;
   preloadedTrack: PlayerTrack | null;
   isTransitioning: boolean;
+  isPreloading: boolean;
+  isReordering: boolean;
   lyrics: any;
   isLyricsLoading: boolean;
 }
@@ -44,8 +48,13 @@ export interface PlaybackActions {
   setTrack: (track: PlayerTrack) => Promise<void>;
   fetchLyrics: (track: PlayerTrack) => Promise<void>;
   setQueue: (tracks: PlayerTrack[], startIndex?: number) => Promise<void>;
+  addToQueue: (track: PlayerTrack) => void;
+  playNext: (track: PlayerTrack) => void;
+  removeFromQueue: (index: number) => void;
+  reorderQueue: (from: number, to: number) => void;
+  jumpToQueueIndex: (index: number) => Promise<void>;
   preloadNext: () => Promise<void>;
-  preloadTrack: (track: PlayerTrack) => Promise<void>;
+  preloadTrack: (track: PlayerTrack) => Promise<string | null>;
   play: () => Promise<void>;
   pause: () => Promise<void>;
   togglePlayback: () => Promise<void>;
@@ -59,6 +68,5 @@ export interface PlaybackActions {
   updateProgress: (position: number, duration: number, buffered: number) => void;
   setStatus: (status: PlaybackStatus) => void;
 }
-
 
 export type PlayerStore = PlaybackState & PlaybackActions;

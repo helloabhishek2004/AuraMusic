@@ -19,17 +19,15 @@ export const RecentSearchService = {
         try {
             const searches = await this.getRecentSearches();
             
-            // Deduplication: Remove existing item if it exists
-            const filtered = searches.filter((s) => s.id !== item.id);
+            // Filter out exact duplicate (same ID AND type)
+            const filtered = searches.filter((s) => !(s.id === item.id && s.type === item.type));
             
-            // Add new item to top with current timestamp
             const newItem: RecentSearchItem = {
                 ...item,
                 timestamp: Date.now(),
             };
             
             const updated = [newItem, ...filtered].slice(0, MAX_RECENT_SEARCHES);
-            
             await AsyncStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
             return updated;
         } catch (e) {

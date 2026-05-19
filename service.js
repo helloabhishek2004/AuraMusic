@@ -10,18 +10,12 @@ let isServiceInitialized = false;
 
 export const PlaybackService = async function () {
   if (Platform.OS === "web") return;
-  if (isServiceInitialized) {
-    console.log("[Service] Background playback listeners already registered.");
-    return;
-  }
-
-  console.log("[Service] Registering background playback listeners...");
+  if (isServiceInitialized) return;
 
   // Initialize the controller which sets up all listeners (Remote + Playback State)
   // This ensures a single authoritative source for event handling.
   PlaybackController.initialize();
 
   isServiceInitialized = true;
-  console.log("[Service] Background playback listeners registered.");
 };
 

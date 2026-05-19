@@ -1018,11 +1018,15 @@ const TopTracksSection = memo(
             meta={track.duration}
             active={currentTrack?.id === track.id}
             onPress={() => onTrackPress(track)}
-            rightIcon={
-              currentTrack?.id === track.id && isPlaying
-                ? "stats-chart"
-                : "ellipsis-vertical"
-            }
+            downloadable
+            track={{
+              id: track.id,
+              title: track.title,
+              artist: track.artist,
+              art: track.art,
+              url: "",
+              duration: parseDuration(track.duration),
+            }}
           />
         ))}
       </View>
@@ -1283,11 +1287,15 @@ const SeeAllBottomSheet = memo(
               meta={item.duration}
               active={currentTrack?.id === item.id}
               onPress={() => onTrackPress(item)}
-              rightIcon={
-                currentTrack?.id === item.id && isPlaying
-                  ? "stats-chart"
-                  : "ellipsis-vertical"
-              }
+              downloadable
+              track={{
+                id: item.id,
+                title: item.title,
+                artist: item.artist,
+                art: item.art,
+                url: "",
+                duration: parseDuration(item.duration),
+              }}
             />
           );
         }

@@ -44,6 +44,11 @@ export default function RootLayout() {
     // Initialize audio engine and bridge
     PlaybackService.setupPlayer();
     PlaybackController.initialize();
+    
+    // Initialize Download System
+    import('../src/features/download/services/download.manager').then(({ DownloadManager }) => {
+      DownloadManager.initialize();
+    });
   }, []);
 
   const [fontsLoaded, error] = useFonts({

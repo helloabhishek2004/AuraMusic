@@ -6,6 +6,9 @@ import {
 } from "../../utils/search-utils";
 import { AlbumDetails, ArtistDetails, MusicTrack } from "../../types/music";
 
+const streamUrlCache = new Map<string, { url: string; timestamp: number }>();
+const STREAM_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Map a song entity from API response
  */
@@ -136,8 +139,6 @@ export const musicService = {
     }
 
     try {
-      console.log('[Search API] Fetching for query:', query);
-
       // Fetch all categories in parallel with specific type filters
       const responses = await Promise.all([
         apiClient.get(`/search`, { params: { q: query, type: 'songs' } }).catch(() => ({ data: [] })),
@@ -154,7 +155,6 @@ export const musicService = {
 
       // Process songs
       const rawSongs: any[] = responses[0].data || [];
-      console.log('[Search API] Raw songs count:', rawSongs.length);
       rawSongs.forEach((item: any) => {
         const mapped = mapSongResult(item);
         if (mapped) songs.push(mapped);
@@ -162,7 +162,6 @@ export const musicService = {
 
       // Process artists
       const rawArtists: any[] = responses[1].data || [];
-      console.log('[Search API] Raw artists count:', rawArtists.length);
       rawArtists.forEach((item: any) => {
         const mapped = mapArtistResult(item);
         if (mapped) artists.push(mapped);
@@ -170,7 +169,6 @@ export const musicService = {
 
       // Process albums
       const rawAlbums: any[] = responses[2].data || [];
-      console.log('[Search API] Raw albums count:', rawAlbums.length);
       rawAlbums.forEach((item: any) => {
         const mapped = mapAlbumResult(item);
         if (mapped) albums.push(mapped);
@@ -178,7 +176,6 @@ export const musicService = {
 
       // Process playlists
       const rawPlaylists: any[] = responses[3].data || [];
-      console.log('[Search API] Raw playlists count:', rawPlaylists.length);
       rawPlaylists.forEach((item: any) => {
         const mapped = mapPlaylistResult(item);
         if (mapped) playlists.push(mapped);
@@ -189,13 +186,6 @@ export const musicService = {
       const limitedArtists = artists.slice(0, 6);
       const limitedAlbums = albums.slice(0, 6);
       const limitedPlaylists = playlists.slice(0, 4);
-
-      console.log('[Search API] Mapped results:', {
-        songs: limitedSongs.length,
-        artists: limitedArtists.length,
-        albums: limitedAlbums.length,
-        playlists: limitedPlaylists.length,
-      });
 
       return {
         songs: limitedSongs,
@@ -446,7 +436,6 @@ export const musicService = {
       for (const item of items) {
         const mapped = mapAlbumResult(item);
         if (mapped) {
-          console.log('[Search] Found album:', mapped.title);
           return mapped;
         }
       }
@@ -461,9 +450,18 @@ export const musicService = {
    * Resolves a videoId to a playable stream URL.
    */
   resolveStream: async (videoId: string): Promise<{ streamUrl: string; duration?: number }> => {
+    const cached = streamUrlCache.get(videoId);
+    if (cached && Date.now() - cached.timestamp < STREAM_CACHE_TTL) {
+      return { streamUrl: cached.url };
+    }
+
     try {
       const response = await apiClient.get(`/resolve/${videoId}`);
-      return response.data;
+      const result = response.data;
+      if (result.streamUrl) {
+        streamUrlCache.set(videoId, { url: result.streamUrl, timestamp: Date.now() });
+      }
+      return result;
     } catch (error) {
       console.error("Error resolving stream:", error);
       throw error;

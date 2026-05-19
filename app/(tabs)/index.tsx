@@ -21,6 +21,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useMusic } from '@/src/context/MusicContext';
 import { useMusicNavigation } from '@/src/navigation/music-navigation';
+import { useDownloadStore } from '@/src/features/download/store/download.store';
+import { DownloadManager } from '@/src/features/download/services/download.manager';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const PAD = 24;
@@ -287,7 +289,7 @@ const HeartButton = ({ liked = false, onPress, size = 24 }: any) => {
 };
 
 // ── DOWNLOAD BUTTON WITH PROGRESS ──────────────────────────────────────────
-const DownloadButton = ({ downloaded = false, onPress, downloading = false }: any) => {
+const DownloadButton = ({ downloaded = false, onPress, downloading = false, progress = 0 }: any) => {
   const rotation = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -314,9 +316,12 @@ const DownloadButton = ({ downloaded = false, onPress, downloading = false }: an
 
   if (downloading) {
     return (
-      <Animated.View style={{ transform: [{ rotate: rotationValue }] }}>
-        <Ionicons name="download" size={24} color={C.accent} />
-      </Animated.View>
+      <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
+        <Animated.View style={{ position: 'absolute', transform: [{ rotate: rotationValue }] }}>
+          <Ionicons name="sync" size={20} color={C.accent} />
+        </Animated.View>
+        <Text style={{ fontSize: 8, color: C.accent, fontWeight: '900' }}>{Math.round(progress * 100)}</Text>
+      </View>
     );
   }
 
@@ -332,56 +337,58 @@ const DownloadButton = ({ downloaded = false, onPress, downloading = false }: an
 };
 
 // ── HORIZONTAL TRACK CARD (FIXED) ──────────────────────────────────────────
-const TrackCard = React.memo(({ title, artist, image, onPress, onArtistPress, liked, onLikePress, downloaded, onDownload, variant = 'compact' }: any) => {
-  const [isLiked, setIsLiked] = useState(liked);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const isCompact = variant === 'compact';
+const TrackCard = React.memo(({ track, onPress, onArtistPress, variant = 'compact' }: any) => {
+  const downloadedTracks = useDownloadStore(s => s.downloadedTracks);
+  const activeTasks = useDownloadStore(s => s.activeTasks);
+  const addDownload = useDownloadStore(s => s.addDownload);
 
-  const handleCardPress = useCallback(() => {
-    onPress?.();
-  }, [onPress]);
+  const downloaded = !!downloadedTracks[track.id];
+  const task = activeTasks[track.id];
+  const downloading = task?.status === 'downloading' || task?.status === 'queued';
+  const progress = task?.progress || 0;
+
+  const isCompact = variant === 'compact';
 
   return (
     <TouchableOpacity
-      onPress={handleCardPress}
+      onPress={onPress}
       activeOpacity={0.7}
       style={[s.trackCardContainer, isCompact ? s.trackCardContainerCompact : s.trackCardContainerExpanded]}
     >
       <PremiumGlass r={20} blur={40} gloss style={[s.trackCardGlass, isCompact ? s.trackCardGlassCompact : s.trackCardGlassExpanded]}>
         <View style={[s.trackCardImageContainer, isCompact ? s.trackCardImageContainerCompact : s.trackCardImageContainerExpanded]}>
-          <Image source={{ uri: image }} style={s.trackCardImage} contentFit="cover" transition={200} />
+          <Image source={{ uri: track.image }} style={s.trackCardImage} contentFit="cover" transition={200} />
           <View style={s.trackCardImageOverlay} />
         </View>
         <View style={[s.trackCardContent, !isCompact && s.trackCardContentExpanded]}>
           <Text style={[s.trackCardTitle, isCompact ? s.trackCardTitleCompact : s.trackCardTitleExpanded]} numberOfLines={isCompact ? 1 : 2}>
-            {title}
+            {track.title}
           </Text>
           <TouchableOpacity onPress={(e) => {
             e.stopPropagation();
             onArtistPress?.();
           }}>
             <Text style={[s.trackCardArtist, !isCompact && s.trackCardArtistExpanded]} numberOfLines={1}>
-              {artist}
+              {track.artist}
             </Text>
           </TouchableOpacity>
           
           {!isCompact && (
             <View style={s.trackCardActionsExpandedRow}>
-               <HeartButton
-                liked={isLiked}
-                size={18}
-                onPress={() => {
-                  setIsLiked(!isLiked);
-                  onLikePress?.();
-                }}
-              />
               <DownloadButton
                 downloaded={downloaded}
-                downloading={isDownloading}
+                downloading={downloading}
+                progress={progress}
                 onPress={() => {
-                  setIsDownloading(true);
-                  setTimeout(() => setIsDownloading(false), 1500);
-                  onDownload?.();
+                  if (!downloaded && !downloading) {
+                    addDownload({ 
+                      id: track.id, 
+                      title: track.title, 
+                      artist: track.artist, 
+                      art: track.image,
+                      url: track.url
+                    });
+                  }
                 }}
               />
             </View>
@@ -390,21 +397,20 @@ const TrackCard = React.memo(({ title, artist, image, onPress, onArtistPress, li
         
         {isCompact && (
           <View style={s.trackCardActionsCompact}>
-            <HeartButton
-              liked={isLiked}
-              size={18}
-              onPress={() => {
-                setIsLiked(!isLiked);
-                onLikePress?.();
-              }}
-            />
             <DownloadButton
               downloaded={downloaded}
-              downloading={isDownloading}
+              downloading={downloading}
+              progress={progress}
               onPress={() => {
-                setIsDownloading(true);
-                setTimeout(() => setIsDownloading(false), 1500);
-                onDownload?.();
+                if (!downloaded && !downloading) {
+                   addDownload({ 
+                    id: track.id, 
+                    title: track.title, 
+                    artist: track.artist, 
+                    art: track.image,
+                    url: track.url
+                  });
+                }
               }}
             />
           </View>
@@ -714,31 +720,12 @@ export default function HomeScreen() {
             {displayedTracks.map((track) => (
               <TrackCard
                 key={track.id}
-                title={track.title}
-                artist={track.artist}
-                image={track.image}
+                track={track}
                 variant="compact"
                 onPress={() => handlePlayPress(track)}
                 onArtistPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   goArtist(track.artistId || 'elara');
-                }}
-                liked={likedSongs.has(track.id)}
-                onLikePress={() => {
-                  const newLiked = new Set(likedSongs);
-                  if (newLiked.has(track.id)) {
-                    newLiked.delete(track.id);
-                  } else {
-                    newLiked.add(track.id);
-                  }
-                  setLikedSongs(newLiked);
-                }}
-                downloaded={downloadedSongs.has(track.id)}
-                onDownload={() => {
-                  const newDownloaded = new Set(downloadedSongs);
-                  newDownloaded.add(track.id);
-                  setDownloadedSongs(newDownloaded);
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 }}
               />
             ))}
@@ -750,31 +737,12 @@ export default function HomeScreen() {
               {tracks.slice(2).map((track) => (
                 <TrackCard
                   key={track.id}
-                  title={track.title}
-                  artist={track.artist}
-                  image={track.image}
+                  track={track}
                   variant="row"
                   onPress={() => handlePlayPress(track)}
                   onArtistPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     goArtist(track.artistId || 'elara');
-                  }}
-                  liked={likedSongs.has(track.id)}
-                  onLikePress={() => {
-                    const newLiked = new Set(likedSongs);
-                    if (newLiked.has(track.id)) {
-                      newLiked.delete(track.id);
-                    } else {
-                      newLiked.add(track.id);
-                    }
-                    setLikedSongs(newLiked);
-                  }}
-                  downloaded={downloadedSongs.has(track.id)}
-                  onDownload={() => {
-                    const newDownloaded = new Set(downloadedSongs);
-                    newDownloaded.add(track.id);
-                    setDownloadedSongs(newDownloaded);
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                   }}
                 />
               ))}

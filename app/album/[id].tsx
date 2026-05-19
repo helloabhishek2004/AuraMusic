@@ -1,3 +1,4 @@
+import { DownloadAlbumButton } from "@/src/components/ui/download-album-button";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { FlashList } from "@shopify/flash-list";
@@ -382,10 +383,12 @@ function AlbumScreen() {
                 onShuffle={() => handlePlayAlbum(true)}
                 onShare={handleShare}
                 isShuffle={isShuffle}
+                tracks={album.tracks}
               />
               <SectionHeader title="Tracks" style={styles.sectionHeader} />
             </View>
           }
+
           ListFooterComponent={<CreditsSection album={album} />}
           contentContainerStyle={styles.contentContainer}
           showsVerticalScrollIndicator={false}
@@ -456,7 +459,7 @@ const HeroSection = memo(
   },
 );
 
-const ActionButtons = memo(({ onPlay, onShuffle, onShare, isShuffle }: any) => (
+const ActionButtons = memo(({ onPlay, onShuffle, onShare, isShuffle, tracks }: any) => (
   <LiquidGlass
     borderRadius={radius.xl}
     intensity={glass.surfaceBlur}
@@ -491,9 +494,16 @@ const ActionButtons = memo(({ onPlay, onShuffle, onShare, isShuffle }: any) => (
     >
       <Ionicons name="share-social-outline" size={20} color={palette.ink} />
     </PressScale>
-    <PressScale style={styles.iconButton} accessibilityLabel="More options">
-      <Ionicons name="ellipsis-horizontal" size={20} color={palette.ink} />
-    </PressScale>
+    <DownloadAlbumButton
+      tracks={tracks.map((t: any) => ({
+        id: t.id,
+        title: t.title,
+        artist: t.artist,
+        art: t.art,
+        url: "",
+        duration: parseDuration(t.duration),
+      }))}
+    />
   </LiquidGlass>
 ));
 

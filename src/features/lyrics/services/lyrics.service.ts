@@ -31,7 +31,6 @@ class LyricsAPIService {
       }
 
       const url = `${this.baseUrl}/lyrics/${trackId}?${params.toString()}`;
-      console.log("[Lyrics Service] Fetching lyrics from:", url);
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
@@ -48,29 +47,17 @@ class LyricsAPIService {
 
       if (!response.ok) {
         if (response.status === 404) {
-          console.log("[Lyrics Service] No lyrics found for track:", title, "-", artist);
           throw new Error("Lyrics not found");
         }
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data: LyricsFetchResponse = await response.json();
-
-      console.log("[Lyrics Service] Successfully fetched lyrics:", {
-        title: data.title,
-        artist: data.artist,
-        synced: data.synced,
-        confidence: data.confidence,
-        lineCount: data.lyrics.length,
-      });
-
       return data;
     } catch (error) {
       if (error instanceof TypeError && error.message.includes("Failed to fetch")) {
-        console.error("[Lyrics Service] Network error - backend may be offline");
         throw new Error("Network error: Backend unreachable");
       }
-      console.error("[Lyrics Service] Error fetching lyrics:", error);
       throw error;
     }
   }
@@ -117,7 +104,6 @@ class LyricsAPIService {
       const data: LyricsFetchResponse = await response.json();
       return data;
     } catch (error) {
-      console.error("[Lyrics Service] Error searching lyrics:", error);
       throw error;
     }
   }

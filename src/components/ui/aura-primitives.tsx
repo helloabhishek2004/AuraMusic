@@ -95,6 +95,9 @@ function MotionRevealComponent({ children, delay = 0, style }: MotionRevealProps
 
 export const MotionReveal = memo(MotionRevealComponent);
 
+import { DownloadButton } from './download-button';
+import { PlayerTrack } from '@/src/features/player/types/player';
+
 type MediaListItemProps = {
   title: string;
   subtitle: string;
@@ -106,6 +109,8 @@ type MediaListItemProps = {
   rightIcon?: React.ComponentProps<typeof Ionicons>['name'];
   accessibilityLabel?: string;
   style?: StyleProp<ViewStyle>;
+  track?: PlayerTrack;
+  downloadable?: boolean;
 };
 
 function MediaListItemComponent({
@@ -119,6 +124,8 @@ function MediaListItemComponent({
   rightIcon = 'ellipsis-vertical',
   accessibilityLabel,
   style,
+  track,
+  downloadable = false,
 }: MediaListItemProps) {
   const accent = active ? palette.primary : palette.border;
 
@@ -159,7 +166,11 @@ function MediaListItemComponent({
         </View>
         {!!meta && <AuraText variant="caption" style={styles.mediaMeta}>{meta}</AuraText>}
         <View style={[styles.mediaIcon, { borderColor: accent }]}>
-          <Ionicons name={rightIcon} size={17} color={active ? palette.primary : palette.inkDim} />
+          {downloadable && track ? (
+            <DownloadButton track={track} size={18} color={active ? palette.primary : palette.inkDim} />
+          ) : (
+            <Ionicons name={rightIcon} size={17} color={active ? palette.primary : palette.inkDim} />
+          )}
         </View>
       </LiquidGlass>
     </PressScale>

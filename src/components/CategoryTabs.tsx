@@ -1,10 +1,17 @@
-import React, { useRef, useState, useCallback, useEffect } from "react";
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Animated, Platform } from "react-native";
-import { BlurView } from "expo-blur";
-import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Dimensions } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+    Animated,
+    Dimensions,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    ViewStyle,
+} from "react-native";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const isTablet = SCREEN_W >= 768;
@@ -26,10 +33,18 @@ interface CategoryTabsProps {
   categories: string[];
   activeCategory: string;
   onCategoryChange: (category: string) => void;
+  style?: ViewStyle | ViewStyle[];
 }
 
-export function CategoryTabs({ categories, activeCategory, onCategoryChange }: CategoryTabsProps) {
-  const [layouts, setLayouts] = useState<Record<number, { x: number; width: number }>>({});
+export function CategoryTabs({
+  categories,
+  activeCategory,
+  onCategoryChange,
+  style,
+}: CategoryTabsProps) {
+  const [layouts, setLayouts] = useState<
+    Record<number, { x: number; width: number }>
+  >({});
   const tabSlide = useRef(new Animated.Value(BASE_PAD - 6 + 6)).current;
   const tabWidth = useRef(new Animated.Value(60)).current;
   const tabPillScale = useRef(new Animated.Value(1)).current;
@@ -95,11 +110,11 @@ export function CategoryTabs({ categories, activeCategory, onCategoryChange }: C
         }),
       ]).start();
     },
-    [layouts, onCategoryChange]
+    [layouts, onCategoryChange],
   );
 
   return (
-    <View style={styles.tabBarOuter}>
+    <View style={[styles.tabBarOuter, style]}>
       <View style={styles.tabBarTopEdge} />
       <ScrollView
         horizontal
@@ -111,10 +126,7 @@ export function CategoryTabs({ categories, activeCategory, onCategoryChange }: C
             styles.tabActivePill,
             {
               width: tabWidth,
-              transform: [
-                { translateX: tabSlide },
-                { scale: tabPillScale },
-              ],
+              transform: [{ translateX: tabSlide }, { scale: tabPillScale }],
             },
           ]}
         >
@@ -136,10 +148,7 @@ export function CategoryTabs({ categories, activeCategory, onCategoryChange }: C
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               selectTab(tab, idx);
             }}
-            style={[
-              styles.tabItem,
-              { paddingHorizontal: isTablet ? 28 : 20 },
-            ]}
+            style={[styles.tabItem, { paddingHorizontal: isTablet ? 28 : 20 }]}
             activeOpacity={1}
           >
             <Text

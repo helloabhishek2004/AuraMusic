@@ -1,27 +1,23 @@
-import React, { useEffect, useRef, useCallback, useMemo, memo } from "react";
-import {
-  StyleSheet,
-  View,
-  Text,
-  Dimensions,
-  Platform,
-  ScrollViewProps,
-} from "react-native";
 import { FlashList } from "@shopify/flash-list";
- 
+import React, { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import {
+    Dimensions,
+    StyleSheet,
+    Text,
+    View
+} from "react-native";
 
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  withSpring,
-  useDerivedValue,
-  runOnJS,
-} from "react-native-reanimated";
-import { GestureDetector, Gesture } from "react-native-gesture-handler";
+import { palette, radius, spacing, typography } from "@/src/design/tokens";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
-import { palette, spacing, radius, typography } from "@/src/design/tokens";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+    runOnJS,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring,
+    withTiming
+} from "react-native-reanimated";
 
 const { width, height } = Dimensions.get("window");
 
@@ -81,17 +77,14 @@ const LyricLine = memo(
     return (
       <Animated.View style={[styles.lyricLineContainer, animatedStyle]}>
         <Text
-          style={[
-            styles.lyricText,
-            isActive && styles.lyricTextActive,
-          ]}
+          style={[styles.lyricText, isActive && styles.lyricTextActive]}
           numberOfLines={3}
         >
           {text || "♪"}
         </Text>
       </Animated.View>
     );
-  }
+  },
 );
 
 LyricLine.displayName = "LyricLine";
@@ -215,7 +208,7 @@ export const LyricsDisplay = memo(
         }
         scrollOffsetY.value = event.nativeEvent.contentOffset.y;
       },
-      [onUserScroll]
+      [onUserScroll],
     );
 
     /**
@@ -233,7 +226,10 @@ export const LyricsDisplay = memo(
       }
 
       // Calculate target scroll position
-      const targetY = Math.max(0, activeLineIndex * LINE_HEIGHT - SCROLL_OFFSET);
+      const targetY = Math.max(
+        0,
+        activeLineIndex * LINE_HEIGHT - SCROLL_OFFSET,
+      );
 
       isAutoScrolling.current = true;
 
@@ -277,7 +273,7 @@ export const LyricsDisplay = memo(
 
             return () => clearTimeout(timer);
           }),
-      [isFollowingPlayback, onUserScroll]
+      [isFollowingPlayback, onUserScroll],
     );
 
     // Render content based on state
@@ -309,14 +305,18 @@ export const LyricsDisplay = memo(
           isPast={isSynced && index < activeLineIndex}
         />
       ),
-      [isSynced, activeLineIndex]
+      [isSynced, activeLineIndex],
     );
 
     return (
       <GestureDetector gesture={panGesture}>
         <View style={styles.container}>
           {/* Background with glass effect */}
-          <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
+          <BlurView
+            intensity={24}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+          />
           <View
             style={{
               position: "absolute",
@@ -342,12 +342,10 @@ export const LyricsDisplay = memo(
 
           {/* Lyrics List */}
           <FlashList
-            // @ts-ignore
             ref={flashListRef}
             data={renderData}
             renderItem={renderLyricLine}
             keyExtractor={(item: any) => item.id}
-            estimatedItemSize={LINE_HEIGHT}
             onScroll={handleScroll}
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
@@ -373,7 +371,7 @@ export const LyricsDisplay = memo(
         </View>
       </GestureDetector>
     );
-  }
+  },
 );
 
 LyricsDisplay.displayName = "LyricsDisplay";

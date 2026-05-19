@@ -1,6 +1,6 @@
-import React, { createContext, useCallback, useContext, useMemo } from 'react';
-import { usePlayerStore } from '../features/player/store/player.store';
-import { PlayerTrack } from '../features/player/types/player';
+import React, { createContext, useCallback, useContext, useMemo } from "react";
+import { usePlayerStore } from "../features/player/store/player.store";
+import { PlayerTrack } from "../features/player/types/player";
 
 export type Track = PlayerTrack;
 
@@ -29,89 +29,125 @@ type MusicActionsContextType = {
   seek: (progress: number) => Promise<void>;
   setTrack: (track: Track) => Promise<void>;
   setQueue: (tracks: Track[], startIndex?: number) => Promise<void>;
+  playNext: (track: Track) => void;
+  addToQueue: (track: Track) => void;
   toggleRepeat: () => Promise<void>;
   toggleShuffle: () => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
   preloadTrack: (track: Track) => Promise<string | null>;
 };
 
-export type MusicContextType = PlaybackStateContextType & MusicProgressContextType & MusicActionsContextType;
+export type MusicContextType = PlaybackStateContextType &
+  MusicProgressContextType &
+  MusicActionsContextType;
 
-const PlaybackStateContext = createContext<PlaybackStateContextType | undefined>(undefined);
-const MusicProgressContext = createContext<MusicProgressContextType | undefined>(undefined);
-const MusicActionsContext = createContext<MusicActionsContextType | undefined>(undefined);
+const PlaybackStateContext = createContext<
+  PlaybackStateContextType | undefined
+>(undefined);
+const MusicProgressContext = createContext<
+  MusicProgressContextType | undefined
+>(undefined);
+const MusicActionsContext = createContext<MusicActionsContextType | undefined>(
+  undefined,
+);
 
-export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   // Use granular selectors to avoid re-rendering the provider when progress updates
-  const currentTrack = usePlayerStore(s => s.currentTrack);
-  const isPlaying = usePlayerStore(s => s.isPlaying);
-  const isBuffering = usePlayerStore(s => s.isBuffering);
-  const status = usePlayerStore(s => s.status);
-  const repeatMode = usePlayerStore(s => s.repeatMode);
-  const isShuffle = usePlayerStore(s => s.isShuffle);
+  const currentTrack = usePlayerStore((s) => s.currentTrack);
+  const isPlaying = usePlayerStore((s) => s.isPlaying);
+  const isBuffering = usePlayerStore((s) => s.isBuffering);
+  const status = usePlayerStore((s) => s.status);
+  const repeatMode = usePlayerStore((s) => s.repeatMode);
+  const isShuffle = usePlayerStore((s) => s.isShuffle);
 
   // Actions - individual stable selectors to avoid object-literal rerender loop
-  const setTrackStore = usePlayerStore(s => s.setTrack);
-  const setQueueStore = usePlayerStore(s => s.setQueue);
-  const playStore = usePlayerStore(s => s.play);
-  const pauseStore = usePlayerStore(s => s.pause);
-  const nextStore = usePlayerStore(s => s.next);
-  const previousStore = usePlayerStore(s => s.previous);
-  const seekStore = usePlayerStore(s => s.seek);
-  const setRepeatModeStore = usePlayerStore(s => s.setRepeatMode);
-  const toggleShuffleStore = usePlayerStore(s => s.toggleShuffle);
-  const setVolumeStore = usePlayerStore(s => s.setVolume);
-  const preloadTrackStore = usePlayerStore(s => s.preloadTrack);
+  const setTrackStore = usePlayerStore((s) => s.setTrack);
+  const setQueueStore = usePlayerStore((s) => s.setQueue);
+  const playStore = usePlayerStore((s) => s.play);
+  const pauseStore = usePlayerStore((s) => s.pause);
+  const nextStore = usePlayerStore((s) => s.next);
+  const previousStore = usePlayerStore((s) => s.previous);
+  const seekStore = usePlayerStore((s) => s.seek);
+  const playNextStore = usePlayerStore((s) => s.playNext);
+  const addToQueueStore = usePlayerStore((s) => s.addToQueue);
+  const setRepeatModeStore = usePlayerStore((s) => s.setRepeatMode);
+  const toggleShuffleStore = usePlayerStore((s) => s.toggleShuffle);
+  const setVolumeStore = usePlayerStore((s) => s.setVolume);
+  const preloadTrackStore = usePlayerStore((s) => s.preloadTrack);
 
   const repeatModeMap: Record<string, 0 | 1> = {
     off: 0,
     track: 1,
   };
 
-  const reverseRepeatModeMap: Record<number, 'off' | 'track'> = {
-    0: 'off',
-    1: 'track',
+  const reverseRepeatModeMap: Record<number, "off" | "track"> = {
+    0: "off",
+    1: "track",
   };
 
   const playbackValue = useMemo<PlaybackStateContextType>(
     () => ({
-      currentTrack: currentTrack ? {
-        ...currentTrack,
-        dominantColors: currentTrack.dominantColors || ['#bf5af2', '#7b2fbe'],
-      } : null,
+      currentTrack: currentTrack
+        ? {
+            ...currentTrack,
+            dominantColors: currentTrack.dominantColors || [
+              "#bf5af2",
+              "#7b2fbe",
+            ],
+          }
+        : null,
       isPlaying,
       isBuffering,
-      isLoading: status === 'loading',
+      isLoading: status === "loading",
       repeatMode: repeatModeMap[repeatMode] as 0 | 1,
       isShuffle,
       isPlayerReady: true,
     }),
-    [currentTrack, isPlaying, isBuffering, status, repeatMode, isShuffle]
+    [currentTrack, isPlaying, isBuffering, status, repeatMode, isShuffle],
   );
 
   const toggleRepeat = useCallback(async () => {
-    const nextMode = repeatMode === 'off' ? 'track' : 'off';
+    const nextMode = repeatMode === "off" ? "track" : "off";
     setRepeatModeStore(nextMode);
   }, [repeatMode, setRepeatModeStore]);
 
   const actionsValue = useMemo<MusicActionsContextType>(
     () => ({
-      play: async (track?: Track) => track ? setTrackStore(track) : playStore(),
+      play: async (track?: Track) =>
+        track ? setTrackStore(track) : playStore(),
       pause: pauseStore,
       next: nextStore,
       prev: previousStore,
-      seek: async (p: number) => { 
+      seek: async (p: number) => {
         const duration = usePlayerStore.getState().duration;
-        await seekStore(p * duration); 
+        await seekStore(p * duration);
       },
       setTrack: setTrackStore,
       setQueue: setQueueStore,
+      playNext: playNextStore,
+      addToQueue: addToQueueStore,
       toggleRepeat,
-      toggleShuffle: async () => { toggleShuffleStore(); },
+      toggleShuffle: async () => {
+        toggleShuffleStore();
+      },
       setVolume: setVolumeStore,
       preloadTrack: preloadTrackStore,
     }),
-    [setTrackStore, playStore, pauseStore, nextStore, previousStore, seekStore, setQueueStore, toggleRepeat, toggleShuffleStore, setVolumeStore, preloadTrackStore]
+    [
+      setTrackStore,
+      playStore,
+      pauseStore,
+      nextStore,
+      previousStore,
+      seekStore,
+      setQueueStore,
+      toggleRepeat,
+      toggleShuffleStore,
+      setVolumeStore,
+      preloadTrackStore,
+    ],
   );
 
   return (
@@ -125,28 +161,33 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
 export function usePlaybackState() {
   const context = useContext(PlaybackStateContext);
-  if (!context) throw new Error('usePlaybackState must be used within MusicProvider');
+  if (!context)
+    throw new Error("usePlaybackState must be used within MusicProvider");
   return context;
 }
 
 export function useMusicProgress(): MusicProgressContextType {
   // Subscribe directly to the store for high-frequency updates
   // This prevents the main Provider from re-rendering the entire app
-  const position = usePlayerStore(s => s.position);
-  const duration = usePlayerStore(s => s.duration);
-  const bufferedPosition = usePlayerStore(s => s.bufferedPosition);
+  const position = usePlayerStore((s) => s.position);
+  const duration = usePlayerStore((s) => s.duration);
+  const bufferedPosition = usePlayerStore((s) => s.bufferedPosition);
 
-  return useMemo(() => ({
-    progress: duration > 0 ? position / duration : 0,
-    elapsedSec: position / 1000,
-    durationSec: duration / 1000,
-    bufferedSec: bufferedPosition / 1000,
-  }), [position, duration, bufferedPosition]);
+  return useMemo(
+    () => ({
+      progress: duration > 0 ? position / duration : 0,
+      elapsedSec: position / 1000,
+      durationSec: duration / 1000,
+      bufferedSec: bufferedPosition / 1000,
+    }),
+    [position, duration, bufferedPosition],
+  );
 }
 
 export function useMusicActions() {
   const context = useContext(MusicActionsContext);
-  if (!context) throw new Error('useMusicActions must be used within MusicProvider');
+  if (!context)
+    throw new Error("useMusicActions must be used within MusicProvider");
   return context;
 }
 
@@ -167,7 +208,15 @@ export function useMusicControls() {
       isShuffle: playback.isShuffle,
       isPlayerReady: playback.isPlayerReady,
     }),
-    [actions, playback.isPlayerReady, playback.isPlaying, playback.isBuffering, playback.isLoading, playback.isShuffle, playback.repeatMode]
+    [
+      actions,
+      playback.isPlayerReady,
+      playback.isPlaying,
+      playback.isBuffering,
+      playback.isLoading,
+      playback.isShuffle,
+      playback.repeatMode,
+    ],
   );
 }
 

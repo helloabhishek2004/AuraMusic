@@ -1,13 +1,7 @@
 import axios from 'axios';
 import Constants from 'expo-constants';
 
-/**
- * API Configuration
- * Replace the IP with your local machine's LAN IP when running on a real device.
- * For Android Emulator: 10.0.2.2
- * For iOS Simulator: 127.0.0.1
- */
-const BASE_URL = 'http://192.168.1.71:8000'; // Change this to your local machine IP
+const BASE_URL = 'http://192.168.1.71:8000';
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
@@ -17,28 +11,11 @@ const apiClient = axios.create({
   },
 });
 
-// Structured Debugging Interceptors
-apiClient.interceptors.request.use((config) => {
-  console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
-    params: config.params,
-    baseURL: config.baseURL,
-  });
-  return config;
-});
-
 apiClient.interceptors.response.use(
-  (response) => {
-    console.log(`[API Response] ${response.status} ${response.config.url}`, {
-      dataCount: Array.isArray(response.data) ? response.data.length : 'N/A',
-    });
-    return response;
-  },
+  (response) => response,
   (error) => {
-    console.error(`[API Error] ${error.config?.url || 'Unknown URL'}`, {
-      message: error.message,
-      code: error.code,
-      status: error.response?.status,
-    });
+    const url = error.config?.url || 'Unknown URL';
+    console.error(`[API Error] ${url}:`, error.message);
     return Promise.reject(error);
   }
 );

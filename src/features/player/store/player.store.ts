@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { PlaybackService } from "../services/playback.service";
+import { transitionManager } from "../services/transition-manager";
 import { musicService } from "../../../services/api/music";
 import {
     PlaybackStatus,
@@ -12,6 +13,7 @@ import {
 // but we'll stick to the defined interface and add private-ish state.
 interface ExtendedPlayerStore extends PlayerStore {
   isPreloading: boolean;
+  isReordering: boolean;
 }
 
 export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
@@ -38,24 +40,25 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
   // Transition / Sync State
   lastResolutionId: 0,
   preloadedTrack: null,
+  previousTrack: null,
   isTransitioning: false,
   isPreloading: false,
+  isReordering: false,
   _lastVolumeSync: 0,
 
   // Actions
   setTrack: async (track: PlayerTrack) => {
     const resolutionId = ++get().lastResolutionId;
+    const currentTrack = get().currentTrack;
     
-    // 1. Check if it's already the current track and playing
-    if (get().currentTrack?.id === track.id && get().status === "playing") {
+    if (currentTrack?.id === track.id && get().status === "playing") {
+      transitionManager.setTransitioning(false);
       return;
     }
 
-    console.log(`[Player] setTrack -> ${track.title} (ID: ${resolutionId})`);
-    
-    // 2. Optimistic Update & Lock (Ensuring all status flags are set)
     set({ 
       isTransitioning: true,
+      previousTrack: currentTrack,
       currentTrack: track,
       status: "buffering",
       isBuffering: true,
@@ -66,59 +69,37 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
     });
 
     try {
-      // 3. STOP previous native playback to free resources
       await PlaybackService.stop();
 
-      let resolvedTrack: PlayerTrack;
-
-      // 4. Optimization: ONLY skip resolution if it's a known direct stream URL
-      // We check for 'googlevideo.com' or 'manifest' which are typical for resolved streams
-      // OR if it's a local track
-      const isAlreadyResolved = track.isLocal || (track.url && (track.url.includes("googlevideo.com") || track.url.includes("manifest")));
-
-      if (isAlreadyResolved) {
-        console.log(`[Player] Using already resolved URL for ${track.id}`);
-        resolvedTrack = track;
-      } else {
-        // 5. Check Preload Cache
-        const preloaded = get().preloadedTrack;
-        if (preloaded && preloaded.id === track.id && preloaded.url) {
-          console.log(`[Player] Using cached preload for ${track.id}`);
-          resolvedTrack = preloaded;
-        } else {
-          // 6. Resolve Stream
-          const { streamUrl } = await musicService.resolveStream(track.id);
-          
-          // Stale check
-          if (get().lastResolutionId !== resolutionId) {
-            console.log(`[Player] Resolution ${resolutionId} is stale, aborting.`);
-            return;
-          }
-
-          resolvedTrack = { ...track, url: streamUrl };
-        }
+      const { resolveFullTrack } = await import("../utils/track-resolver");
+      const resolvedTrack = await resolveFullTrack(track, get().preloadedTrack);
+      
+      if (get().lastResolutionId !== resolutionId) {
+        transitionManager.setTransitioning(false);
+        set({ isTransitioning: false });
+        return;
       }
 
-      // 7. Load into Engine
       await PlaybackService.loadTrack(resolvedTrack, get().queue, get().currentIndex);
       
-      // 8. Finalize State
       set({ 
         currentTrack: resolvedTrack,
         status: "playing",
         isPlaying: true,
         isBuffering: false,
         isTransitioning: false,
-        preloadedTrack: null // Clear used cache
+        preloadedTrack: null
       });
 
-      // 9. Post-load tasks
+      transitionManager.setTransitioning(false);
+      transitionManager.clearCache([resolvedTrack.id]);
+      
       get().preloadNext();
       get().fetchLyrics(resolvedTrack);
 
     } catch (error) {
       if (get().lastResolutionId === resolutionId) {
-        console.error(`[Player] setTrack failed (${resolutionId}):`, error);
+        transitionManager.setTransitioning(false);
         set({ 
           status: "error", 
           error: (error as Error).message || "Playback failed",
@@ -131,7 +112,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
   },
 
   preloadTrack: async (track: PlayerTrack) => {
-    if (get().preloadedTrack?.id === track.id) return;
+    if (get().preloadedTrack?.id === track.id) return get().preloadedTrack?.url || null;
     
     set({ isPreloading: true });
     try {
@@ -170,47 +151,33 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
   },
 
   preloadNext: async () => {
-    const { queue, currentIndex, preloadedTrack, isPreloading } = get();
-    if (queue.length === 0 || isPreloading) return;
+    const { queue, currentIndex, preloadedTrack, isPreloading, currentTrack } = get();
+    if (queue.length === 0 || isPreloading || !currentTrack) return;
 
     const nextIndex = (currentIndex + 1) % queue.length;
     const nextTrack = queue[nextIndex];
 
-    if (!nextTrack || (preloadedTrack && preloadedTrack.id === nextTrack.id)) {
-      return;
-    }
+    if (!nextTrack) return;
+    if (preloadedTrack && preloadedTrack.id === nextTrack.id) return;
+    if (transitionManager.getCachedTrack(nextTrack.id)) return;
 
     set({ isPreloading: true });
-    console.log(`[Player] Preloading: ${nextTrack.title}`);
     
-    try {
-      let preloadData: PlayerTrack;
+    const cached = await transitionManager.preloadNextTrack(nextTrack, currentTrack.id);
+    
+    if (cached && get().currentIndex === nextIndex) {
+      set({ preloadedTrack: cached, isPreloading: false });
       
-      if (nextTrack.isLocal) {
-        preloadData = { ...nextTrack };
-      } else {
-        const { streamUrl } = await musicService.resolveStream(nextTrack.id);
-        preloadData = { ...nextTrack, url: streamUrl };
+      const secondIndex = (nextIndex + 1) % queue.length;
+      if (secondIndex !== nextIndex && queue[secondIndex]) {
+        transitionManager.preloadSecondaryTrack(queue[secondIndex], currentTrack.id);
       }
-      
-      // Check if we are still on the same context
-      if (get().currentIndex === currentIndex) {
-        set({ 
-          preloadedTrack: preloadData,
-          isPreloading: false
-        });
-        console.log(`[Player] Preload ready: ${nextTrack.title}`);
-      } else {
-        set({ isPreloading: false });
-      }
-    } catch (e) {
+    } else {
       set({ isPreloading: false });
     }
   },
 
   setQueue: async (tracks: PlayerTrack[], startIndex: number = 0) => {
-    console.log(`[Player] setQueue (${tracks.length} items)`);
-    
     const isShuffle = get().isShuffle;
     let activeQueue = [...tracks];
     let newStartIndex = startIndex;
@@ -235,6 +202,113 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
     if (activeQueue[newStartIndex]) {
       await get().setTrack(activeQueue[newStartIndex]);
     }
+  },
+
+  playNext: (track: PlayerTrack) => {
+    const { queue, originalQueue, currentIndex, currentTrack } = get();
+    
+    const newQueue = [...queue];
+    newQueue.splice(currentIndex + 1, 0, track);
+    
+    const newOriginal = [...originalQueue];
+    if (!newOriginal.find(t => t.id === track.id)) {
+      newOriginal.push(track);
+    }
+    
+    set({ queue: newQueue, originalQueue: newOriginal });
+    
+    if (currentTrack?.isLocal) {
+      PlaybackService.updateQueue(newQueue, currentIndex);
+    }
+  },
+
+  addToQueue: (track: PlayerTrack) => {
+    const { queue, originalQueue, currentIndex, currentTrack } = get();
+    
+    const newQueue = [...queue, track];
+    const newOriginal = [...originalQueue];
+    if (!newOriginal.find(t => t.id === track.id)) {
+      newOriginal.push(track);
+    }
+    
+    set({ queue: newQueue, originalQueue: newOriginal });
+    
+    if (currentTrack?.isLocal) {
+      PlaybackService.updateQueue(newQueue, currentIndex);
+    }
+  },
+
+  removeFromQueue: (index: number) => {
+    const { queue, currentIndex, currentTrack } = get();
+    if (index < 0 || index >= queue.length) return;
+    
+    // Prevent removing currently playing track
+    if (index === currentIndex) {
+      return;
+    }
+    
+    const newQueue = [...queue];
+    newQueue.splice(index, 1);
+    
+    let newIndex = currentIndex;
+    if (index < currentIndex) {
+      newIndex--;
+    }
+    
+    set({ queue: newQueue, currentIndex: newIndex });
+    
+    // Only sync with native for local tracks
+    if (currentTrack?.isLocal) {
+      PlaybackService.updateQueue(newQueue, newIndex);
+    }
+  },
+
+  reorderQueue: (from: number, to: number) => {
+    const { queue, currentIndex, isReordering, currentTrack } = get();
+    
+    if (isReordering) {
+      return;
+    }
+
+    const newQueue = [...queue];
+    const [movedItem] = newQueue.splice(from, 1);
+    newQueue.splice(to, 0, movedItem);
+    
+    let newIndex = currentIndex;
+    if (currentIndex === from) {
+      newIndex = to;
+    } else if (currentIndex > from && currentIndex <= to) {
+      newIndex--;
+    } else if (currentIndex < from && currentIndex >= to) {
+      newIndex++;
+    }
+    
+    set({ 
+      queue: newQueue, 
+      currentIndex: newIndex,
+      isReordering: true 
+    });
+    
+    const finishReorder = () => {
+      setTimeout(() => {
+        set({ isReordering: false });
+      }, 50);
+    };
+    
+    if (currentTrack?.isLocal) {
+      PlaybackService.updateQueue(newQueue, newIndex);
+      finishReorder();
+    } else {
+      finishReorder();
+    }
+  },
+
+  jumpToQueueIndex: async (index: number) => {
+    const { queue } = get();
+    if (index < 0 || index >= queue.length) return;
+    
+    set({ currentIndex: index });
+    await get().setTrack(queue[index]);
   },
 
   play: async () => {
@@ -275,38 +349,57 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
 
   next: async () => {
     const { queue, currentIndex, repeatMode, isTransitioning, currentTrack } = get();
+    
     if (queue.length === 0 || isTransitioning) return;
+    
+    if (transitionManager.getTransitionState()) return;
 
-    // 1. If Repeat is ON (track mode), restart the current track IMMEDIATELY
+    transitionManager.setTransitioning(true);
+    set({ isTransitioning: true });
+
     if (repeatMode === "track" && currentTrack) {
-      console.log("[Player] Repeat One: High-speed loop restart.");
+      transitionManager.setTransitioning(false);
+      set({ isTransitioning: false });
       await get().seek(0);
       await get().play();
       return;
     }
 
-    // 2. If it's a local track, we use native queue skipping for smoother transitions
     if (currentTrack?.isLocal) {
-      console.log("[Player] Next (Local Mode)");
+      transitionManager.setTransitioning(false);
+      set({ isTransitioning: false });
       await PlaybackService.skipToNext();
       return;
     }
 
-    // 3. Otherwise (Online Mode or fallback), advance to next in queue
     let nextIndex = currentIndex + 1;
 
     if (nextIndex >= queue.length) {
-      // Queue mode: loop back to start, otherwise stop
       if (repeatMode === "queue") {
         nextIndex = 0;
       } else {
-        console.log("[Player] End of queue reached.");
+        transitionManager.setTransitioning(false);
+        set({ isTransitioning: false });
         return;
       }
     }
 
-    set({ currentIndex: nextIndex });
-    await get().setTrack(queue[nextIndex]);
+    const nextTrack = queue[nextIndex];
+    if (!nextTrack) {
+      transitionManager.setTransitioning(false);
+      set({ isTransitioning: false });
+      return;
+    }
+
+    const cachedPreload = transitionManager.getCachedTrack(nextTrack.id);
+    
+    if (cachedPreload && transitionManager.validatePreload(cachedPreload)) {
+      set({ currentIndex: nextIndex, preloadedTrack: cachedPreload });
+    } else {
+      set({ currentIndex: nextIndex });
+    }
+    
+    await get().setTrack(cachedPreload || nextTrack);
   },
 
   previous: async () => {
@@ -321,7 +414,6 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
 
     // If it's a local track, use native queue skipping
     if (currentTrack?.isLocal) {
-      console.log("[Player] Previous (Local Mode)");
       await PlaybackService.skipToPrevious();
       return;
     }
@@ -392,13 +484,26 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
     }
 
     set({ isShuffle: newShuffle, queue: newQueue, currentIndex: newIndex });
+
+    // Sync with native if it's a local queue session
+    if (currentTrack?.isLocal) {
+      PlaybackService.updateQueue(newQueue, newIndex);
+    }
   },
 
   updateProgress: (position: number, duration: number, buffered: number) => {
     const s = get();
-    // More granular updates for smoother progress bar (100ms position delta)
     if (Math.abs(s.position - position) > 100 || Math.abs(s.duration - duration) > 100) {
       set({ position, duration, bufferedPosition: buffered });
+    }
+    
+    if (s.isPlaying && !s.isTransitioning && !s.isPreloading && transitionManager.shouldPreload(position, duration)) {
+      const nextIndex = (s.currentIndex + 1) % s.queue.length;
+      const nextTrack = s.queue[nextIndex];
+      
+      if (nextTrack && nextTrack.id !== s.currentTrack?.id) {
+        transitionManager.preloadNextTrack(nextTrack, s.currentTrack?.id || '');
+      }
     }
   },
 
@@ -412,6 +517,10 @@ export const usePlayerStore = create<ExtendedPlayerStore>((set, get) => ({
       isPlaying: status === "playing",
       isBuffering: status === "buffering",
     });
+  },
+
+  clearPreviousTrack: () => {
+    set({ previousTrack: null });
   },
 }));
 
