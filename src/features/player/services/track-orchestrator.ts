@@ -1,6 +1,6 @@
 import { PlayerTrack } from "../types/player";
 import { useMediaCacheStore } from "../../cache/store/media-cache.store";
-import { resolveFullTrack } from "../utils/track-resolver";
+import { resolveAudioOnly } from "../utils/track-resolver";
 import { musicService } from "../../../services/api/music";
 import { usePlayerStore } from "../store/player.store";
 import { PlaybackService } from "./playback.service";
@@ -36,7 +36,7 @@ export class TrackOrchestrator {
         }
 
         // 2. Perform Full Resolution
-        const resolved = await resolveFullTrack(track);
+        const resolved = await resolveAudioOnly(track);
 
         // 3. Cache the result
         cacheStore.cacheTrack(resolved);
@@ -67,7 +67,7 @@ export class TrackOrchestrator {
 
         try {
             // Metadata & Album Enrichment
-            const resolved = await resolveFullTrack(track);
+            const resolved = await resolveAudioOnly(track);
             cacheStore.cacheTrack(resolved);
 
             // Lyrics Prefetch (if online)
@@ -87,7 +87,7 @@ export class TrackOrchestrator {
      */
     private static async backgroundEnrich(track: PlayerTrack) {
         try {
-            const resolved = await resolveFullTrack(track);
+            const resolved = await resolveAudioOnly(track);
             useMediaCacheStore.getState().cacheTrack(resolved);
         } catch (e) {}
     }

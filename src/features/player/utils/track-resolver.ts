@@ -132,7 +132,7 @@ export async function resolveTrack(t: PlayerTrack, preloadedTrack?: PlayerTrack 
 
 const resolutionPromises = new Map<string, Promise<PlayerTrack>>();
 
-export async function resolveFullTrack(t: PlayerTrack, preloadedTrack?: PlayerTrack | null): Promise<PlayerTrack> {
+export async function resolveAudioOnly(t: PlayerTrack, preloadedTrack?: PlayerTrack | null): Promise<PlayerTrack> {
     // Deduplicate concurrent resolutions for the same track
     const existing = resolutionPromises.get(t.id);
     if (existing) return existing;
@@ -140,36 +140,8 @@ export async function resolveFullTrack(t: PlayerTrack, preloadedTrack?: PlayerTr
     const promise = (async () => {
         try {
             let resolved = await resolveTrack(t, preloadedTrack);
-            const cacheStore = useMediaCacheStore.getState();
 
-            // Enrich with album details if missing but we have an album name
-            if (!resolved.albumId && resolved.album) {
-                const cachedId = cacheStore.getAlbumId(resolved.album, resolved.artist);
-                if (cachedId) {
-                    resolved = { ...resolved, albumId: cachedId };
-                } else {
-                    try {
-                        const albumSearch = await musicService.lookupAlbumByName(`${resolved.album} ${resolved.artist}`);
-                        if (albumSearch && albumSearch.id) {
-                            cacheStore.cacheAlbumId(resolved.album, resolved.artist, albumSearch.id);
-                            resolved = { ...resolved, albumId: albumSearch.id };
-                            
-                            // Sync with player store if needed
-                            const { usePlayerStore } = await import("../store/player.store");
-                            const store = usePlayerStore.getState();
-                            if (store.currentTrack?.id === resolved.id) {
-                                usePlayerStore.setState({
-                                    currentTrack: { ...store.currentTrack, albumId: albumSearch.id }
-                                });
-                            }
-                        }
-                    } catch (e) {
-                        console.warn("[TrackResolver] Album enrichment failed:", e);
-                    }
-                }
-            }
-
-            // Resolve Stream URL if still missing
+            // Resolve Stream URL if missing
             if (!resolved.url || (!resolved.isLocal && !isResolvedUrl(resolved.url))) {
                 try {
                     const { streamUrl } = await musicService.resolveStream(resolved.id);
@@ -183,8 +155,6 @@ export async function resolveFullTrack(t: PlayerTrack, preloadedTrack?: PlayerTr
                 }
             }
 
-            // Always cache the final enriched metadata
-            cacheStore.cacheTrack(resolved);
             return resolved;
         } finally {
             resolutionPromises.delete(t.id);

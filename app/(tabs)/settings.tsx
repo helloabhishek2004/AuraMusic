@@ -190,7 +190,7 @@ const QualityModal = ({
   );
 };
 
-import { useMediaCacheStore } from "../../src/features/cache/store/media-cache.store";
+import { MetadataCache } from "../../src/features/cache/services/metadata-cache.service";
 import { useDownloadStore } from "../../src/features/download/store/download.store";
 
 // Inside SettingsScreen component
@@ -199,13 +199,23 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { themeColors, setAccentColor, accentColor } = useTheme();
 
-  const cacheStore = useMediaCacheStore();
   const downloadedTracks = useDownloadStore((s) => s.downloadedTracks);
 
-  const cacheStats = useMemo(
-    () => cacheStore.getCacheStats(),
-    [cacheStore.metadata, cacheStore.albumMap],
-  );
+  const [cacheStats, setCacheStats] = useState({
+    metadataCount: 0,
+    lyricsCount: 0,
+    totalSizeEstimate: "0 MB"
+  });
+
+  useEffect(() => {
+    MetadataCache.getMetrics().then(metrics => {
+      setCacheStats({
+        ...metrics,
+        totalSizeEstimate: `${((metrics.metadataCount + metrics.lyricsCount) * 0.05).toFixed(1)} MB`
+      });
+    });
+  }, []);
+
   const downloadCount = useMemo(
     () => Object.keys(downloadedTracks).length,
     [downloadedTracks],
@@ -229,6 +239,39 @@ export default function SettingsScreen() {
     null,
   );
   const [cacheAcknowledgement, setCacheAcknowledgement] = useState(false);
+  const [tapCount, setTapCount] = useState(0);
+
+  const runStressTest = async () => {
+    const { usePlayerStore } = await import("../../src/features/player/store/player.store");
+    
+    Alert.alert("Stress Test Initiated", "Injecting 1000 tracks and rapidly skipping.");
+    
+    // Create 1000 tracks
+    const mockTracks = Array.from({ length: 1000 }).map((_, i) => ({
+      id: `stress-${i}`,
+      videoId: `stress-${i}`,
+      title: `Stress Track ${i}`,
+      artist: `Stress Artist`,
+      duration: 180,
+      art: 'https://via.placeholder.com/150',
+      source: 'local'
+    } as any));
+
+    const playerStore = usePlayerStore.getState();
+    playerStore.setActiveContext({ type: "search", id: "stress-test" });
+    await playerStore.setQueue(mockTracks, 0);
+
+    // Rapidly skip 50 times every 150ms
+    let skips = 0;
+    const interval = setInterval(() => {
+      playerStore.next();
+      skips++;
+      if (skips >= 50) {
+        clearInterval(interval);
+        Alert.alert("Stress Test Completed", "Check for UI jank or crashes.");
+      }
+    }, 150);
+  };
 
   const toggleSwitch = (key: keyof typeof switches) => {
     setSwitches((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -243,8 +286,9 @@ export default function SettingsScreen() {
         {
           text: "Clear",
           style: "destructive",
-          onPress: () => {
-            cacheStore.clearCache();
+          onPress: async () => {
+            await MetadataCache.clearAll();
+            setCacheStats({ metadataCount: 0, lyricsCount: 0, totalSizeEstimate: "0 MB" });
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             setCacheAcknowledgement(true);
             setTimeout(() => setCacheAcknowledgement(false), 2000);
@@ -504,7 +548,7 @@ export default function SettingsScreen() {
             ]}
             onPress={handleClearCache}
             disabled={
-              cacheStats.metadataCount === 0 && cacheStats.albumCount === 0
+              cacheStats.metadataCount === 0 && cacheStats.lyricsCount === 0
             }
           >
             <LinearGradient
@@ -570,10 +614,20 @@ export default function SettingsScreen() {
           </View>
         </SettingSection>
 
-        <View style={styles.footer}>
+        <Pressable 
+          style={styles.footer} 
+          onPress={() => {
+            const newCount = (tapCount || 0) + 1;
+            setTapCount(newCount);
+            if (newCount >= 7) {
+              setTapCount(0);
+              runStressTest();
+            }
+          }}
+        >
           <Text style={styles.footerBrand}>AuraMusic</Text>
           <Text style={styles.footerVersion}>Version 1.0.0 (Build 2405)</Text>
-        </View>
+        </Pressable>
       </ScrollView>
 
       <QualityModal

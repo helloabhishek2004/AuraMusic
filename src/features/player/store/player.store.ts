@@ -21,6 +21,7 @@ interface ExtendedPlayerStore extends PlayerStore {
   // Playlist-aware playback context
   activeContext: PlaybackContext | null;
   setActiveContext: (context: PlaybackContext | null) => void;
+  updateTrackMetadata: (trackId: string, partial: Partial<PlayerTrack>) => void;
 }
 
 export const usePlayerStore = create<ExtendedPlayerStore>()(
@@ -80,6 +81,22 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           }
         } catch (e) {}
       },
+      updateTrackMetadata: (trackId: string, partial: Partial<PlayerTrack>) => set((state) => {
+        if (state.currentTrack && state.currentTrack.id === trackId) {
+          // Shallow equality check to prevent re-renders if no actual change
+          let changed = false;
+          for (const key of Object.keys(partial)) {
+            if ((state.currentTrack as any)[key] !== (partial as any)[key]) {
+              changed = true;
+              break;
+            }
+          }
+          if (changed) {
+            return { currentTrack: { ...state.currentTrack, ...partial } };
+          }
+        }
+        return state;
+      }),
 
       // Actions
       setTrack: async (track: PlayerTrack) => {
@@ -105,8 +122,11 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         });
 
         try {
-          const { TrackOrchestrator } = await import("../services/track-orchestrator");
-          const resolvedTrack = await TrackOrchestrator.resolveAndEnrich(track);
+          const { resolveAudioOnly } = await import("../utils/track-resolver");
+          const { HydrationScheduler } = await import("../services/hydration.service");
+          const { MetadataCache } = await import("../../cache/services/metadata-cache.service");
+
+          const resolvedTrack = await resolveAudioOnly(track);
 
           if (get().lastResolutionId !== resolutionId) {
             transitionManager.setTransitioning(false);
@@ -114,13 +134,17 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
             return;
           }
 
-          // Hydrate lyrics from cache if available, otherwise fetch
-          const cached = useMediaCacheStore.getState().getCachedTrack(resolvedTrack.id);
-          if (cached?.lyrics) {
-              set({ lyrics: cached.lyrics });
-          } else {
-              get().fetchLyrics(resolvedTrack);
+          // Instantly patch from hot cache if available
+          const hotCache = MetadataCache.getHotEntry(resolvedTrack);
+          if (hotCache) {
+             if (hotCache.lyrics) set({ lyrics: hotCache.lyrics });
+             resolvedTrack.albumId = hotCache.albumId || resolvedTrack.albumId;
+             resolvedTrack.art = hotCache.artwork || resolvedTrack.art;
+             resolvedTrack.album = hotCache.album || resolvedTrack.album;
           }
+
+          // Trigger progressive hydration in background
+          HydrationScheduler.scheduleHydration(resolvedTrack);
 
           await PlaybackService.loadTrack(resolvedTrack, get().queue, get().currentIndex);
 

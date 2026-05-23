@@ -2263,7 +2263,7 @@ const LocalPlaylistView = React.memo(
           },
         ];
 
-        if (targetAlbumId || (track.title && track.artist)) {
+        if (targetAlbumId || track.album) {
           options.push({
             label: "Go to Album",
             icon: "disc-outline",
@@ -2271,20 +2271,19 @@ const LocalPlaylistView = React.memo(
               setActionSheetVisible(false);
               if (targetAlbumId) {
                 router.push(`/album/${targetAlbumId}`);
-              } else {
-                const { musicService } =
-                  await import("@/src/services/api/music");
-                const searchQuery = `${track.title} ${track.artist}`;
-                const results = await musicService.searchSongs(
-                  searchQuery.trim(),
-                );
-                const match = results.find((r) => r.albumId);
-                if (match && match.albumId)
-                  router.push(`/album/${match.albumId}`);
-                else
-                  Haptics.notificationAsync(
-                    Haptics.NotificationFeedbackType.Error,
-                  );
+              } else if (track.album) {
+                const { musicService } = await import("@/src/services/api/music");
+                const { MetadataCache } = await import("@/src/features/cache/services/metadata-cache.service");
+                const { usePlayerStore } = await import("@/src/features/player/store/player.store");
+                
+                const albumSearch = await musicService.lookupAlbumByName(`${track.album} ${track.artist || ''}`.trim());
+                if (albumSearch && albumSearch.id) {
+                  MetadataCache.mergeEntry(track, { albumId: albumSearch.id });
+                  usePlayerStore.getState().updateTrackMetadata(track.id, { albumId: albumSearch.id });
+                  router.push(`/album/${albumSearch.id}`);
+                } else {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                }
               }
             },
           });

@@ -726,19 +726,21 @@ const InfoModal = memo(
       if (track?.albumId) {
         onClose();
         openAlbum(router, track.albumId);
-      } else if (track?.title && track?.artist) {
+      } else if (track?.album) {
         setIsSearchingAlbum(true);
         try {
           const { musicService } = await import("@/src/services/api/music");
+          const { MetadataCache } = await import("@/src/features/cache/services/metadata-cache.service");
           
-          const searchQuery = `${track.title} ${track.artist}`;
-          const results = await musicService.searchSongs(searchQuery.trim());
+          const albumSearch = await musicService.lookupAlbumByName(`${track.album} ${track.artist || ''}`.trim());
           
-          const match = results.find((r) => r.albumId);
-          
-          if (match && match.albumId) {
+          if (albumSearch && albumSearch.id) {
+            // Cache the retrieved album ID so we don't look it up again
+            MetadataCache.mergeEntry(track, { albumId: albumSearch.id });
+            usePlayerStore.getState().updateTrackMetadata(track.id, { albumId: albumSearch.id });
+            
             onClose();
-            openAlbum(router, match.albumId);
+            openAlbum(router, albumSearch.id);
           } else {
             onClose();
             setTimeout(() => {
@@ -778,12 +780,12 @@ const InfoModal = memo(
         icon: "person-outline",
         onPress: handleGoToArtist,
       },
-      {
+      (track?.albumId || track?.album) ? {
         label: isSearchingAlbum ? "Searching..." : "Go to Album",
         icon: "disc-outline",
         onPress: handleGoToAlbum,
         disabled: isSearchingAlbum,
-      },
+      } : null,
       {
         label: "Share Track",
         icon: "share-social-outline",
@@ -800,7 +802,7 @@ const InfoModal = memo(
         icon: "information-circle-outline",
         onPress: handleViewCredits,
       },
-    ];
+    ].filter((a): a is NonNullable<typeof a> => Boolean(a));
 
     function handleAddToPlaylist() {
       onClose();

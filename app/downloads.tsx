@@ -962,10 +962,15 @@ export default function DownloadsScreen() {
       setIsSearchingAlbum(true);
       try {
         const { musicService } = await import("@/src/services/api/music");
+        const { MetadataCache } = await import("@/src/features/cache/services/metadata-cache.service");
+        const { usePlayerStore } = await import("@/src/features/player/store/player.store");
+        
         const search = await musicService.lookupAlbumByName(
-          `${selectedTrack.album} ${selectedTrack.artist}`,
+          `${selectedTrack.album} ${selectedTrack.artist || ''}`.trim()
         );
         if (search && search.id) {
+          MetadataCache.mergeEntry(selectedTrack, { albumId: search.id });
+          usePlayerStore.getState().updateTrackMetadata(selectedTrack.id, { albumId: search.id });
           setActionSheetVisible(false);
           openAlbum(router, search.id);
         } else {
@@ -1197,27 +1202,29 @@ export default function DownloadsScreen() {
                   style={s.modalActionsList}
                   showsVerticalScrollIndicator={false}
                 >
-                  <TouchableOpacity
-                    style={s.modalActionRow}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      handleGoToAlbum();
-                    }}
-                  >
-                    <Ionicons
-                      name="disc-outline"
-                      size={22}
-                      color="rgba(255,255,255,0.85)"
-                    />
-                    <Text style={s.modalActionLabel}>Go to Album</Text>
-                    {isSearchingAlbum && (
-                      <ActivityIndicator
-                        size="small"
-                        color={C.primary}
-                        style={{ marginLeft: 10 }}
+                  {(selectedTrack.albumId || selectedTrack.album) && (
+                    <TouchableOpacity
+                      style={s.modalActionRow}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        handleGoToAlbum();
+                      }}
+                    >
+                      <Ionicons
+                        name="disc-outline"
+                        size={22}
+                        color="rgba(255,255,255,0.85)"
                       />
-                    )}
-                  </TouchableOpacity>
+                      <Text style={s.modalActionLabel}>Go to Album</Text>
+                      {isSearchingAlbum && (
+                        <ActivityIndicator
+                          size="small"
+                          color={C.primary}
+                          style={{ marginLeft: 10 }}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  )}
 
                   <TouchableOpacity
                     style={s.modalActionRow}
