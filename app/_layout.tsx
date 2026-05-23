@@ -28,8 +28,9 @@ function GlobalPlayer() {
   
   const isNowPlaying = pathname === '/now_playing';
   const isLyrics = pathname === '/lyrics';
+  const isCreatePlaylist = pathname.includes('create_playlist');
   
-  if (isNowPlaying || isLyrics) return null;
+  if (isNowPlaying || isLyrics || isCreatePlaylist) return null;
 
   // If we are in a tab, we need to lift the mini player above the tab bar
   const isTab = segments[0] === '(tabs)';

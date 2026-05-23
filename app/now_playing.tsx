@@ -22,38 +22,37 @@
  *  ✓ Zero-change to functionality — all hooks, stores, handlers identical
  */
 
+import { useLikesStore } from "@/src/features/likes/store/likes.store";
 import { DownloadButton } from "@/src/components/ui/download-button";
 import { useMusicActions } from "@/src/context/MusicContext";
 import { InsightPanel } from "@/src/features/player/components/InsightPanel";
 import { QueueSheet } from "@/src/features/player/components/QueueSheet";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
-import { openArtistByName } from "@/src/navigation/music-navigation";
+import AddToPlaylistSheet from "@/src/features/playlist/components/AddToPlaylistSheet";
+import { openAlbum, openArtistByName } from "@/src/navigation/music-navigation";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, {
-  memo,
-  useEffect,
-  useMemo,
-  useRef,
-  useState
-} from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
-  Easing,
   Modal,
   Platform,
   Pressable,
   Animated as RNAnimated,
+  ScrollView,
+  Share,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import {
   Gesture,
@@ -532,13 +531,13 @@ const PlayPauseBtn = memo(
             RNAnimated.timing(glow, {
               toValue: 1,
               duration: 1200,
-              easing: Easing.inOut(Easing.sin),
+              easing: REasing.inOut(REasing.sin),
               useNativeDriver: true,
             }),
             RNAnimated.timing(glow, {
               toValue: 0.6,
               duration: 1200,
-              easing: Easing.inOut(Easing.sin),
+              easing: REasing.inOut(REasing.sin),
               useNativeDriver: true,
             }),
           ]),
@@ -665,19 +664,150 @@ const InfoModal = memo(
     onClose,
     accentColor,
     track,
+    onAddToPlaylist,
   }: {
     visible: boolean;
     onClose: () => void;
     accentColor: string;
     track: any;
+    onAddToPlaylist: () => void;
   }) => {
+    const router = useRouter();
     const { sc, onIn, onOut } = useSpringPress(0.95);
-    const rows = [
-      { label: "Format", value: "FLAC 24-bit / 48kHz" },
-      { label: "Source", value: "Aura Premium Master" },
-      { label: "Track", value: track?.title ?? "—" },
-      { label: "Artist", value: track?.artist ?? "—" },
+    const [mode, setMode] = useState<"actions" | "credits">("actions");
+    const [isSearchingAlbum, setIsSearchingAlbum] = useState(false);
+
+    // Reset mode when visibility changes
+    useEffect(() => {
+      if (visible) setMode("actions");
+    }, [visible]);
+
+    const handleShare = async () => {
+      onClose();
+      try {
+        await Share.share({
+          message: `Listening to "${track?.title}" by ${track?.artist} on AuraMusic! 🎧`,
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    const handleNotInterested = async () => {
+      onClose();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+
+      try {
+        const stored = await AsyncStorage.getItem("aura-not-interested-ids");
+        const list = stored ? JSON.parse(stored) : [];
+        if (!list.includes(track?.id)) {
+          list.push(track?.id);
+          await AsyncStorage.setItem(
+            "aura-not-interested-ids",
+            JSON.stringify(list),
+          );
+        }
+      } catch (e) {
+        console.error(e);
+      }
+
+      // Skip instantly
+      usePlayerStore.getState().next();
+    };
+
+    const handleGoToArtist = () => {
+      onClose();
+      if (track?.artist) {
+        openArtistByName(router, track.artist);
+      }
+    };
+
+    const handleGoToAlbum = async () => {
+      if (track?.albumId) {
+        onClose();
+        openAlbum(router, track.albumId);
+      } else if (track?.title && track?.artist) {
+        setIsSearchingAlbum(true);
+        try {
+          const { musicService } = await import("@/src/services/api/music");
+          
+          const searchQuery = `${track.title} ${track.artist}`;
+          const results = await musicService.searchSongs(searchQuery.trim());
+          
+          const match = results.find((r) => r.albumId);
+          
+          if (match && match.albumId) {
+            onClose();
+            openAlbum(router, match.albumId);
+          } else {
+            onClose();
+            setTimeout(() => {
+              Alert.alert("No Album Found", "This track does not appear to belong to any official album catalog.");
+            }, 300);
+          }
+        } catch (e) {
+          console.warn(e);
+          onClose();
+          setTimeout(() => {
+            Alert.alert("Connection Error", "Please connect to the internet to view online albums.");
+          }, 300);
+        } finally {
+          setIsSearchingAlbum(false);
+        }
+      } else {
+        onClose();
+        setTimeout(() => {
+          Alert.alert("No Album", "This track does not have an associated album.");
+        }, 300);
+      }
+    };
+
+    const handleViewCredits = () => {
+      setMode("credits");
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    };
+
+    const actions = [
+      {
+        label: "Add to Playlist",
+        icon: "add-circle-outline",
+        onPress: handleAddToPlaylist,
+      },
+      {
+        label: "Go to Artist",
+        icon: "person-outline",
+        onPress: handleGoToArtist,
+      },
+      {
+        label: isSearchingAlbum ? "Searching..." : "Go to Album",
+        icon: "disc-outline",
+        onPress: handleGoToAlbum,
+        disabled: isSearchingAlbum,
+      },
+      {
+        label: "Share Track",
+        icon: "share-social-outline",
+        onPress: handleShare,
+      },
+      {
+        label: "Not Interested",
+        icon: "heart-dislike-outline",
+        onPress: handleNotInterested,
+        color: "#ff453a",
+      },
+      {
+        label: "View Credits",
+        icon: "information-circle-outline",
+        onPress: handleViewCredits,
+      },
     ];
+
+    function handleAddToPlaylist() {
+      onClose();
+      setTimeout(() => {
+        onAddToPlaylist();
+      }, 280);
+    }
 
     return (
       <Modal
@@ -717,22 +847,82 @@ const InfoModal = memo(
               <View style={s.modalHandle} />
             </View>
 
-            <Text style={s.modalTitle}>Track Details</Text>
-
-            {rows.map((row, i) => (
-              <React.Fragment key={row.label}>
-                <View style={s.modalRow}>
-                  <Text style={s.modalLabel}>{row.label}</Text>
-                  <Text style={s.modalValue} numberOfLines={1}>
-                    {row.value}
+            {mode === "actions" ? (
+              <>
+                <View style={s.modalHeaderInfo}>
+                  <Text style={s.modalTitle} numberOfLines={1}>
+                    {track?.title ?? "—"}
+                  </Text>
+                  <Text style={s.modalSubtitle} numberOfLines={1}>
+                    {track?.artist ?? "—"}
                   </Text>
                 </View>
-                {i < rows.length - 1 && <View style={s.modalDivider} />}
-              </React.Fragment>
-            ))}
+
+                <View style={s.modalDivider} />
+
+                <ScrollView
+                  style={s.modalActionsList}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {actions.map((act, i) => (
+                    <TouchableOpacity
+                      key={act.label}
+                      disabled={act.disabled}
+                      style={[
+                        s.modalActionRow,
+                        act.disabled && { opacity: 0.5 },
+                      ]}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        act.onPress();
+                      }}
+                    >
+                      <Ionicons
+                        name={act.icon as any}
+                        size={22}
+                        color={act.color ?? "rgba(255,255,255,0.85)"}
+                      />
+                      <Text
+                        style={[
+                          s.modalActionLabel,
+                          act.color ? { color: act.color } : null,
+                        ]}
+                      >
+                        {act.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            ) : (
+              <View style={s.creditsContent}>
+                <View style={s.creditsHeader}>
+                  <TouchableOpacity
+                    onPress={() => setMode("actions")}
+                    style={s.creditsBack}
+                  >
+                    <Ionicons
+                      name="chevron-back"
+                      size={20}
+                      color="rgba(255,255,255,0.6)"
+                    />
+                  </TouchableOpacity>
+                  <Text style={s.creditsTitle}>Song Credits</Text>
+                </View>
+
+                <View style={s.creditsList}>
+                  <CreditRow label="Title" value={track?.title} />
+                  <CreditRow label="Artist" value={track?.artist} />
+                  <CreditRow label="Album" value={track?.album || "Single"} />
+                  <CreditRow label="Source" value="Aura Premium Master" />
+                  <CreditRow label="Format" value="FLAC 24-bit / 48kHz" />
+                  <CreditRow label="Rights" value="© AuraMusic Corporation" />
+                </View>
+              </View>
+            )}
 
             <RNAnimated.View
-              style={[{ transform: [{ scale: sc }] }, { marginTop: 24 }]}
+              style={[{ transform: [{ scale: sc }] }, { marginTop: 16 }]}
             >
               <TouchableOpacity
                 onPressIn={onIn}
@@ -760,6 +950,15 @@ const InfoModal = memo(
   },
 );
 
+const CreditRow = ({ label, value }: { label: string; value: string }) => (
+  <View style={s.creditRow}>
+    <Text style={s.creditLabel}>{label}</Text>
+    <Text style={s.creditValue} numberOfLines={2}>
+      {value ?? "—"}
+    </Text>
+  </View>
+);
+
 // ─── MAIN SCREEN ──────────────────────────────────────────────────────────────
 export default function NowPlayingScreen() {
   const router = useRouter();
@@ -776,11 +975,14 @@ export default function NowPlayingScreen() {
   const repeatMode = usePlayerStore((s) => (s.repeatMode === "track" ? 1 : 0));
   const isShuffle = usePlayerStore((s) => s.isShuffle);
 
-  const [isLiked, setIsLiked] = useState(false);
+  const isLiked = useLikesStore((s) => !!(currentTrack?.id && s.likedTrackIds[currentTrack.id]));
+  const toggleLike = useLikesStore((s) => s.toggleLike);
+
   const [isInfoVisible, setIsInfoVisible] = useState(false);
   const [isImageLoading, setIsImageLoading] = useState(true);
   const [isQueueVisible, setIsQueueVisible] = useState(false);
   const [isInsightVisible, setIsInsightVisible] = useState(false);
+  const [isAddToPlaylistVisible, setIsAddToPlaylistVisible] = useState(false);
 
   // ── Reanimated values ──────────────────────────────────────────────────────
   const artScale = useSharedValue(0.9);
@@ -1143,7 +1345,7 @@ export default function NowPlayingScreen() {
               >
                 <LikeBtn
                   isLiked={isLiked}
-                  onToggle={() => setIsLiked((v) => !v)}
+                  onToggle={() => toggleLike(currentTrack)}
                   accentColor={accentColor}
                 />
                 <DownloadButton
@@ -1238,6 +1440,12 @@ export default function NowPlayingScreen() {
           onClose={() => setIsInfoVisible(false)}
           accentColor={accentColor}
           track={currentTrack}
+          onAddToPlaylist={() => {
+            setIsInfoVisible(false);
+            setTimeout(() => {
+              setIsAddToPlaylistVisible(true);
+            }, 300);
+          }}
         />
 
         <QueueSheet
@@ -1251,6 +1459,12 @@ export default function NowPlayingScreen() {
           onClose={() => setIsInsightVisible(false)}
           track={currentTrack}
           accentColor={accentColor}
+        />
+
+        <AddToPlaylistSheet
+          visible={isAddToPlaylistVisible}
+          track={currentTrack}
+          onClose={() => setIsAddToPlaylistVisible(false)}
         />
       </Animated.View>
     </GestureHandlerRootView>
@@ -1618,7 +1832,34 @@ const s = StyleSheet.create({
     fontWeight: "800",
     color: "#FFF",
     letterSpacing: -0.5,
+    marginBottom: 6,
+  },
+  modalHeaderInfo: {
     marginBottom: 20,
+  },
+  modalSubtitle: {
+    fontSize: 15,
+    fontWeight: "500",
+    color: "rgba(255,255,255,0.54)",
+    fontFamily: Platform.OS === "ios" ? "System" : "sans-serif",
+  },
+  modalActionsList: {
+    maxHeight: SH * 0.45,
+    marginVertical: 12,
+  },
+  modalActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    borderBottomWidth: 0.5,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  modalActionLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.85)",
+    marginLeft: 14,
+    fontFamily: Platform.OS === "ios" ? "System" : "sans-serif-medium",
   },
   modalRow: {
     flexDirection: "row",
@@ -1664,5 +1905,50 @@ const s = StyleSheet.create({
     fontWeight: "900",
     color: "#FFF",
     letterSpacing: 1.5,
+  },
+  // Credits Styles
+  creditsContent: {
+    minHeight: 280,
+  },
+  creditsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  creditsBack: {
+    padding: 8,
+    marginLeft: -8,
+  },
+  creditsTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#FFF",
+    flex: 1,
+    textAlign: "center",
+    marginRight: 24, // balancing the back button
+  },
+  creditsList: {
+    gap: 16,
+  },
+  creditRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  creditLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.4)",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    width: 70,
+  },
+  creditValue: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.9)",
+    flex: 1,
+    textAlign: "right",
   },
 });

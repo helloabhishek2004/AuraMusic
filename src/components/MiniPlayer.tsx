@@ -179,33 +179,10 @@ function MiniPlayer({ offset = 0 }: MiniPlayerProps) {
 
   const gradientColors = useMemo(() => [accent, accentDeep] as const, [accent, accentDeep]);
 
-  // ── Skeleton state ──────────────────────────────────────────────────────────
+  // ── Only render if we have a track or are in active playback session
+  // Don't render skeleton on cold start when no session exists
   if (!track) {
-    return (
-      <Animated.View
-        style={[
-          styles.container,
-          { bottom, width: metrics.navWidth },
-          containerTransform,
-        ]}
-      >
-        {/* Skeleton glass shell */}
-        <View style={styles.skeletonShell}>
-          <BlurView intensity={52} tint="dark" style={StyleSheet.absoluteFill} />
-          <View style={[StyleSheet.absoluteFill, styles.glassBase]} />
-          <View style={[StyleSheet.absoluteFill, styles.glassBorder]} />
-          {/* Shimmer content */}
-          <View style={styles.skeletonContent}>
-            <Shimmer style={styles.skeletonArt} />
-            <View style={styles.skeletonMeta}>
-              <Shimmer style={styles.skeletonTitle} />
-              <Shimmer style={styles.skeletonArtist} />
-            </View>
-            <Shimmer style={styles.skeletonBtn} />
-          </View>
-        </View>
-      </Animated.View>
-    );
+    return null;
   }
 
   return (

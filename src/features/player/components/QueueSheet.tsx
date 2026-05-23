@@ -1,21 +1,3 @@
-/**
- * QueueSheet.tsx — iOS 26 Liquid Glass Edition
- *
- * Production-grade queue management:
- *  ✓ Reliable drag-to-reorder — position-tracked ghost row, live list mutation
- *  ✓ Haptic feedback: Medium on lift, Selection tick per slot, Light on drop
- *  ✓ Animated EQ bars (3 independent sin-wave loops, native driver)
- *  ✓ Now Playing card: glass tint, purple accent rim, waveform badge
- *  ✓ Row entrance: staggered FadeIn + slideY spring
- *  ✓ Dragging row: elevated glass + shadow + scale 1.04
- *  ✓ Swipe-to-delete: reveal red trash zone on left swipe
- *  ✓ Empty state: icon + copy with glass panel
- *  ✓ Full accessibility: labels, roles, min 44pt targets
- *  ✓ All Reanimated values on UI thread — zero JS jank
- *  ✓ Sheet itself slides up via withSpring, backdrop fades
- *  ✓ Gesture-dismiss: drag the handle bar down to close
- */
-
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
@@ -24,8 +6,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Dimensions,
-  Easing,
-  FlatList,
+  Easing as RNEasing,
   LayoutAnimation,
   Platform,
   Animated as RNAnimated,
@@ -35,11 +16,17 @@ import {
   UIManager,
   View,
 } from "react-native";
+import DraggableFlatList, {
+  RenderItemParams,
+  ScaleDecorator,
+  ShadowDecorator,
+} from "react-native-draggable-flatlist";
 import {
   State as GestureState,
   PanGestureHandler,
 } from "react-native-gesture-handler";
 import Animated, {
+  Easing,
   FadeIn,
   useAnimatedStyle,
   useSharedValue,
@@ -50,6 +37,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePlayerStore } from "../store/player.store";
 import { PlayerTrack } from "../types/player";
 import { QueueActionSheet } from "./QueueActionSheet";
+import AddToPlaylistSheet from "@/src/features/playlist/components/AddToPlaylistSheet";
 
 type AnimatedPanGestureEvent = {
   nativeEvent: {
@@ -59,30 +47,27 @@ type AnimatedPanGestureEvent = {
   };
 };
 
-// ─── Enable LayoutAnimation on Android ───────────────────────────────────────
-if (
-  Platform.OS === "android" &&
-  UIManager.setLayoutAnimationEnabledExperimental
-) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+// ─── LayoutAnimation setup (handled by platform defaults in new arch) ─────────────────
 
 const { width: SW, height: SH } = Dimensions.get("window");
 const isTablet = SW >= 768;
-const SHEET_H = SH * 0.82;
-const ROW_H = 76; // must be fixed for drag math
+const SHEET_H = SH * 0.88; // Slightly taller for better queue visibility
+const ROW_H = 76; 
 
-// Spring configs
-const SPR_SHEET = { damping: 26, stiffness: 200, mass: 0.9 };
-const SPR_ROW = { damping: 20, stiffness: 260, mass: 0.7 };
-const SPR_SCALE = { damping: 18, stiffness: 300, mass: 0.6 };
+// Spring configs - Refined for "buttery smooth" feel
+const SPR_SHEET = { damping: 24, stiffness: 220, mass: 0.8 };
+const SPR_ROW = { damping: 20, stiffness: 200 };
 
 // ─── Colour helpers ───────────────────────────────────────────────────────────
 const h2r = (hex: string, a: number) => {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${a})`;
+  try {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${a})`;
+  } catch (e) {
+    return `rgba(120,120,120,${a})`;
+  }
 };
 
 const SPEC_TOP = "rgba(255,255,255,0.20)";
@@ -121,7 +106,6 @@ const Glass = ({
         ]}
       />
     )}
-    {/* Top specular line */}
     <View
       pointerEvents="none"
       style={{
@@ -134,21 +118,6 @@ const Glass = ({
         zIndex: 9,
       }}
     />
-    {/* Left fresnel */}
-    <View
-      pointerEvents="none"
-      style={{
-        position: "absolute",
-        left: 6,
-        top: r * 0.3,
-        bottom: r * 0.3,
-        width: 2,
-        backgroundColor: "rgba(255,255,255,0.08)",
-        transform: [{ skewX: "-8deg" }],
-        zIndex: 9,
-      }}
-    />
-    {/* Border — bright top only */}
     <View
       pointerEvents="none"
       style={{
@@ -165,6 +134,7 @@ const Glass = ({
     {children}
   </View>
 );
+Glass.displayName = "Glass";
 
 // ─── Animated EQ bars ─────────────────────────────────────────────────────────
 const EqBars = React.memo(({ color }: { color: string }) => {
@@ -181,13 +151,13 @@ const EqBars = React.memo(({ color }: { color: string }) => {
           RNAnimated.timing(bar, {
             toValue: 1,
             duration: 340 + i * 90,
-            easing: Easing.inOut(Easing.sin),
+            easing: RNEasing.inOut(RNEasing.sin),
             useNativeDriver: true,
           }),
           RNAnimated.timing(bar, {
             toValue: 0.28,
             duration: 340 + i * 90,
-            easing: Easing.inOut(Easing.sin),
+            easing: RNEasing.inOut(RNEasing.sin),
             useNativeDriver: true,
           }),
         ]),
@@ -195,7 +165,7 @@ const EqBars = React.memo(({ color }: { color: string }) => {
     );
     anims.forEach((a) => a.start());
     return () => anims.forEach((a) => a.stop());
-  }, []);
+  }, [bars]);
 
   return (
     <View style={s.eqWrap}>
@@ -214,21 +184,7 @@ const EqBars = React.memo(({ color }: { color: string }) => {
     </View>
   );
 });
-
-// ─── Drag-reorder list ────────────────────────────────────────────────────────
-/**
- * We roll our own drag list instead of using DraggableFlatList (which has
- * peer-dep issues). Strategy:
- *  1. Each row has a PanGestureHandler restricted to vertical axis.
- *  2. On grant: snapshot draggedIndex, lift the row (scale + shadow).
- *  3. On move: compute hoverIndex = clamp(round(dy / ROW_H) + draggedIndex).
- *     When hoverIndex changes, commit a JS-side swap + LayoutAnimation smooth.
- *  4. On end: snap translateY back to 0, resolve final position.
- *
- * All scale/opacity values live on the UI thread via Reanimated shared values.
- * The list mutation (array swap) runs on JS thread but is cheap and guarded
- * by the LayoutAnimation spring for a natural gap-open/close effect.
- */
+EqBars.displayName = "EqBars";
 
 interface QueueSheetProps {
   isVisible: boolean;
@@ -243,7 +199,6 @@ export const QueueSheet = ({
 }: QueueSheetProps) => {
   const insets = useSafeAreaInsets();
   const queue = usePlayerStore((s) => s.queue);
-  const currentTrack = usePlayerStore((s) => s.currentTrack);
   const currentIndex = usePlayerStore((s) => s.currentIndex);
   const isShuffle = usePlayerStore((s) => s.isShuffle);
   const jumpToQueueIndex = usePlayerStore((s) => s.jumpToQueueIndex);
@@ -252,23 +207,22 @@ export const QueueSheet = ({
   const playNext = usePlayerStore((s) => s.playNext);
   const addToQueue = usePlayerStore((s) => s.addToQueue);
   const toggleShuffle = usePlayerStore((s) => s.toggleShuffle);
+  const currentTrack = usePlayerStore((s) => s.currentTrack);
+  const isReordering = usePlayerStore((s) => s.isReordering);
 
-  // Local copy for immediate drag feedback (avoid flickering from store round-trip)
+  // Local copy for smooth dragging
   const [localQueue, setLocalQueue] = useState<PlayerTrack[]>([]);
 
   useEffect(() => {
-    const upcoming =
-      currentIndex === -1 ? queue : queue.slice(currentIndex + 1);
-    setLocalQueue(upcoming);
-  }, [queue, currentIndex]);
+    if (!isReordering) {
+      setLocalQueue(queue);
+    }
+  }, [queue, isReordering]);
 
   // Action sheet state
   const [actionTrack, setActionTrack] = useState<PlayerTrack | null>(null);
   const [actionIndex, setActionIndex] = useState<number>(-1);
-
-  // Drag state
-  const [draggingIndex, setDraggingIndex] = useState<number>(-1);
-  const hoverIndexRef = useRef<number>(-1);
+  const [addToPlaylistTrack, setAddToPlaylistTrack] = useState<PlayerTrack | null>(null);
 
   // Sheet gesture-dismiss
   const handleY = useSharedValue(0);
@@ -276,21 +230,24 @@ export const QueueSheet = ({
 
   useEffect(() => {
     sheetAnim.value = withSpring(isVisible ? 0 : SHEET_H, SPR_SHEET);
-  }, [isVisible]);
+  }, [isVisible, sheetAnim]);
 
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: sheetAnim.value + Math.max(0, handleY.value) }],
+    opacity: withTiming(isVisible ? 1 : 0.9, { duration: 200 }),
   }));
 
   const backdropOpacity = useSharedValue(0);
   useEffect(() => {
-    backdropOpacity.value = withTiming(isVisible ? 1 : 0, { duration: 280 });
-  }, [isVisible]);
+    backdropOpacity.value = withTiming(isVisible ? 1 : 0, { 
+      duration: isVisible ? 240 : 300,
+      easing: Easing.out(Easing.cubic)
+    });
+  }, [isVisible, backdropOpacity]);
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: backdropOpacity.value,
   }));
 
-  // Handle-bar drag to dismiss
   const handleGesture = useCallback(
     (event: AnimatedPanGestureEvent) => {
       const { translationY, velocityY, state } = event.nativeEvent;
@@ -312,57 +269,38 @@ export const QueueSheet = ({
     [handleY, onClose],
   );
 
-  // ── Drag reorder ──────────────────────────────────────────────────────────
-
-  const commitReorder = useCallback(
-    (fromUpcoming: number, toUpcoming: number) => {
-      if (fromUpcoming === toUpcoming) return;
-      LayoutAnimation.configureNext({
-        duration: 220,
-        create: { type: "spring", property: "scaleY", springDamping: 0.85 },
-        update: { type: "spring", property: "scaleY", springDamping: 0.85 },
-        delete: { type: "spring", property: "scaleY", springDamping: 0.85 },
-      });
-      setLocalQueue((prev) => {
-        const next = [...prev];
-        const [moved] = next.splice(fromUpcoming, 1);
-        next.splice(toUpcoming, 0, moved);
-        return next;
-      });
-      Haptics.selectionAsync();
-    },
-    [],
-  );
-
   const onDragEnd = useCallback(
-    (fromUpcoming: number, finalUpcoming: number) => {
-      // Persist to store (absolute indices)
-      const from = currentIndex + 1 + fromUpcoming;
-      const to = currentIndex + 1 + finalUpcoming;
-      if (from !== to) reorderQueue(from, to);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setDraggingIndex(-1);
+    ({ data, from, to }: { data: PlayerTrack[]; from: number; to: number }) => {
+      setLocalQueue(data);
+      if (from !== to) {
+        reorderQueue(from, to);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
     },
-    [currentIndex, reorderQueue],
+    [reorderQueue],
   );
 
   const handleTrackPress = useCallback(
-    async (indexInUpcoming: number) => {
+    async (trackId: string) => {
+      const state = usePlayerStore.getState();
+      const index = state.queue.findIndex(t => t.id === trackId);
+      if (index === -1 || index === state.currentIndex) return;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const actualIndex = currentIndex + 1 + indexInUpcoming;
-      await jumpToQueueIndex(actualIndex);
+      await state.jumpToQueueIndex(index);
       onClose();
     },
-    [jumpToQueueIndex, currentIndex, onClose],
+    [onClose],
   );
 
   const handleMenuPress = useCallback(
-    (track: PlayerTrack, upcomingIndex: number) => {
+    (track: PlayerTrack) => {
+      const state = usePlayerStore.getState();
+      const index = state.queue.findIndex(t => t.id === track.id);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setActionTrack(track);
-      setActionIndex(currentIndex + 1 + upcomingIndex);
+      setActionIndex(index);
     },
-    [currentIndex],
+    [],
   );
 
   const handleRemove = useCallback(
@@ -373,6 +311,35 @@ export const QueueSheet = ({
     [removeFromQueue],
   );
 
+  const renderItem = useCallback(
+    ({ item, drag, isActive }: RenderItemParams<PlayerTrack>) => {
+      const isPlaying = item.id === currentTrack?.id;
+      
+      return (
+        <ScaleDecorator>
+          <ShadowDecorator>
+            <TouchableOpacity
+              onLongPress={drag}
+              disabled={isActive}
+              activeOpacity={1}
+            >
+              <QueueRow
+                item={item}
+                accentColor={accentColor}
+                isPlaying={isPlaying}
+                isActive={isActive}
+                onPress={() => handleTrackPress(item.id)}
+                onMenuPress={() => handleMenuPress(item)}
+                onDrag={drag}
+              />
+            </TouchableOpacity>
+          </ShadowDecorator>
+        </ScaleDecorator>
+      );
+    },
+    [currentTrack, accentColor, handleTrackPress, handleMenuPress],
+  );
+
   if (!isVisible && Platform.OS === "android") return null;
 
   return (
@@ -380,7 +347,6 @@ export const QueueSheet = ({
       style={[StyleSheet.absoluteFill, { zIndex: 1000 }]}
       pointerEvents={isVisible ? "auto" : "none"}
     >
-      {/* Backdrop */}
       <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]}>
         <TouchableOpacity
           style={StyleSheet.absoluteFill}
@@ -389,63 +355,41 @@ export const QueueSheet = ({
           accessibilityLabel="Close queue"
           accessibilityRole="button"
         >
-          <BlurView
-            intensity={28}
-            tint="dark"
-            style={StyleSheet.absoluteFill}
-          />
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              { backgroundColor: "rgba(0,0,0,0.55)" },
-            ]}
-          />
+          <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)" }]} />
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Sheet */}
-      <Animated.View
-        style={[s.sheet, sheetStyle, { paddingBottom: insets.bottom + 16 }]}
-      >
-        {/* Background layers */}
+      <Animated.View style={[s.sheet, sheetStyle, { paddingBottom: insets.bottom + 16 }]}>
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <BlurView
-            intensity={72}
-            tint="dark"
-            style={StyleSheet.absoluteFill}
-          />
+          <BlurView intensity={72} tint="dark" style={StyleSheet.absoluteFill} />
           <LinearGradient
             colors={["rgba(12,10,20,0.97)", "rgba(8,8,14,0.99)"]}
             style={StyleSheet.absoluteFill}
           />
-          {/* Purple ambient */}
           <LinearGradient
-            colors={[h2r(accentColor, 0.1), "transparent"]}
+            colors={[h2r(accentColor, 0.12), "transparent"]}
             start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 0.45 }}
+            end={{ x: 0.5, y: 0.4 }}
             style={StyleSheet.absoluteFill}
           />
-          {/* Top border glow */}
           <View style={s.sheetTopBorder} />
         </View>
 
-        {/* Handle + dismiss gesture */}
         <PanGestureHandler onGestureEvent={handleGesture}>
           <Animated.View style={s.handleArea}>
             <View style={s.handleBar} />
           </Animated.View>
         </PanGestureHandler>
 
-        {/* Header */}
         <View style={s.header}>
           <View>
-            <Text style={s.headerTitle}>Playing Queue</Text>
+            <Text style={s.headerTitle}>Queue</Text>
             <Text style={s.headerSubtitle}>
-              {localQueue.length} upcoming · {queue.length} total
+              {queue.length} tracks total
             </Text>
           </View>
           <View style={s.headerActions}>
-            {/* Shuffle */}
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -455,19 +399,11 @@ export const QueueSheet = ({
                 s.headerIconBtn,
                 isShuffle && { backgroundColor: h2r(accentColor, 0.18) },
               ]}
-              accessibilityLabel={
-                isShuffle ? "Disable shuffle" : "Enable shuffle"
-              }
+              accessibilityLabel={isShuffle ? "Disable shuffle" : "Enable shuffle"}
               accessibilityRole="button"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               {isShuffle && (
-                <View
-                  style={[
-                    s.headerIconBtnGlow,
-                    { backgroundColor: h2r(accentColor, 0.25) },
-                  ]}
-                />
+                <View style={[s.headerIconBtnGlow, { backgroundColor: h2r(accentColor, 0.25) }]} />
               )}
               <Ionicons
                 name="shuffle"
@@ -476,131 +412,39 @@ export const QueueSheet = ({
               />
             </TouchableOpacity>
 
-            {/* Close */}
             <TouchableOpacity
               onPress={onClose}
               style={s.closeBtn}
               accessibilityLabel="Close queue"
               accessibilityRole="button"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Ionicons name="close" size={20} color="rgba(255,255,255,0.80)" />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Now Playing */}
-        {currentTrack && (
-          <View style={s.nowPlayingWrap}>
-            <Text style={s.sectionLabel}>Now Playing</Text>
-            <Glass
-              r={22}
-              blur={50}
-              tintColor={h2r(accentColor, 0.09)}
-              style={[
-                s.nowPlayingCard,
-                { borderColor: h2r(accentColor, 0.28) },
-              ]}
-            >
-              <View style={s.nowPlayingInner}>
-                {/* Artwork */}
-                <View style={s.nowArtWrap}>
-                  <Image
-                    source={{ uri: currentTrack.art }}
-                    style={s.nowArt}
-                    contentFit="cover"
-                    transition={250}
-                  />
-                  <View
-                    style={[
-                      StyleSheet.absoluteFillObject,
-                      {
-                        borderRadius: 14,
-                        borderWidth: 1,
-                        borderColor: "rgba(255,255,255,0.12)",
-                      },
-                    ]}
-                  />
-                </View>
-
-                {/* Info */}
-                <View style={s.nowInfo}>
-                  <Text style={s.nowTitle} numberOfLines={1}>
-                    {currentTrack.title}
-                  </Text>
-                  <Text style={s.nowArtist} numberOfLines={1}>
-                    {currentTrack.artist}
-                  </Text>
-                </View>
-
-                {/* EQ */}
-                <EqBars color={accentColor} />
-              </View>
-            </Glass>
-          </View>
-        )}
-
-        {/* Up Next list */}
         <View style={s.listWrap}>
-          <View style={s.upNextRow}>
-            <Text style={s.sectionLabel}>Up Next</Text>
-            {localQueue.length > 0 && (
-              <Text style={s.dragHint}>Hold & drag to reorder</Text>
-            )}
-          </View>
-
-          <FlatList
+          <DraggableFlatList
             data={localQueue}
-            keyExtractor={(item, idx) => `${item.id}-${idx}`}
+            onDragEnd={onDragEnd}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            containerStyle={s.listContainer}
             contentContainerStyle={s.listContent}
             showsVerticalScrollIndicator={false}
-            scrollEnabled={draggingIndex === -1}
-            removeClippedSubviews={false}
-            // Prevent FlatList from re-rendering children unnecessarily
-            extraData={draggingIndex}
-            renderItem={({ item, index }) => (
-              <QueueRow
-                key={`${item.id}-${index}`}
-                item={item}
-                index={index}
-                accentColor={accentColor}
-                isDraggingThis={draggingIndex === index}
-                onPress={() => handleTrackPress(index)}
-                onMenuPress={() => handleMenuPress(item, index)}
-                onDragStart={() => {
-                  setDraggingIndex(index);
-                  hoverIndexRef.current = index;
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                }}
-                onDragMove={(dy) => {
-                  const newIndex = Math.round(dy / ROW_H) + index;
-                  const clamped = Math.max(
-                    0,
-                    Math.min(localQueue.length - 1, newIndex),
-                  );
-                  if (clamped !== hoverIndexRef.current) {
-                    commitReorder(hoverIndexRef.current, clamped);
-                    hoverIndexRef.current = clamped;
-                  }
-                }}
-                onDragEnd={(dy) => {
-                  const finalIndex = Math.max(
-                    0,
-                    Math.min(
-                      localQueue.length - 1,
-                      Math.round(dy / ROW_H) + index,
-                    ),
-                  );
-                  onDragEnd(index, hoverIndexRef.current);
-                }}
-              />
-            )}
+            activationDistance={10}
+            onPlaceholderIndexChange={() => Haptics.selectionAsync()}
             ListEmptyComponent={<EmptyState accentColor={accentColor} />}
+            ListHeaderComponent={() => (
+               <View style={s.listHeader}>
+                  <Text style={s.sectionLabel}>All Tracks</Text>
+                  <Text style={s.dragHint}>Long press & drag to reorder</Text>
+               </View>
+            )}
           />
         </View>
       </Animated.View>
 
-      {/* Action sheet */}
       <QueueActionSheet
         visible={actionTrack !== null}
         track={actionTrack}
@@ -608,202 +452,149 @@ export const QueueSheet = ({
           setActionTrack(null);
           setActionIndex(-1);
         }}
-        onPlayNext={(t) => {
-          playNext(t);
-        }}
-        onAddToQueue={(t) => {
-          addToQueue(t);
-        }}
+        onPlayNext={playNext}
+        onAddToQueue={addToQueue}
         onRemove={handleRemove}
+        onAddToPlaylist={(track) => setAddToPlaylistTrack(track)}
         trackIndex={actionIndex}
+      />
+      <AddToPlaylistSheet
+        visible={addToPlaylistTrack !== null}
+        track={addToPlaylistTrack}
+        onClose={() => setAddToPlaylistTrack(null)}
       />
     </View>
   );
 };
 
-// ─── Queue Row ────────────────────────────────────────────────────────────────
-// Drag is handled here with a PanGestureHandler. The row translates on the UI
-// thread while the parent JS-side list mutates with LayoutAnimation.
-
 interface QueueRowProps {
   item: PlayerTrack;
-  index: number;
   accentColor: string;
-  isDraggingThis: boolean;
+  isPlaying: boolean;
+  isActive: boolean;
   onPress: () => void;
   onMenuPress: () => void;
-  onDragStart: () => void;
-  onDragMove: (dy: number) => void;
-  onDragEnd: (dy: number) => void;
+  onDrag: () => void;
 }
 
 const QueueRow = React.memo(
   ({
     item,
-    index,
     accentColor,
-    isDraggingThis,
+    isPlaying,
+    isActive,
     onPress,
     onMenuPress,
-    onDragStart,
-    onDragMove,
-    onDragEnd,
+    onDrag,
   }: QueueRowProps) => {
-    const translateY = useSharedValue(0);
-    const scale = useSharedValue(1);
-    const elevation = useSharedValue(0);
-    const opacity = useSharedValue(1);
-    const glowOpacity = useSharedValue(0);
-
-    const startDy = useRef(0);
-
     const duration = item.duration ? Math.floor(item.duration / 1000) : 0;
     const mm = Math.floor(duration / 60);
     const ss = duration % 60;
     const durationText = `${mm}:${ss.toString().padStart(2, "0")}`;
 
-    // ── Drag gesture ───────────────────────────────────────────────────────────
-    const gestureHandler = useCallback(
-      (event: AnimatedPanGestureEvent) => {
-        const { translationY, state } = event.nativeEvent;
-        if (state === GestureState.BEGAN) {
-          scale.value = withSpring(1.04, SPR_SCALE);
-          opacity.value = withTiming(0.88, { duration: 120 });
-          elevation.value = withTiming(1, { duration: 100 });
-          glowOpacity.value = withTiming(1, { duration: 160 });
-          onDragStart();
-        } else if (state === GestureState.ACTIVE) {
-          translateY.value = translationY;
-          onDragMove(translationY);
-        } else if (
-          state === GestureState.END ||
-          state === GestureState.CANCELLED ||
-          state === GestureState.FAILED
-        ) {
-          onDragEnd(translationY);
-          translateY.value = withSpring(0, SPR_ROW);
-          scale.value = withSpring(1, SPR_SCALE);
-          opacity.value = withTiming(1, { duration: 200 });
-          elevation.value = withTiming(0, { duration: 200 });
-          glowOpacity.value = withTiming(0, { duration: 200 });
-        }
-      },
-      [onDragEnd, onDragMove, onDragStart],
-    );
+    const rowOpacity = useSharedValue(1);
+    useEffect(() => {
+      rowOpacity.value = withTiming(isActive ? 0.6 : 1, { duration: 150 });
+    }, [isActive, rowOpacity]);
 
     const rowStyle = useAnimatedStyle(() => ({
-      transform: [{ translateY: translateY.value }, { scale: scale.value }],
-      opacity: opacity.value,
-      zIndex: elevation.value > 0.5 ? 100 : 1,
-      // Android elevation
-      elevation: elevation.value * 16,
-    }));
-
-    const glowStyle = useAnimatedStyle(() => ({
-      opacity: glowOpacity.value,
+      opacity: rowOpacity.value,
+      transform: [{ scale: withSpring(isActive ? 1.05 : 1, { damping: 15 }) }],
     }));
 
     return (
       <Animated.View
-        entering={FadeIn.duration(180).delay(Math.min(index * 28, 420))}
-        style={[s.rowOuter, rowStyle]}
+        entering={FadeIn.duration(200)}
+        style={s.rowOuter}
       >
-        {/* Dragging glow ring */}
-        <Animated.View
-          style={[
-            s.rowGlow,
-            glowStyle,
-            { borderColor: h2r(accentColor, 0.55) },
-          ]}
-          pointerEvents="none"
-        />
-
-        <Glass
-          r={18}
-          blur={46}
-          style={s.rowGlass}
-          tintColor={isDraggingThis ? h2r(accentColor, 0.08) : undefined}
-        >
-          <View style={s.rowInner}>
-            {/* Drag handle — wrapped in PanGestureHandler */}
-            <PanGestureHandler onGestureEvent={gestureHandler} minDist={4}>
-              <Animated.View
+        <Animated.View style={rowStyle}>
+          <Glass
+            r={18}
+            blur={46}
+            style={[
+              s.rowGlass,
+              isPlaying && { borderColor: h2r(accentColor, 0.4), borderWidth: 1 },
+            ]}
+            tintColor={isPlaying ? h2r(accentColor, 0.1) : isActive ? h2r(accentColor, 0.15) : undefined}
+          >
+            <View style={s.rowInner}>
+              {/* Drag Handle */}
+              <TouchableOpacity
+                onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                onLongPress={onDrag}
                 style={s.dragHandle}
-                accessibilityLabel={`Drag to reorder ${item.title}`}
-                accessibilityRole="adjustable"
               >
                 <Ionicons
                   name="reorder-three"
                   size={22}
-                  color="rgba(255,255,255,0.28)"
+                  color={isPlaying ? accentColor : "rgba(255,255,255,0.22)"}
                 />
-              </Animated.View>
-            </PanGestureHandler>
+              </TouchableOpacity>
 
-            {/* Main press area */}
-            <TouchableOpacity
-              style={s.rowPressable}
-              onPress={onPress}
-              activeOpacity={0.75}
-              accessibilityRole="button"
-              accessibilityLabel={`Play ${item.title} by ${item.artist}`}
-            >
-              {/* Artwork */}
-              <View style={s.artWrap}>
-                <Image
-                  source={{ uri: item.art }}
-                  style={s.art}
-                  contentFit="cover"
-                  transition={200}
-                />
-                <View
-                  style={[
-                    StyleSheet.absoluteFillObject,
-                    {
-                      borderRadius: 12,
-                      borderWidth: 1,
-                      borderColor: "rgba(255,255,255,0.10)",
-                    },
-                  ]}
-                />
-              </View>
-
-              {/* Track info */}
-              <View style={s.trackInfo}>
-                <Text style={s.trackTitle} numberOfLines={1}>
-                  {item.title}
-                </Text>
-                <Text style={s.trackArtist} numberOfLines={1}>
-                  {item.artist}
-                </Text>
-              </View>
-
-              {/* Right: duration + menu */}
-              <View style={s.rowRight}>
-                <Text style={s.duration}>{durationText}</Text>
-                <TouchableOpacity
-                  onPress={onMenuPress}
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 8 }}
-                  style={s.menuBtn}
-                  accessibilityLabel="More options"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="ellipsis-horizontal"
-                    size={18}
-                    color="rgba(255,255,255,0.35)"
+              <TouchableOpacity
+                style={s.rowPressable}
+                onPress={onPress}
+                activeOpacity={0.7}
+              >
+                <View style={s.artWrap}>
+                  <Image
+                    source={{ uri: item.art }}
+                    style={s.art}
+                    contentFit="cover"
+                    transition={200}
                   />
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </Glass>
+                  <View
+                    style={[
+                      StyleSheet.absoluteFillObject,
+                      {
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: "rgba(255,255,255,0.08)",
+                      },
+                    ]}
+                  />
+                  {isPlaying && (
+                    <View style={s.rowEqOverlay}>
+                        <EqBars color={accentColor} />
+                    </View>
+                  )}
+                </View>
+
+                <View style={s.trackInfo}>
+                  <Text 
+                    style={[s.trackTitle, isPlaying && { color: accentColor }]} 
+                    numberOfLines={1}
+                  >
+                    {item.title}
+                  </Text>
+                  <Text style={s.trackArtist} numberOfLines={1}>
+                    {item.artist}
+                  </Text>
+                </View>
+
+                <View style={s.rowRight}>
+                  {!isPlaying && <Text style={s.duration}>{durationText}</Text>}
+                  <TouchableOpacity
+                    onPress={onMenuPress}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 8 }}
+                    style={s.menuBtn}
+                  >
+                    <Ionicons
+                      name="ellipsis-horizontal"
+                      size={18}
+                      color="rgba(255,255,255,0.3)"
+                    />
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </Glass>
+        </Animated.View>
       </Animated.View>
     );
   },
 );
-
-// ─── Empty State ──────────────────────────────────────────────────────────────
+QueueRow.displayName = "QueueRow";
 
 const EmptyState = ({ accentColor }: { accentColor: string }) => (
   <View style={s.emptyWrap}>
@@ -831,18 +622,15 @@ const EmptyState = ({ accentColor }: { accentColor: string }) => (
   </View>
 );
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const s = StyleSheet.create({
-  // Sheet
   sheet: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
     height: SHEET_H,
-    borderTopLeftRadius: 34,
-    borderTopRightRadius: 34,
+    borderTopLeftRadius: 36,
+    borderTopRightRadius: 36,
     overflow: "hidden",
   },
   sheetTopBorder: {
@@ -850,166 +638,103 @@ const s = StyleSheet.create({
     top: 0,
     left: 60,
     right: 60,
-    height: 1,
+    height: 1.5,
     backgroundColor: "rgba(255,255,255,0.25)",
-    borderRadius: 0.5,
+    borderRadius: 1,
   },
-
-  // Handle
   handleArea: {
     alignItems: "center",
-    paddingTop: 14,
-    paddingBottom: 10,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
   handleBar: {
-    width: 38,
+    width: 42,
     height: 5,
     borderRadius: 3,
-    backgroundColor: "rgba(255,255,255,0.20)",
+    backgroundColor: "rgba(255,255,255,0.18)",
   },
-
-  // Header
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 22,
-    paddingBottom: 20,
+    paddingHorizontal: 24,
+    paddingBottom: 16,
   },
   headerTitle: {
-    fontSize: isTablet ? 24 : 20,
+    fontSize: isTablet ? 26 : 22,
     fontWeight: "800",
     color: "#FFF",
-    letterSpacing: -0.5,
+    letterSpacing: -0.6,
   },
   headerSubtitle: {
     fontSize: 12,
-    fontWeight: "500",
-    color: "rgba(255,255,255,0.36)",
-    marginTop: 3,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.32)",
+    marginTop: 2,
   },
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
   },
   headerIconBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: "rgba(255,255,255,0.06)",
     justifyContent: "center",
     alignItems: "center",
-    overflow: "hidden",
     borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(255,255,255,0.1)",
   },
   headerIconBtnGlow: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 21,
+    borderRadius: 22,
   },
   closeBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: "rgba(255,255,255,0.08)",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 0.5,
     borderColor: "rgba(255,255,255,0.12)",
   },
-
-  // Now playing
-  nowPlayingWrap: {
-    paddingHorizontal: 22,
-    marginBottom: 18,
-  },
-  nowPlayingCard: {
-    borderWidth: 1,
-  },
-  nowPlayingInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 14,
-    gap: 14,
-  },
-  nowArtWrap: { position: "relative" },
-  nowArt: {
-    width: 58,
-    height: 58,
-    borderRadius: 14,
-  },
-  nowInfo: { flex: 1 },
-  nowTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#FFF",
-    letterSpacing: -0.2,
-  },
-  nowArtist: {
-    fontSize: 13,
-    color: "rgba(255,255,255,0.48)",
-    marginTop: 4,
-    fontWeight: "500",
-  },
-
-  // EQ bars
-  eqWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingRight: 4,
-  },
-  eqBar: {
-    width: 3,
-    height: 16,
-    borderRadius: 2,
-    transformOrigin: "bottom",
-  },
-
-  // Section labels
-  sectionLabel: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "rgba(255,255,255,0.30)",
-    textTransform: "uppercase",
-    letterSpacing: 1.3,
-    marginBottom: 10,
-  },
-
-  // List
   listWrap: { flex: 1 },
-  upNextRow: {
+  listContainer: { flex: 1 },
+  listContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 40,
+    gap: 10,
+  },
+  listHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 22,
-    marginBottom: 4,
+    paddingHorizontal: 8,
+    paddingBottom: 12,
+    paddingTop: 8,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "rgba(255,255,255,0.35)",
+    textTransform: "uppercase",
+    letterSpacing: 1.5,
   },
   dragHint: {
-    fontSize: 11,
-    color: "rgba(255,255,255,0.22)",
-    fontWeight: "500",
+    fontSize: 10,
+    color: "rgba(255,255,255,0.2)",
+    fontWeight: "600",
     fontStyle: "italic",
   },
-  listContent: {
-    paddingHorizontal: 14,
-    paddingBottom: 60,
-    gap: 8,
-  },
-
-  // Queue row
   rowOuter: {
-    // zIndex managed by animated style
-  },
-  rowGlow: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 18,
-    borderWidth: 1.5,
+    marginVertical: 0,
   },
   rowGlass: {
     borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.07)",
+    borderColor: "rgba(255,255,255,0.06)",
     minHeight: ROW_H,
   },
   rowInner: {
@@ -1018,39 +743,44 @@ const s = StyleSheet.create({
     minHeight: ROW_H,
   },
   dragHandle: {
-    paddingHorizontal: 14,
-    paddingVertical: 16,
+    paddingHorizontal: 12,
+    height: ROW_H,
     justifyContent: "center",
     alignItems: "center",
     minWidth: 44,
-    minHeight: 44,
   },
   rowPressable: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    paddingRight: 12,
+    paddingRight: 14,
     paddingVertical: 12,
-    gap: 13,
-    minHeight: 44,
+    gap: 14,
   },
   artWrap: { position: "relative", flexShrink: 0 },
   art: {
-    width: 50,
-    height: 50,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.06)",
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.05)",
+  },
+  rowEqOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
   },
   trackInfo: { flex: 1 },
   trackTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: "700",
     color: "#FFF",
-    letterSpacing: -0.1,
+    letterSpacing: -0.2,
   },
   trackArtist: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.40)",
+    fontSize: 13,
+    color: "rgba(255,255,255,0.42)",
     marginTop: 3,
     fontWeight: "500",
   },
@@ -1058,53 +788,60 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    flexShrink: 0,
   },
   duration: {
     fontSize: 12,
-    color: "rgba(255,255,255,0.30)",
+    color: "rgba(255,255,255,0.25)",
     fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
-    fontWeight: "500",
+    fontWeight: "600",
   },
   menuBtn: {
-    padding: 6,
-    minWidth: 32,
-    minHeight: 32,
+    padding: 8,
+    minWidth: 36,
     justifyContent: "center",
     alignItems: "center",
   },
-
-  // Empty
+  eqWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+  },
+  eqBar: {
+    width: 4,
+    height: 16,
+    borderRadius: 2,
+  },
   emptyWrap: {
     paddingHorizontal: 22,
-    paddingTop: 32,
+    paddingTop: 48,
   },
   emptyGlass: {
-    padding: 32,
+    padding: 40,
     alignItems: "center",
-    overflow: "hidden",
     borderWidth: 0.5,
     borderColor: "rgba(255,255,255,0.08)",
   },
-  emptyIconWrap: { marginBottom: 20 },
+  emptyIconWrap: { marginBottom: 24 },
   emptyIconBg: {
-    width: 68,
-    height: 68,
-    borderRadius: 20,
+    width: 72,
+    height: 72,
+    borderRadius: 24,
     justifyContent: "center",
     alignItems: "center",
   },
   emptyTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "800",
     color: "#FFF",
-    letterSpacing: -0.4,
-    marginBottom: 8,
+    letterSpacing: -0.5,
+    marginBottom: 10,
   },
   emptySub: {
-    fontSize: 14,
-    color: "rgba(255,255,255,0.35)",
+    fontSize: 15,
+    color: "rgba(255,255,255,0.38)",
     textAlign: "center",
-    lineHeight: 20,
+    lineHeight: 22,
   },
 });
+

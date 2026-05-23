@@ -20,6 +20,10 @@ import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { usePlaylistStore } from '@/src/features/playlist/store/playlist.store';
+import { useDownloadStore } from '@/src/features/download/store/download.store';
+import type { PlayerTrack } from '@/src/features/player/types/player';
+import { musicService } from '@/src/services/api/music';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const isTablet = SW >= 768;
@@ -52,22 +56,13 @@ const h2r = (hex: string, a: number) => {
    return `rgba(${r},${g},${b},${a})`;
 };
 
-// ── Full song catalogue (for search + suggested) ──────────────────────────────
-const ALL_SONGS = [
-   { id: '1', title: 'Electric Dreams', artist: 'Neon Pulse', art: 'https://picsum.photos/seed/ed/200' },
-   { id: '2', title: 'Urban Echoes', artist: 'Lofi Soul', art: 'https://picsum.photos/seed/ue/200' },
-   { id: '3', title: 'Midnight Voyage', artist: 'The Explorers', art: 'https://picsum.photos/seed/mv/200' },
-   { id: '4', title: 'Crystal Rain', artist: 'Aurora Drift', art: 'https://picsum.photos/seed/cr/200' },
-   { id: '5', title: 'Neon Horizon', artist: 'Synthwave City', art: 'https://picsum.photos/seed/nh/200' },
-   { id: '6', title: 'Void Walker', artist: 'Deep Bass Theory', art: 'https://picsum.photos/seed/vw/200' },
-   { id: '7', title: 'Solar Flare', artist: 'Cosmic Echo', art: 'https://picsum.photos/seed/sf/200' },
-   { id: '8', title: 'Spectral Drift', artist: 'Aether Flow', art: 'https://picsum.photos/seed/sd/200' },
-   { id: '9', title: 'Quantum Bloom', artist: 'The Synthesizer', art: 'https://picsum.photos/seed/qb/200' },
-   { id: '10', title: 'Starbound Journey', artist: 'Nebula Voyager', art: 'https://picsum.photos/seed/sj/200' },
-   { id: '11', title: 'Luminous Path', artist: 'Lofi Dreamer', art: 'https://picsum.photos/seed/lp/200' },
-   { id: '12', title: 'Cascade Waves', artist: 'Calm Horizon', art: 'https://picsum.photos/seed/cw/200' },
-];
+// ── ID generator ─────────────────────────────────────────────────────────────
+function generatePlaylistId(): string {
+   return `pl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
 const MOODS = ['#Chill', '#Workout', '#Focus', '#Sleep', '#Party'];
+
 
 // ── 4-Layer Liquid Glass ──────────────────────────────────────────────────────
 const Glass = ({ children, style, r = 20, blur = 60, accent = false }: any) => (
@@ -158,7 +153,7 @@ const TrackRow = ({ track, added, onToggle }: any) => {
          Animated.spring(sc, { toValue: 1.0, ...PP, useNativeDriver: true }),
       ]).start();
       Animated.timing(bg, { toValue: added ? 0 : 1, duration: 250, useNativeDriver: false }).start();
-      onToggle(track.id);
+      onToggle(track);
    };
 
    const btnBg = bg.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0.07)', h2r(C.primary, 0.20)] });
@@ -196,7 +191,7 @@ const TrackRow = ({ track, added, onToggle }: any) => {
 };
 
 // ── Cover art placeholder ────────────────────────────────────────────────────
-const CoverArt = ({ addedTracks }: { addedTracks: string[] }) => {
+const CoverArt = ({ addedTracks, allSongs }: { addedTracks: string[]; allSongs: PlayerTrack[] }) => {
    const pulse = useRef(new Animated.Value(1)).current;
    useEffect(() => {
       Animated.loop(Animated.sequence([
@@ -205,7 +200,15 @@ const CoverArt = ({ addedTracks }: { addedTracks: string[] }) => {
       ])).start();
    }, []);
 
-   const firstThree = addedTracks.slice(0, 4);
+   const firstFour = addedTracks.slice(0, 4);
+   
+   // Combine all downloaded tracks and online tracks for the cover art
+   const storeSongs = useMemo(() => Object.values(useDownloadStore.getState().downloadedTracks) as PlayerTrack[], []);
+   const displayTracks = useMemo(() => {
+      // Find track objects in allSongs first, fallback to a dummy if missing
+      return firstFour.map(id => storeSongs.find(t => t.id === id) || allSongs.find(t => t.id === id) || { id, art: '' });
+   }, [firstFour, storeSongs, allSongs]);
+
    return (
       <Animated.View style={[s.coverOuter, { transform: [{ scale: pulse }] }]}>
          <Glass style={s.coverBox} r={28} blur={40}>
@@ -214,15 +217,16 @@ const CoverArt = ({ addedTracks }: { addedTracks: string[] }) => {
                colors={[h2r(C.primaryDp, 0.55), h2r(C.primaryMid, 0.30), 'transparent']}
                style={StyleSheet.absoluteFill}
             />
-            {firstThree.length === 0 ? (
+            {firstFour.length === 0 ? (
                <View style={s.coverEmpty}>
                   <Ionicons name="musical-note" size={64} color={h2r(C.primary, 0.35)} />
                   <Text style={s.coverHint}>Add tracks to{'\n'}preview cover</Text>
                </View>
             ) : (
                <View style={s.coverGrid}>
-                  {ALL_SONGS.filter(t => firstThree.includes(t.id)).map((t, i) => (
-                     <Image key={t.id} source={{ uri: t.art }} style={[s.coverGridImg, firstThree.length === 1 && { width: 180, height: 180, borderRadius: 20 }]} contentFit="cover" />
+                  {displayTracks.map((t: any) => (
+                     t.art ? <Image key={t.id} source={{ uri: t.art }} style={[s.coverGridImg, firstFour.length === 1 && { width: 180, height: 180, borderRadius: 20 }]} contentFit="cover" />
+                           : <View key={t.id} style={[s.coverGridImg, { backgroundColor: 'rgba(255,255,255,0.05)' }]} />
                   ))}
                </View>
             )}
@@ -230,12 +234,12 @@ const CoverArt = ({ addedTracks }: { addedTracks: string[] }) => {
             <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }} />
             {/* top specular arc */}
             <View style={{ position: 'absolute', top: 0, left: 28, right: 28, height: 1.5, backgroundColor: 'rgba(255,255,255,0.24)' }} />
-            {/* drop shadow bloom */}
          </Glass>
          <View style={s.coverGlow} />
       </Animated.View>
    );
 };
+
 
 // ── MAIN SCREEN ───────────────────────────────────────────────────────────────
 export default function CreatePlaylistScreen() {
@@ -243,11 +247,25 @@ export default function CreatePlaylistScreen() {
    const router = useRouter();
 
    const [name, setName] = useState('');
-   const [desc, setDesc] = useState('');
    const [mood, setMood] = useState('#Chill');
    const [query, setQuery] = useState('');
    const [added, setAdded] = useState<string[]>([]);
+   const [selectedOnlineTracks, setSelectedOnlineTracks] = useState<Record<string, PlayerTrack>>({});
    const [showAll, setShowAll] = useState(false);
+
+   // Auto-focus name input on mount for premium UX
+   const nameInputRef = useRef<TextInput>(null);
+   useEffect(() => {
+      const timer = setTimeout(() => nameInputRef.current?.focus(), 350);
+      return () => clearTimeout(timer);
+   }, []);
+
+   // Real downloaded tracks as catalogue source
+   const downloadedTracks = useDownloadStore(s => s.downloadedTracks);
+   const allSongs = useMemo(
+      () => Object.values(downloadedTracks) as PlayerTrack[],
+      [downloadedTracks]
+   );
 
    // Animated bg
    const bgP = useRef(new Animated.Value(0)).current;
@@ -260,32 +278,132 @@ export default function CreatePlaylistScreen() {
    }, []);
    const b1Op = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: [0.14, 0.22, 0.10] });
    const b2Op = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: [0.08, 0.14, 0.18] });
-   const b1T = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: ['-5%', '10%', '-8%'] });
+   const b1T  = bgP.interpolate({ inputRange: [0, 1, 2], outputRange: ['-5%', '10%', '-8%'] });
 
-   // Real-time search filter
+   // Filter from real downloaded tracks
    const filtered = useMemo(() => {
-      if (!query.trim()) return showAll ? ALL_SONGS : ALL_SONGS.slice(0, 3);
-      return ALL_SONGS.filter(t =>
+      if (allSongs.length === 0) return [];
+      if (!query.trim()) return showAll ? allSongs : allSongs.slice(0, 5);
+      return allSongs.filter(t =>
          t.title.toLowerCase().includes(query.toLowerCase()) ||
          t.artist.toLowerCase().includes(query.toLowerCase())
       );
-   }, [query, showAll]);
+   }, [allSongs, query, showAll]);
 
-   const toggleAdded = useCallback((id: string) => {
-      setAdded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-   }, []);
+   // Online search integration
+   const [onlineResults, setOnlineResults] = useState<PlayerTrack[]>([]);
+   const [isSearching, setIsSearching] = useState(false);
+   const abortControllerRef = useRef<AbortController | null>(null);
+
+   useEffect(() => {
+      const trimmed = query.trim();
+      if (trimmed.length < 2) {
+         setOnlineResults([]);
+         setIsSearching(false);
+         if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+         }
+         return;
+      }
+
+      if (abortControllerRef.current) {
+         abortControllerRef.current.abort();
+      }
+      const ac = new AbortController();
+      abortControllerRef.current = ac;
+
+      const timer = setTimeout(async () => {
+         setIsSearching(true);
+         try {
+            const results = await musicService.searchSongs(query);
+            if (!ac.signal.aborted) {
+               const downloadedIds = new Set(allSongs.map(s => s.id));
+               const newTracks: PlayerTrack[] = results
+                  .filter(r => !downloadedIds.has(r.id))
+                  .slice(0, 5)
+                  .map(r => ({
+                     id: r.id,
+                     title: r.title,
+                     artist: r.artist || 'Unknown',
+                     art: r.art || '',
+                     url: '',
+                     albumId: r.albumId,
+                     album: r.album,
+                     source: r.source || 'ytmusic',
+                     duration: typeof r.duration === 'string' ? r.duration.split(':').reduce((acc, time) => (60 * acc) + +time, 0) * 1000 : 0,
+                     isLocal: false
+                  }));
+               setOnlineResults(newTracks);
+            }
+         } catch (e: any) {
+            if (e.name !== 'AbortError' && e.name !== 'CanceledError') {
+               console.warn('[Online Search] Failed:', e);
+            }
+         } finally {
+            if (!ac.signal.aborted) {
+               setIsSearching(false);
+            }
+         }
+      }, 400);
+
+      return () => {
+         clearTimeout(timer);
+      };
+   }, [query, allSongs]);
+
+   const toggleAdded = useCallback((track: PlayerTrack) => {
+      setAdded(prev => {
+         const isAdding = !prev.includes(track.id);
+         return isAdding ? [...prev, track.id] : prev.filter(x => x !== track.id);
+      });
+
+      setSelectedOnlineTracks(currentDict => {
+         const isAddingDict = !currentDict[track.id] && !allSongs.some(t => t.id === track.id);
+         const isRemovingDict = !!currentDict[track.id];
+         
+         if (isAddingDict) {
+            return { ...currentDict, [track.id]: track };
+         } else if (isRemovingDict) {
+            const newDict = { ...currentDict };
+            delete newDict[track.id];
+            return newDict;
+         }
+         return currentDict;
+      });
+   }, [allSongs]);
 
    const backP = useP();
    const createP = useP();
 
    const handleCreate = () => {
-      if (!name.trim()) {
+      const trimmedName = name.trim();
+      if (!trimmedName) {
          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
          Alert.alert('Name required', 'Please give your playlist a name.');
          return;
       }
+
+      const newId = generatePlaylistId();
+
+      // Create and populate playlist in the store synchronously first
+      const store = usePlaylistStore.getState();
+      store.createPlaylist(newId, trimmedName, undefined, mood || undefined);
+      if (added.length > 0) {
+         const finalTracks = added.map(id => {
+            const localMatch = allSongs.find(t => t.id === id);
+            if (localMatch) return localMatch;
+            return selectedOnlineTracks[id];
+         }).filter(Boolean) as PlayerTrack[];
+         
+         if (finalTracks.length > 0) {
+            store.addMultipleTracks(newId, finalTracks);
+         }
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Playlist Created!', `"${name}" has been created with ${added.length} track${added.length !== 1 ? 's' : ''}.`);
+
+      // Perform instant route transition
+      Keyboard.dismiss();
+      router.replace(`/playlist/${newId}`);
    };
 
    return (
@@ -332,7 +450,7 @@ export default function CreatePlaylistScreen() {
             contentInsetAdjustmentBehavior="automatic"
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingHorizontal: PAD, paddingTop: 20, paddingBottom: 180 }}
+            contentContainerStyle={{ paddingHorizontal: PAD, paddingTop: 20, paddingBottom: 260 }}
          >
             {/* Hero text */}
             <Mat delay={60}>
@@ -347,7 +465,7 @@ export default function CreatePlaylistScreen() {
             {/* Cover art */}
             <Mat delay={120}>
                <View style={s.coverWrap}>
-                  <CoverArt addedTracks={added} />
+                  <CoverArt addedTracks={added} allSongs={allSongs} />
                   {/* Auto generate cover pill */}
                   <TouchableOpacity style={s.autoGenBtn} activeOpacity={0.85}>
                      <Glass style={s.autoGenGlass} r={22} blur={50} accent>
@@ -368,6 +486,7 @@ export default function CreatePlaylistScreen() {
                      <Text style={s.inputLabel}>PLAYLIST NAME</Text>
                      <View style={s.nameInputWrap}>
                         <TextInput
+                           ref={nameInputRef}
                            placeholder="Late Night Jazz..."
                            placeholderTextColor={C.placeholder}
                            style={s.nameInput}
@@ -377,22 +496,6 @@ export default function CreatePlaylistScreen() {
                            onSubmitEditing={() => Keyboard.dismiss()}
                         />
                      </View>
-                  </View>
-
-                  {/* Description — glass dark */}
-                  <View style={s.inputGroup}>
-                     <Text style={s.inputLabel}>DESCRIPTION</Text>
-                     <Glass style={s.descWrap} r={20} blur={50}>
-                        <TextInput
-                           placeholder="Describe the vibe of this collection..."
-                           placeholderTextColor={C.dim}
-                           style={s.descInput}
-                           multiline
-                           value={desc}
-                           onChangeText={setDesc}
-                           textAlignVertical="top"
-                        />
-                     </Glass>
                   </View>
                </View>
             </Mat>
@@ -436,7 +539,7 @@ export default function CreatePlaylistScreen() {
                      clearButtonMode="while-editing"
                   />
                   {query.length > 0 && (
-                     <TouchableOpacity onPress={() => setQuery('')} style={s.clearBtn}>
+                     <TouchableOpacity onPress={() => { setQuery(''); setOnlineResults([]); setIsSearching(false); }} style={s.clearBtn}>
                         <Ionicons name="close-circle" size={18} color={C.dim} />
                      </TouchableOpacity>
                   )}
@@ -445,7 +548,17 @@ export default function CreatePlaylistScreen() {
 
             {/* Track list */}
             <View style={s.trackList}>
-               {filtered.length === 0 ? (
+               {allSongs.length === 0 ? (
+                  <Mat delay={0}>
+                     <View style={s.emptySearch}>
+                        <Ionicons name="cloud-download-outline" size={36} color={C.dim} />
+                        <Text style={s.emptyText}>No downloaded songs</Text>
+                        <Text style={[s.emptyText, { fontSize: 13, marginTop: 4 }]}>
+                           Download tracks first to add them here
+                        </Text>
+                     </View>
+                  </Mat>
+               ) : filtered.length === 0 && onlineResults.length === 0 && !isSearching ? (
                   <Mat delay={0}>
                      <View style={s.emptySearch}>
                         <Ionicons name="search-outline" size={36} color={C.dim} />
@@ -453,11 +566,43 @@ export default function CreatePlaylistScreen() {
                      </View>
                   </Mat>
                ) : (
-                  filtered.map((track, idx) => (
-                     <Mat key={track.id} delay={idx * 40}>
-                        <TrackRow track={track} added={added.includes(track.id)} onToggle={toggleAdded} />
-                     </Mat>
-                  ))
+                  <>
+                     {filtered.length > 0 && (
+                        <View style={{ marginBottom: query.length >= 2 ? 24 : 0 }}>
+                           <Text style={[s.sectionTitle, { marginLeft: 4, marginBottom: 8, fontSize: 13, color: C.dim }]}>Downloaded</Text>
+                           {filtered.map((track, idx) => (
+                              <Mat key={track.id} delay={idx * 40}>
+                                 <TrackRow track={track} added={added.includes(track.id)} onToggle={toggleAdded} />
+                              </Mat>
+                           ))}
+                        </View>
+                     )}
+                     
+                     {query.length >= 2 && (
+                        <View>
+                           <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 4, marginBottom: 8, gap: 8 }}>
+                              <Text style={[s.sectionTitle, { fontSize: 13, color: C.dim }]}>Online Results</Text>
+                              {isSearching && <Animated.View style={{ opacity: 0.7 }}><Ionicons name="sync" size={14} color={C.accent} /></Animated.View>}
+                           </View>
+                           
+                           {onlineResults.length > 0 ? (
+                              onlineResults.map((track, idx) => (
+                                 <Mat key={track.id} delay={(filtered.length + idx) * 40}>
+                                    <TrackRow track={track} added={added.includes(track.id)} onToggle={toggleAdded} />
+                                 </Mat>
+                              ))
+                           ) : isSearching ? (
+                              <View style={{ padding: 16, alignItems: 'center' }}>
+                                 <Text style={{ color: C.dim, fontSize: 13, fontFamily: 'Inter_500Medium' }}>Searching online...</Text>
+                              </View>
+                           ) : (
+                              <View style={{ padding: 16, alignItems: 'center' }}>
+                                 <Text style={{ color: C.dim, fontSize: 13, fontFamily: 'Inter_500Medium' }}>No online matches</Text>
+                              </View>
+                           )}
+                        </View>
+                     )}
+                  </>
                )}
             </View>
 
@@ -473,38 +618,28 @@ export default function CreatePlaylistScreen() {
                   </View>
                </Mat>
             )}
-         </ScrollView>
 
-         {/* ── STICKY FOOTER ─────────────────────────────────────────────────── */}
-         <View style={[s.footer, { paddingBottom: insets.bottom + 20 }]}>
-            {/* Fade overlay */}
-            <LinearGradient
-               colors={['transparent', 'rgba(13,13,18,0.80)', C.bg]}
-               style={s.footerFade}
-               pointerEvents="none"
-            />
-            <Animated.View style={[{ width: '100%' }, { transform: [{ scale: createP.sc }] }]}>
-               <TouchableOpacity
-                  style={s.createBtn}
-                  onPressIn={createP.onIn} onPressOut={createP.onOut}
-                  onPress={handleCreate} activeOpacity={1}
-               >
-                  {/* 4-layer glass pill button */}
-                  <LinearGradient
-                     colors={[C.primary, C.primaryMid, C.primaryDp]}
-                     start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                     style={StyleSheet.absoluteFill}
-                  />
-                  {/* specular top arc */}
-                  <View style={{ position: 'absolute', top: 4, left: 32, right: 32, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.30)' }} />
-                  {/* specular left */}
-                  <View style={{ position: 'absolute', left: 14, top: 10, width: 28, bottom: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.16)', transform: [{ skewX: '-8deg' }] }} />
-                  {/* refraction */}
-                  <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 32, borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)', backgroundColor: 'rgba(255,255,255,0.04)' }} />
-                  <Text style={s.createText}>Create Playlist</Text>
-               </TouchableOpacity>
-            </Animated.View>
-         </View>
+            {/* Create Playlist Button inside ScrollView flow */}
+            <Mat delay={420}>
+               <Animated.View style={[{ width: '100%', marginTop: 40, marginBottom: insets.bottom + 60 }, { transform: [{ scale: createP.sc }] }]}>
+                  <TouchableOpacity
+                     style={s.createBtn}
+                     onPressIn={createP.onIn} onPressOut={createP.onOut}
+                     onPress={handleCreate} activeOpacity={1}
+                  >
+                     <LinearGradient
+                        colors={[C.primary, C.primaryMid, C.primaryDp]}
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                        style={StyleSheet.absoluteFill}
+                     />
+                     <View style={{ position: 'absolute', top: 4, left: 32, right: 32, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.30)' }} />
+                     <View style={{ position: 'absolute', left: 14, top: 10, width: 28, bottom: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.16)', transform: [{ skewX: '-8deg' }] }} />
+                     <View style={{ ...StyleSheet.absoluteFillObject, borderRadius: 32, borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)', backgroundColor: 'rgba(255,255,255,0.04)' }} />
+                     <Text style={s.createText}>Create Playlist</Text>
+                  </TouchableOpacity>
+               </Animated.View>
+            </Mat>
+         </ScrollView>
       </View>
    );
 }

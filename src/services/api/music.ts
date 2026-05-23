@@ -27,9 +27,13 @@ function mapSongResult(item: any): SearchEntity | null {
     type: 'song',
     id: item.videoId,
     title: item.title,
-    artist: item.artist || item.artists?.[0]?.name || 'Unknown',
+    artist: Array.isArray(item.artists) && item.artists.length > 0
+      ? item.artists.map((a: any) => a.name).join(', ')
+      : (item.artist || 'Unknown'),
     art: item.thumbnail || getBestThumbnail(item.thumbnails),
     duration: item.duration || '--:--',
+    album: item.album?.name || (typeof item.album === 'string' ? item.album : undefined),
+    albumId: item.album?.id || undefined,
     source: 'ytmusic',
   };
 }
@@ -41,10 +45,13 @@ function mapBackendSongToMusicTrack(song: any): MusicTrack {
   return {
     id: song.id || song.videoId,
     title: song.title,
-    artist: song.artist,
+    artist: Array.isArray(song.artists) && song.artists.length > 0
+      ? song.artists.map((a: any) => a.name).join(', ')
+      : (song.artist || 'Unknown'),
     art: song.thumbnail,
     duration: song.duration,
-    album: song.album,
+    album: song.album?.name || (typeof song.album === 'string' ? song.album : undefined),
+    albumId: song.album?.id || song.albumId || undefined,
     source: song.source || 'ytmusic',
   };
 }

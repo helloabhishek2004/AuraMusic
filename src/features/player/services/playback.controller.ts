@@ -102,6 +102,9 @@ export class PlaybackController {
 
     // 3. Media Item Transition (Sync currentIndex)
     TrackPlayer.addEventListener(Event.MediaItemTransition, (data) => {
+      const { PlaybackService } = require('./playback.service');
+      if (PlaybackService.isReorderingQueue()) return;
+
       const store = usePlayerStore.getState();
       if (!data.item) return;
 
@@ -118,6 +121,13 @@ export class PlaybackController {
         
         const validTrack = transitionManager.validatePreload(trackToUse) ? trackToUse : nextTrack;
         
+        // If the track is a dummy/unresolved item, we must properly resolve it via setTrack
+        const { isResolvedUrl } = require('../utils/track-resolver');
+        if (!validTrack.isLocal && !isResolvedUrl(validTrack.url)) {
+            usePlayerStore.getState().setTrack(nextTrack);
+            return;
+        }
+
         usePlayerStore.setState({ 
           currentIndex: newIndex, 
           currentTrack: validTrack,

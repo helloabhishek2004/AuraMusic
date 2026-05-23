@@ -20,8 +20,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { useMusic } from '@/src/context/MusicContext';
+import { usePlayerStore } from '@/src/features/player/store/player.store';
 import { useMusicNavigation } from '@/src/navigation/music-navigation';
 import { useDownloadStore } from '@/src/features/download/store/download.store';
+import { useLikesStore } from '@/src/features/likes/store/likes.store';
 import { DownloadManager } from '@/src/features/download/services/download.manager';
 
 const { width: SW, height: SH } = Dimensions.get('window');
@@ -342,6 +344,9 @@ const TrackCard = React.memo(({ track, onPress, onArtistPress, variant = 'compac
   const activeTasks = useDownloadStore(s => s.activeTasks);
   const addDownload = useDownloadStore(s => s.addDownload);
 
+  const isLiked = useLikesStore((s) => !!s.likedTrackIds[track.id]);
+  const toggleLike = useLikesStore((s) => s.toggleLike);
+
   const downloaded = !!downloadedTracks[track.id];
   const task = activeTasks[track.id];
   const downloading = task?.status === 'downloading' || task?.status === 'queued';
@@ -391,6 +396,21 @@ const TrackCard = React.memo(({ track, onPress, onArtistPress, variant = 'compac
                   }
                 }}
               />
+              <TouchableOpacity
+                onPress={(e) => {
+                  e.stopPropagation();
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  toggleLike({ ...track, art: track.image });
+                }}
+                activeOpacity={0.6}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons
+                  name={isLiked ? "heart" : "heart-outline"}
+                  size={24}
+                  color={isLiked ? C.primary : C.textSecondary}
+                />
+              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -413,6 +433,22 @@ const TrackCard = React.memo(({ track, onPress, onArtistPress, variant = 'compac
                 }
               }}
             />
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                toggleLike({ ...track, art: track.image });
+              }}
+              activeOpacity={0.6}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={{ marginTop: 12 }}
+            >
+              <Ionicons
+                name={isLiked ? "heart" : "heart-outline"}
+                size={22}
+                color={isLiked ? C.primary : C.textSecondary}
+              />
+            </TouchableOpacity>
           </View>
         )}
       </PremiumGlass>
@@ -656,21 +692,28 @@ export default function HomeScreen() {
     },
   ];
 
-  const { setTrack } = useMusic();
+  const { setQueue } = useMusic();
+  const setActiveContext = usePlayerStore(s => s.setActiveContext);
 
   const handlePlayPress = useCallback((track: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    setTrack({
-      id: track.id,
-      url: trackUrls[track.id] ?? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3',
-      title: track.title,
-      artist: track.artist,
-      art: track.image,
+    
+    setActiveContext({ type: 'home', id: 'home' });
+    
+    const idx = tracks.findIndex(t => t.id === track.id);
+    const queueTracks = tracks.map(t => ({
+      id: t.id,
+      url: trackUrls[t.id] ?? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3',
+      title: t.title,
+      artist: t.artist,
+      art: t.image,
       duration: 240,
       dominantColors: ['#bf5af2', '#1a0033'],
-    });
+    }));
+    
+    setQueue(queueTracks as any, idx !== -1 ? idx : 0);
     goNowPlaying(track.id);
-  }, [goNowPlaying, setTrack]);
+  }, [goNowPlaying, setQueue, tracks, setActiveContext]);
 
   const displayedTracks = expandedContinueListening ? tracks : tracks.slice(0, 2);
 

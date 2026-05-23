@@ -11,7 +11,7 @@
  * ✓ All interactive elements spring-animated on press
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated as RNAnimated,
   Dimensions,
@@ -38,6 +38,7 @@ import { PlayerTrack } from '../types/player';
 import { palette, radius, spacing } from '@/src/design/tokens';
 import { useDownloadStore } from '../../download/store/download.store';
 import { DownloadManager } from '../../download/services/download.manager';
+import AddToPlaylistSheet from '@/src/features/playlist/components/AddToPlaylistSheet';
 
 const { width: SW } = Dimensions.get('window');
 const isTablet = SW >= 768;
@@ -180,6 +181,7 @@ interface QueueActionSheetProps {
   onPlayNext: (track: PlayerTrack) => void;
   onAddToQueue: (track: PlayerTrack) => void;
   onRemove: (index: number) => void;
+  onAddToPlaylist: (track: PlayerTrack) => void;
   trackIndex: number;
 }
 
@@ -190,9 +192,11 @@ export const QueueActionSheet = ({
   onPlayNext,
   onAddToQueue,
   onRemove,
+  onAddToPlaylist,
   trackIndex,
 }: QueueActionSheetProps) => {
   const insets = useSafeAreaInsets();
+  const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
 
   if (!visible || !track) return null;
 
@@ -315,6 +319,15 @@ export const QueueActionSheet = ({
             onPress={handleAddToQueue}
           />
           <ActionBtn
+            icon="list"
+            label="Add to Playlist"
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onClose();
+              setTimeout(() => onAddToPlaylist(track), 150);
+            }}
+          />
+          <ActionBtn
             icon={isDownloaded ? "trash-outline" : "cloud-download-outline"}
             label={isDownloaded ? "Remove Download" : (isDownloading ? "Downloading..." : "Download")}
             onPress={handleDownload}
@@ -349,10 +362,11 @@ export const QueueActionSheet = ({
             onPress={onClose}
           />
         </View>
-      </Animated.View>
-    </View>
-  );
+        </Animated.View>
+      </View>
+    );
 };
+
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 

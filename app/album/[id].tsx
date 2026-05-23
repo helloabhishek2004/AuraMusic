@@ -110,6 +110,49 @@ function AlbumScreen() {
   const fetchAlbumData = useCallback(async (id: string, useCache = true) => {
     if (!id) return;
 
+    if (id.startsWith("local-album-")) {
+      setIsLoading(true);
+      try {
+        const decodedName = decodeURIComponent(id.replace("local-album-", ""));
+        const { useDownloadStore } = await import("@/src/features/download/store/download.store");
+        const downloaded = Object.values(useDownloadStore.getState().downloadedTracks);
+        const albumTracks = downloaded.filter(t => t.album === decodedName);
+
+        if (albumTracks.length > 0) {
+          const localAlbum: AlbumDetails = {
+            id: id,
+            title: decodedName,
+            artist: albumTracks[0].artist || "Unknown Artist",
+            year: new Date(albumTracks[0].downloadedAt || Date.now()).getFullYear().toString(),
+            thumbnail: albumTracks[0].art || "",
+            trackCount: albumTracks.length,
+            tracks: albumTracks.map(t => ({
+              id: t.id,
+              title: t.title,
+              artist: t.artist,
+              art: t.art,
+              album: t.album || decodedName,
+              duration: String(t.duration || "0:00"),
+              source: t.source || "local"
+            }))
+          };
+          setAlbum(localAlbum);
+          setIsLoading(false);
+          setError(null);
+          return;
+        } else {
+          setError("Local album has no downloaded tracks.");
+          setIsLoading(false);
+          return;
+        }
+      } catch (e: any) {
+        console.error("[Album Page] Local album load failed:", e);
+        setError("Unable to load offline album.");
+        setIsLoading(false);
+        return;
+      }
+    }
+
     if (useCache && IN_MEMORY_CACHE[id]) {
       setAlbum(IN_MEMORY_CACHE[id]);
       setIsLoading(false);
@@ -384,6 +427,8 @@ function AlbumScreen() {
                 onShare={handleShare}
                 isShuffle={isShuffle}
                 tracks={album.tracks}
+                albumTitle={album.title}
+                albumId={album.id}
               />
               <SectionHeader title="Tracks" style={styles.sectionHeader} />
             </View>
@@ -459,7 +504,7 @@ const HeroSection = memo(
   },
 );
 
-const ActionButtons = memo(({ onPlay, onShuffle, onShare, isShuffle, tracks }: any) => (
+const ActionButtons = memo(({ onPlay, onShuffle, onShare, isShuffle, tracks, albumTitle, albumId }: any) => (
   <LiquidGlass
     borderRadius={radius.xl}
     intensity={glass.surfaceBlur}
@@ -499,7 +544,9 @@ const ActionButtons = memo(({ onPlay, onShuffle, onShare, isShuffle, tracks }: a
         id: t.id,
         title: t.title,
         artist: t.artist,
-        art: t.art,
+        art: t.art || "",
+        album: albumTitle,
+        albumId: albumId,
         url: "",
         duration: parseDuration(t.duration),
       }))}

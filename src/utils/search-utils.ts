@@ -11,6 +11,8 @@ export interface SearchEntity {
   trackCount?: number;
   itemCount?: number;
   source?: string;
+  album?: string;
+  albumId?: string;
 }
 
 export interface UnifiedSearchResult {

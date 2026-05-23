@@ -1,12 +1,23 @@
 import { PlayerTrack } from "../types/player";
 import { musicService } from "../../../services/api/music";
 import { transitionManager } from "../services/transition-manager";
+import { useMediaCacheStore } from "../../cache/store/media-cache.store";
 
 export type PlaybackSourceType = "stream" | "download" | "cache" | "local" | "unknown";
 
 export function getUriScheme(uri?: string): string {
   const match = uri?.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
   return match?.[1]?.toLowerCase() || "";
+}
+
+export function isResolvedUrl(url?: string): boolean {
+  if (!url) return false;
+  if (url.startsWith('file://') || url.startsWith('content://')) return true;
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+      if (url.includes('youtube.com') || url.includes('youtu.be')) return false; // Not resolved yet
+      return true; 
+  }
+  return false;
 }
 
 export function normalizePlaybackUri(uri?: string): string {
@@ -41,6 +52,20 @@ export async function resolveTrack(t: PlayerTrack, preloadedTrack?: PlayerTrack 
 
   if (t.isLocal && !hasDownloadPath && (directScheme === "file" || directScheme === "content")) {
     return { ...t, url: directUrl };
+  }
+
+  // 0. Check Cache First
+  const cached = useMediaCacheStore.getState().getCachedTrack(t.id);
+  if (cached && cached.track.url && isResolvedUrl(cached.track.url)) {
+      // Basic validity check for local files
+      if (cached.track.isLocal) {
+          const { StorageService } = await import("../../download/services/storage.service");
+          if (await StorageService.fileExists(cached.track.url)) {
+              return { ...t, ...cached.track } as PlayerTrack;
+          }
+      } else {
+          return { ...t, ...cached.track } as PlayerTrack;
+      }
   }
 
   // 1. Check Downloads
@@ -78,7 +103,7 @@ export async function resolveTrack(t: PlayerTrack, preloadedTrack?: PlayerTrack 
     console.warn("[TrackResolver] Download check failed:", e);
   }
 
-  // 2. Check Cache
+  // 2. Check Filesystem Cache
   try {
     const { CacheManager } = await import("../../download/services/cache.manager");
     if (await CacheManager.isCached(t.id)) {
@@ -102,29 +127,70 @@ export async function resolveTrack(t: PlayerTrack, preloadedTrack?: PlayerTrack 
     return preloadedTrack;
   }
 
-  // 4. Resolve Stream URL (Online) - Only if online
-  // Note: We don't always want to resolve stream URL for the whole queue at once to avoid API spam.
-  // But for the current track, it's necessary.
   return t;
 }
 
+const resolutionPromises = new Map<string, Promise<PlayerTrack>>();
+
 export async function resolveFullTrack(t: PlayerTrack, preloadedTrack?: PlayerTrack | null): Promise<PlayerTrack> {
-    const resolved = await resolveTrack(t, preloadedTrack);
-    if (resolved.url && (resolved.url.startsWith('file://') || resolved.url.startsWith('content://') || resolved.url.startsWith('http'))) {
-        return resolved;
-    }
+    // Deduplicate concurrent resolutions for the same track
+    const existing = resolutionPromises.get(t.id);
+    if (existing) return existing;
 
-    try {
-        const { streamUrl } = await musicService.resolveStream(t.id);
-        if (streamUrl) {
-            const finalResolved = { ...t, url: streamUrl };
-            const { CacheManager } = await import("../../download/services/cache.manager");
-            CacheManager.addToCache(t.id, streamUrl);
-            return finalResolved;
+    const promise = (async () => {
+        try {
+            let resolved = await resolveTrack(t, preloadedTrack);
+            const cacheStore = useMediaCacheStore.getState();
+
+            // Enrich with album details if missing but we have an album name
+            if (!resolved.albumId && resolved.album) {
+                const cachedId = cacheStore.getAlbumId(resolved.album, resolved.artist);
+                if (cachedId) {
+                    resolved = { ...resolved, albumId: cachedId };
+                } else {
+                    try {
+                        const albumSearch = await musicService.lookupAlbumByName(`${resolved.album} ${resolved.artist}`);
+                        if (albumSearch && albumSearch.id) {
+                            cacheStore.cacheAlbumId(resolved.album, resolved.artist, albumSearch.id);
+                            resolved = { ...resolved, albumId: albumSearch.id };
+                            
+                            // Sync with player store if needed
+                            const { usePlayerStore } = await import("../store/player.store");
+                            const store = usePlayerStore.getState();
+                            if (store.currentTrack?.id === resolved.id) {
+                                usePlayerStore.setState({
+                                    currentTrack: { ...store.currentTrack, albumId: albumSearch.id }
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("[TrackResolver] Album enrichment failed:", e);
+                    }
+                }
+            }
+
+            // Resolve Stream URL if still missing
+            if (!resolved.url || (!resolved.isLocal && !isResolvedUrl(resolved.url))) {
+                try {
+                    const { streamUrl } = await musicService.resolveStream(resolved.id);
+                    if (streamUrl) {
+                        resolved = { ...resolved, url: streamUrl };
+                        const { CacheManager } = await import("../../download/services/cache.manager");
+                        CacheManager.addToCache(resolved.id, streamUrl);
+                    }
+                } catch (e) {
+                    console.error("[TrackResolver] Stream resolution failed:", e);
+                }
+            }
+
+            // Always cache the final enriched metadata
+            cacheStore.cacheTrack(resolved);
+            return resolved;
+        } finally {
+            resolutionPromises.delete(t.id);
         }
-    } catch (e) {
-        console.error("[TrackResolver] Stream resolution failed:", e);
-    }
+    })();
 
-    return t;
+    resolutionPromises.set(t.id, promise);
+    return promise;
 }

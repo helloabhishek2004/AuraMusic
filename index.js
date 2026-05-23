@@ -64,8 +64,6 @@ const { ExpoRoot } = require("expo-router");
 console.log("[AuraMusic] Startup environment", {
   expoSdkVersion:
     Constants.expoConfig?.sdkVersion || Constants.manifest?.sdkVersion,
-  reactNativeVersion: require("react-native/package.json").version,
-  trackPlayerVersion: require("./package.json").dependencies["@rntp/player"],
   platform: Platform.OS,
   hasRNTPPlayerNative: !!NativeModules.RNTPPlayer,
 });

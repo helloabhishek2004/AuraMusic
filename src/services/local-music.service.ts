@@ -1,11 +1,13 @@
 import * as logger from "@/src/utils/logger";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
-import { Platform } from "react-native";
+import { Platform, PermissionsAndroid } from "react-native";
 import { MusicTrack } from "../types/music";
+import * as MediaLibrary from 'expo-media-library';
 
 const STORAGE_KEY = "@aura_music_folders";
-const AUDIO_EXTENSIONS = ["mp3", "m4a", "wav", "flac", "opus", "ogg", "aac"];
+const FIRST_ACCESS_KEY = "@aura_music_first_access";
+const AUDIO_EXTENSIONS = ["mp3", "m4a", "wav", "flac", "aac", "opus", "ogg"];
 
 export class LocalMusicService {
   private static get saf() {
@@ -17,6 +19,75 @@ export class LocalMusicService {
       return null;
     }
     return FS.StorageAccessFramework;
+  }
+
+/**
+   * Check if user has accessed local library before
+   */
+  static async hasAccessedBefore(): Promise<boolean> {
+    try {
+      const value = await AsyncStorage.getItem(FIRST_ACCESS_KEY);
+      return value === "true";
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Mark that user has accessed local library
+   */
+  static async markFirstAccess(): Promise<void> {
+    try {
+      await AsyncStorage.setItem(FIRST_ACCESS_KEY, "true");
+    } catch {}
+  }
+
+  /**
+   * Check and request standard Android permissions with proper version handling
+   * Android 13+: READ_MEDIA_AUDIO
+   * Android <=12: READ_EXTERNAL_STORAGE
+   */
+  static async requestPermissions(): Promise<boolean> {
+    if (Platform.OS !== 'android') return true;
+
+    try {
+      // Check current permission status
+      const { status, canAskAgain } = await MediaLibrary.getPermissionsAsync();
+      
+      if (status === 'granted') return true;
+      
+      if (!canAskAgain) {
+        return false;
+      }
+
+      // Request with proper Android version handling
+      if (Platform.Version >= 33) {
+        // Android 13+ - request READ_MEDIA_AUDIO via expo-media-library
+        const { status: newStatus } = await MediaLibrary.requestPermissionsAsync();
+        return newStatus === 'granted';
+      } else {
+        // Android 12 and below
+        const { status: newStatus } = await MediaLibrary.requestPermissionsAsync();
+        return newStatus === 'granted';
+      }
+    } catch (e) {
+      logger.error("[LocalSAF] Permission check failed:", e);
+      return false;
+    }
+  }
+
+  /**
+   * Check if we have permission granted
+   */
+  static async hasPermission(): Promise<boolean> {
+    if (Platform.OS !== 'android') return true;
+    
+    try {
+      const { status } = await MediaLibrary.getPermissionsAsync();
+      return status === 'granted';
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -32,6 +103,13 @@ export class LocalMusicService {
     if (!SAF) return null;
 
     try {
+      // 1. First ensure basic media permissions
+      const hasMediaPerm = await this.requestPermissions();
+      if (!hasMediaPerm) {
+        logger.warn("[LocalSAF] Media permission denied");
+      }
+
+      // 2. Launch SAF picker
       const permissions = await SAF.requestDirectoryPermissionsAsync();
       if (permissions.granted) {
         const uri = permissions.directoryUri;
@@ -40,7 +118,7 @@ export class LocalMusicService {
         return uri;
       }
     } catch (e) {
-      logger.error("[LocalSAF] Permission error:", e);
+      logger.error("[LocalSAF] SAF request error:", e);
     }
     return null;
   }
@@ -97,7 +175,7 @@ export class LocalMusicService {
     const folderUris = await this.getPersistedFolderUris();
     if (folderUris.length === 0) return [];
 
-    logger.info("[LocalSAF] Scanning folders:", folderUris.length);
+    logger.info("[LocalSAF] Starting scan for", folderUris.length, "folders");
     let allTracks: MusicTrack[] = [];
 
     for (const folderUri of folderUris) {
@@ -113,8 +191,7 @@ export class LocalMusicService {
     const uniqueTracks = Array.from(
       new Map(allTracks.map((t) => [t.id, t])).values(),
     );
-    logger.info(`[LocalSAF] Total tracks discovered: ${uniqueTracks.length}`);
-
+    
     return uniqueTracks;
   }
 
@@ -131,8 +208,6 @@ export class LocalMusicService {
     const queue: string[] = [directoryUri];
     const visited = new Set<string>();
 
-    logger.info("[LocalSAF] Starting recursive scan for:", directoryUri);
-
     while (queue.length > 0) {
       const currentUri = queue.shift()!;
       if (visited.has(currentUri)) continue;
@@ -140,45 +215,48 @@ export class LocalMusicService {
 
       try {
         const files = await SAF.readDirectoryAsync(currentUri);
-
+        
         for (const fileUri of files) {
-          const isAudio = this.isAudioFile(fileUri);
-          if (isAudio) {
-            tracks.push(this.normalizeSafFile(fileUri, currentUri));
-          } else {
-            // Heuristic for directory detection in SAF:
-            // 1. Doesn't have a known audio extension
-            // 2. We can try to read it; if it succeeds, it's a folder.
-            const decoded = decodeURIComponent(fileUri);
-            const lastPart = decoded.split("/").pop() || "";
-            const hasAudioExt = AUDIO_EXTENSIONS.some((ext) =>
-              lastPart.toLowerCase().endsWith("." + ext),
-            );
+          if (this.isHiddenFile(fileUri)) continue;
 
-            // If it doesn't have an audio extension, it might be a directory or another file type.
-            // To be safe, we only recurse if it doesn't look like a file with an extension,
-            // OR if it's a known folder pattern.
-            if (
-              !hasAudioExt &&
-              (!lastPart.includes(".") || lastPart.length > 20)
-            ) {
-              queue.push(fileUri);
-            }
+          if (this.isAudioFile(fileUri)) {
+            tracks.push(this.normalizeSafFile(fileUri, currentUri));
+          } else if (this.isDirectoryHeuristic(fileUri)) {
+            queue.push(fileUri);
           }
         }
       } catch (e) {
-        // Not a directory or access denied - skip silently
+        // Access denied or not a directory
       }
     }
 
     return tracks;
   }
 
-  private static isAudioFile(uri: string): boolean {
+  private static isHiddenFile(uri: string): boolean {
     const decoded = decodeURIComponent(uri);
     const lastPart = decoded.split("/").pop() || "";
-    const ext = lastPart.split(".").pop()?.toLowerCase();
+    return lastPart.startsWith(".");
+  }
+
+  private static isAudioFile(uri: string): boolean {
+    const decoded = decodeURIComponent(uri).toLowerCase();
+    const lastPart = decoded.split("/").pop() || "";
+    const ext = lastPart.split(".").pop();
     return !!ext && AUDIO_EXTENSIONS.includes(ext);
+  }
+
+  private static isDirectoryHeuristic(uri: string): boolean {
+    const decoded = decodeURIComponent(uri);
+    const lastPart = decoded.split("/").pop() || "";
+    
+    if (!lastPart.includes(".")) return true;
+    
+    const commonFileExts = ["jpg", "jpeg", "png", "gif", "txt", "pdf", "mp4", "mkv", "avi", "zip", "rar"];
+    const ext = lastPart.split(".").pop()?.toLowerCase();
+    if (ext && commonFileExts.includes(ext)) return false;
+
+    return false;
   }
 
   /**
@@ -196,23 +274,16 @@ export class LocalMusicService {
     }
 
     const filename = decoded.split("/").pop() || "Unknown Track";
-
-    // Improved title extraction: remove extension and clean up
     const title = filename.replace(/\.[^/.]+$/, "").trim();
-
-    // Extension for mimeType
     const extension = filename.split(".").pop()?.toLowerCase() || "mp3";
 
-    // Extract folder name from parent URI
     let folderName = "Local";
     try {
       const decodedParent = decodeURIComponent(parentUri);
       const parentParts = decodedParent.split("/");
       const rawFolderName = parentParts[parentParts.length - 1] || "";
-      // Clean up SAF folder names (e.g., "primary:Music" -> "Music")
       folderName = rawFolderName.split(":").pop() || "Local";
     } catch (e) {
-      // Fallback
     }
 
     return {
@@ -222,8 +293,8 @@ export class LocalMusicService {
       art: "",
       isLocal: true,
       localUri: fileUri,
-      url: fileUri, // Ensure url is set for player compatibility
-      mimeType: `audio/${extension === "m4a" ? "mp4" : extension}`,
+      url: fileUri,
+      mimeType: `audio/${extension === "m4a" ? "mp4" : (extension === "mp3" ? "mpeg" : extension)}`,
       time: "--:--",
       folderName: folderName,
     };

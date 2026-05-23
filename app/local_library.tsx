@@ -1,18 +1,4 @@
-/**
- * LocalLibraryScreen — iOS 26 Liquid Glass Edition
- *
- * Design principles:
- *  ✓ Liquid Glass cards: multi-layer frosted glass, top-edge specular, caustic tint
- *  ✓ Animated tab indicator: smooth spring-driven pill slide (native driver)
- *  ✓ Hero card: rich stats, gradient tint, icon glow
- *  ✓ Track rows: album art with active waveform badge, proper spacing
- *  ✓ Folder cards: proper aspect ratio, glassmorphic depth
- *  ✓ Empty/loading states: centered, breathing glow, clear CTA
- *  ✓ Fully responsive: phone (≥320) → large phone (≥414) → tablet (≥768)
- *  ✓ Safe-area aware, translucent status bar
- *  ✓ Accessibility: labels, roles, minimum hit targets
- *  ✓ All animations useNativeDriver / Reanimated worklet — zero JS-thread jank
- */
+
 
 import React, {
     useCallback,
@@ -40,6 +26,7 @@ import {
     TouchableOpacity,
     UIManager,
     View,
+    Modal,
 } from "react-native";
 import Reanimated, {
     useSharedValue,
@@ -53,6 +40,7 @@ import Reanimated, {
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { useLikesStore } from "@/src/features/likes/store/likes.store";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { LocalMusicService } from "@/src/services/local-music.service";
 import { MusicTrack } from "@/src/types/music";
@@ -61,10 +49,7 @@ import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { PressScale } from "@/src/components/ui/press-scale";
 import { palette, radius, spacing } from "@/src/design/tokens";
 
-// Enable LayoutAnimation on Android
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-    UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+// LayoutAnimation setup (handled by platform defaults in new arch)
 
 // ─── Responsive Layout ────────────────────────────────────────────────────────
 
@@ -141,6 +126,180 @@ const WaveformBars = () => {
     );
 };
 
+// ─── OnboardingModal ──────────────────────────────────────────────────────────
+
+const OnboardingModal = React.memo(({
+    visible,
+    onGrantAccess,
+    onDismiss,
+}: {
+    visible: boolean;
+    onGrantAccess: () => void;
+    onDismiss: () => void;
+}) => {
+    const scaleAnim = useRef(new Animated.Value(0.85)).current;
+    const opacityAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        if (visible) {
+            Animated.parallel([
+                Animated.spring(scaleAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }),
+                Animated.timing(opacityAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+            ]).start();
+        } else {
+            scaleAnim.setValue(0.85);
+            opacityAnim.setValue(0);
+        }
+    }, [visible]);
+
+    if (!visible) return null;
+
+    return (
+        <Modal transparent visible={visible} animationType="fade" onRequestClose={onDismiss}>
+            <View style={s.onboardingOverlay}>
+                <Animated.View style={[s.onboardingBackdrop, { opacity: opacityAnim }]} />
+                <Animated.View style={[s.onboardingContent, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
+                    <LiquidGlass borderRadius={32} intensity={26} style={s.onboardingGlass}>
+                        <LinearGradient
+                            colors={[GLASS_TINT, GLASS_TINT_HI]}
+                            style={[StyleSheet.absoluteFill, { borderRadius: 32 }]}
+                            pointerEvents="none"
+                        />
+                        <View style={s.onboardingSpecular} pointerEvents="none" />
+
+                        <View style={s.onboardingIconWrap}>
+                            <LinearGradient
+                                colors={["rgba(191,90,242,0.22)", "rgba(120,40,200,0.10)"]}
+                                style={s.onboardingIconBg}
+                            >
+                                <Ionicons name="folder-open" size={44} color={palette.primary} />
+                            </LinearGradient>
+                        </View>
+
+                        <Text style={s.onboardingTitle}>Access Your Music</Text>
+                        <Text style={s.onboardingSub}>
+                            AuraMusic needs access to your music folders to scan and play audio files stored on your device.
+                        </Text>
+                        <Text style={s.onboardingNote}>
+                            Your files are never uploaded. We only scan them locally to build your offline library.
+                        </Text>
+
+                        <View style={s.onboardingActions}>
+                            <PressScale
+                                style={s.onboardingPrimaryBtn}
+                                onPress={onGrantAccess}
+                                haptic={Haptics.ImpactFeedbackStyle.Medium}
+                            >
+                                <LinearGradient
+                                    colors={[palette.primary, "#7B42F6"]}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 0 }}
+                                    style={StyleSheet.absoluteFill}
+                                />
+                                <View style={s.onboardingBtnSpec} pointerEvents="none" />
+                                <Ionicons name="folder-open" size={18} color="#fff" />
+                                <Text style={s.onboardingPrimaryBtnText}>Grant Folder Access</Text>
+                            </PressScale>
+
+                            <PressScale
+                                style={s.onboardingSecondaryBtn}
+                                onPress={onDismiss}
+                                haptic={Haptics.ImpactFeedbackStyle.Light}
+                            >
+                                <Text style={s.onboardingSecondaryBtnText}>Not Now</Text>
+                            </PressScale>
+                        </View>
+                    </LiquidGlass>
+                </Animated.View>
+            </View>
+        </Modal>
+    );
+});
+
+// ─── PermissionDeniedModal ─────────────────────────────────────────────────────
+
+const PermissionDeniedModal = React.memo(({
+    visible,
+    onRetry,
+    onDismiss,
+}: {
+    visible: boolean;
+    onRetry: () => void;
+    onDismiss: () => void;
+}) => {
+    const scaleAnim = useRef(new Animated.Value(0.85)).current;
+    const opacityAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        if (visible) {
+            Animated.parallel([
+                Animated.spring(scaleAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }),
+                Animated.timing(opacityAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+            ]).start();
+        } else {
+            scaleAnim.setValue(0.85);
+            opacityAnim.setValue(0);
+        }
+    }, [visible]);
+
+    if (!visible) return null;
+
+    return (
+        <Modal transparent visible={visible} animationType="fade" onRequestClose={onDismiss}>
+            <View style={s.onboardingOverlay}>
+                <Animated.View style={[s.onboardingBackdrop, { opacity: opacityAnim }]} />
+                <Animated.View style={[s.onboardingContent, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
+                    <LiquidGlass borderRadius={28} intensity={26} style={s.onboardingGlass}>
+                        <LinearGradient
+                            colors={[GLASS_TINT, GLASS_TINT_HI]}
+                            style={[StyleSheet.absoluteFill, { borderRadius: 28 }]}
+                            pointerEvents="none"
+                        />
+
+                        <View style={s.deniedIconWrap}>
+                            <LinearGradient
+                                colors={["rgba(255,107,107,0.22)", "rgba(220,53,69,0.10)"]}
+                                style={s.onboardingIconBg}
+                            >
+                                <Ionicons name="lock-closed" size={36} color={palette.coral} />
+                            </LinearGradient>
+                        </View>
+
+                        <Text style={s.onboardingTitle}>Permission Required</Text>
+                        <Text style={s.onboardingSub}>
+                            Folder access was denied. Please enable it in your device settings to browse local music.
+                        </Text>
+
+                        <View style={s.onboardingActions}>
+                            <PressScale
+                                style={s.onboardingPrimaryBtn}
+                                onPress={onRetry}
+                                haptic={Haptics.ImpactFeedbackStyle.Medium}
+                            >
+                                <LinearGradient
+                                    colors={[palette.primary, "#7B42F6"]}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 0 }}
+                                    style={StyleSheet.absoluteFill}
+                                />
+                                <Text style={s.onboardingPrimaryBtnText}>Try Again</Text>
+                            </PressScale>
+
+                            <PressScale
+                                style={s.onboardingSecondaryBtn}
+                                onPress={onDismiss}
+                                haptic={Haptics.ImpactFeedbackStyle.Light}
+                            >
+                                <Text style={s.onboardingSecondaryBtnText}>Cancel</Text>
+                            </PressScale>
+                        </View>
+                    </LiquidGlass>
+                </Animated.View>
+            </View>
+        </Modal>
+    );
+});
+
 // ─── LocalTrackRow ────────────────────────────────────────────────────────────
 
 const LocalTrackRow = React.memo(
@@ -157,6 +316,9 @@ const LocalTrackRow = React.memo(
     }) => {
         const formatExt = (mime?: string) =>
             mime?.split("/")[1]?.toUpperCase().replace("MPEG", "MP3") ?? null;
+
+        const isLiked = useLikesStore((s) => !!s.likedTrackIds[track.id]);
+        const toggleLike = useLikesStore((s) => s.toggleLike);
 
         return (
             <PressScale
@@ -241,7 +403,33 @@ const LocalTrackRow = React.memo(
 
                         {/* Duration + chevron */}
                         <View style={s.trackRight}>
-                            <Text style={s.trackDur}>{track.time || "--:--"}</Text>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                        toggleLike({
+                                            id: track.id,
+                                            title: track.title,
+                                            artist: track.artist || "Local Audio",
+                                            art: track.album || "",
+                                            url: track.url || "",
+                                            duration: 0,
+                                            isLocal: true,
+                                            source: "local"
+                                        });
+                                    }}
+                                    hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                                    accessibilityLabel={isLiked ? "Unlike" : "Like"}
+                                    accessibilityRole="button"
+                                >
+                                    <Ionicons
+                                        name={isLiked ? "heart" : "heart-outline"}
+                                        size={18}
+                                        color={isLiked ? palette.primary : "rgba(255,255,255,0.18)"}
+                                    />
+                                </TouchableOpacity>
+                                <Text style={s.trackDur}>{track.time || "--:--"}</Text>
+                            </View>
                             <Ionicons
                                 name="chevron-forward"
                                 size={14}
@@ -645,13 +833,18 @@ const HeroCard = ({
 export default function LocalLibraryScreen() {
     const insets = useSafeAreaInsets();
     const router = useRouter();
-    const { setQueue, currentTrack } = usePlayerStore();
+    const { setQueue, currentTrack, setActiveContext } = usePlayerStore();
 
     const [activeTab, setActiveTab] = useState<Tab>("Songs");
     const [isLoading, setIsLoading] = useState(true);
     const [tracks, setTracks] = useState<MusicTrack[]>([]);
     const [folders, setFolders] = useState<Record<string, MusicTrack[]>>({});
     const [grantedFolders, setGrantedFolders] = useState<string[]>([]);
+
+    // Onboarding state
+    const [showOnboarding, setShowOnboarding] = useState(false);
+    const [showPermissionDenied, setShowPermissionDenied] = useState(false);
+    const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false);
 
     // Rotate icon animation (refresh)
     const rotateAnim = useRef(new Animated.Value(0)).current;
@@ -690,24 +883,77 @@ export default function LocalLibraryScreen() {
                 setFolders({});
             }
         } catch (e) {
-            console.warn("Local media load failed", e);
+            // Error handled via UI state - no logging needed in production
         } finally {
             setIsLoading(false);
+            setHasInitiallyLoaded(true);
         }
     }, [spinOnce]);
 
+    // First access check
     useEffect(() => {
-        loadLocalMedia();
-    }, [loadLocalMedia]);
+        const checkFirstAccess = async () => {
+            const hasAccess = await LocalMusicService.hasAccessedBefore();
+            const folderUris = await LocalMusicService.getPersistedFolderUris();
+            
+            // If first time AND no folders granted yet, show onboarding
+            if (!hasAccess && folderUris.length === 0) {
+                setShowOnboarding(true);
+            } else {
+                loadLocalMedia();
+            }
+        };
+        
+        checkFirstAccess();
+    }, []);
 
     const handleGrantAccess = async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        setShowOnboarding(false);
+        
         try {
+            // First request media permissions
+            const hasPerm = await LocalMusicService.requestPermissions();
+            
+            if (!hasPerm) {
+                setShowPermissionDenied(true);
+                return;
+            }
+            
+            // Then grant folder access
             const uri = await LocalMusicService.grantFolderPermission();
-            if (uri) loadLocalMedia();
+            
+            if (uri) {
+                await LocalMusicService.markFirstAccess();
+                loadLocalMedia();
+            } else {
+                // User cancelled SAF picker - check if any folders exist
+                const folderUris = await LocalMusicService.getPersistedFolderUris();
+                if (folderUris.length === 0) {
+                    setShowOnboarding(true);
+                }
+            }
         } catch (e) {
             console.error("[LocalLibrary] Grant access failed:", e);
+            setShowPermissionDenied(true);
         }
+    };
+
+    const handleRetryPermission = async () => {
+        setShowPermissionDenied(false);
+        const hasPerm = await LocalMusicService.requestPermissions();
+        
+        if (hasPerm) {
+            handleGrantAccess();
+        } else {
+            setShowPermissionDenied(true);
+        }
+    };
+
+    const handleOnboardingDismiss = async () => {
+        setShowOnboarding(false);
+        await LocalMusicService.markFirstAccess();
+        loadLocalMedia();
     };
 
     const handleRemoveFolder = async (uri: string) => {
@@ -729,6 +975,8 @@ export default function LocalLibraryScreen() {
                 mimeType: t.mimeType,
             }));
             const startIndex = playerTracks.findIndex((t) => t.id === track.id);
+            
+            setActiveContext({ type: "local", id: "local" });
             setQueue(playerTracks, startIndex !== -1 ? startIndex : 0);
             // Removed navigation to /now_playing
         },
@@ -937,6 +1185,20 @@ export default function LocalLibraryScreen() {
                 {/* ── Main content ────────────────────────────────────────── */}
                 {renderContent()}
             </ScrollView>
+
+            {/* Onboarding Modal */}
+            <OnboardingModal
+                visible={showOnboarding}
+                onGrantAccess={handleGrantAccess}
+                onDismiss={handleOnboardingDismiss}
+            />
+
+            {/* Permission Denied Modal */}
+            <PermissionDeniedModal
+                visible={showPermissionDenied}
+                onRetry={handleRetryPermission}
+                onDismiss={() => setShowPermissionDenied(false)}
+            />
         </View>
     );
 }
@@ -1589,5 +1851,110 @@ const s = StyleSheet.create({
         flexDirection: "row",
         gap: 12,
         width: "100%",
+    },
+
+    // ── Onboarding Modal
+    onboardingOverlay: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    onboardingBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: "rgba(0,0,0,0.68)",
+    },
+    onboardingContent: {
+        width: SW - PAD * 2,
+        maxWidth: 340,
+    },
+    onboardingGlass: {
+        padding: 28,
+        alignItems: "center",
+        overflow: "hidden",
+    },
+    onboardingSpecular: {
+        position: "absolute",
+        top: 0,
+        left: 24,
+        right: 24,
+        height: 1,
+        backgroundColor: SPEC_TOP,
+    },
+    onboardingIconWrap: {
+        marginBottom: 22,
+    },
+    onboardingIconBg: {
+        width: 88,
+        height: 88,
+        borderRadius: 26,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    onboardingTitle: {
+        color: palette.ink,
+        fontSize: isTablet ? 23 : 20,
+        fontWeight: "900",
+        letterSpacing: -0.5,
+        textAlign: "center",
+        marginBottom: 12,
+    },
+    onboardingSub: {
+        color: palette.inkMuted,
+        fontSize: 14,
+        lineHeight: 21,
+        textAlign: "center",
+        marginBottom: 12,
+    },
+    onboardingNote: {
+        color: "rgba(170,170,185,0.45)",
+        fontSize: 12,
+        lineHeight: 18,
+        textAlign: "center",
+        marginBottom: 24,
+    },
+    onboardingActions: {
+        width: "100%",
+        gap: 12,
+    },
+    onboardingPrimaryBtn: {
+        height: 52,
+        borderRadius: 26,
+        overflow: "hidden",
+        justifyContent: "center",
+        alignItems: "center",
+        flexDirection: "row",
+        gap: 8,
+    },
+    onboardingBtnSpec: {
+        position: "absolute",
+        top: 0,
+        left: 24,
+        right: 24,
+        height: 1,
+        backgroundColor: "rgba(255,255,255,0.32)",
+        zIndex: 1,
+    },
+    onboardingPrimaryBtnText: {
+        color: "#fff",
+        fontSize: 15,
+        fontWeight: "800",
+        letterSpacing: 0.2,
+    },
+    onboardingSecondaryBtn: {
+        height: 44,
+        borderRadius: 22,
+        justifyContent: "center",
+        alignItems: "center",
+        backgroundColor: "rgba(255,255,255,0.04)",
+    },
+    onboardingSecondaryBtnText: {
+        color: palette.inkMuted,
+        fontSize: 14,
+        fontWeight: "600",
+    },
+
+    // ── Permission Denied Modal
+    deniedIconWrap: {
+        marginBottom: 20,
     },
 });

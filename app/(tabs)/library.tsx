@@ -19,6 +19,8 @@
  * ✓ Zero functionality change — all hooks, navigation, store selectors identical
  */
 
+import { useLikesStore } from "@/src/features/likes/store/likes.store";
+import { getLikedTracks } from "@/src/features/likes/utils/get-liked-tracks";
 import { useMusic } from "@/src/context/MusicContext";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
 import { Ionicons } from "@expo/vector-icons";
@@ -32,10 +34,12 @@ import React, {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import {
+  Alert,
   Animated,
   Dimensions,
   Easing,
@@ -54,6 +58,12 @@ import Reanimated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
+import { useDownloadStore } from "@/src/features/download/store/download.store";
+import type { DownloadedTrack } from "@/src/features/download/types/download";
+import { formatDuration } from "@/src/utils/time";
+import { usePlaylistStore } from "@/src/features/playlist/store/playlist.store";
+import PlaylistArtwork from "@/src/features/playlist/components/PlaylistArtwork";
+import type { Playlist } from "@/src/features/playlist/types/playlist";
 
 // ─── Dimensions & layout ──────────────────────────────────────────────────────
 
@@ -359,6 +369,7 @@ const SectionHeader = memo(({
 const HeroCard = memo(({ onPress }: { onPress: () => void }) => {
   const p = usePress(0.97);
   const heartPulse = useRef(new Animated.Value(1)).current;
+  const likedCount = useLikesStore((s) => Object.keys(s.likedTrackIds).length);
 
   useEffect(() => {
     Animated.loop(
@@ -425,11 +436,13 @@ const HeroCard = memo(({ onPress }: { onPress: () => void }) => {
                 <Text style={s.heroTitle}>Liked Songs</Text>
                 <View style={s.heroMetaRow}>
                   <View style={[s.heroStatPill, { backgroundColor: h2r(C.primary, 0.18) }]}>
-                    <Text style={[s.heroStatText, { color: C.primary }]}>1,248 tracks</Text>
+                    <Text style={[s.heroStatText, { color: C.primary }]}>
+                      {likedCount.toLocaleString()} {likedCount === 1 ? "track" : "tracks"}
+                    </Text>
                   </View>
                   <View style={[s.heroStatPill, { backgroundColor: h2r(C.accent, 0.12) }]}>
                     <LiveDot color={C.accent} />
-                    <Text style={[s.heroStatText, { color: C.accent, marginLeft: 5 }]}>Updated 2m ago</Text>
+                    <Text style={[s.heroStatText, { color: C.accent, marginLeft: 5 }]}>Library Sync Active</Text>
                   </View>
                 </View>
               </View>
@@ -725,7 +738,7 @@ const TrackRow = memo(({
 
 const PlaylistCell = memo(({
   item, delay, onOpen,
-}: { item: any; delay: number; onOpen: (id: string) => void }) => {
+}: { item: Playlist; delay: number; onOpen: (id: string) => void }) => {
   const p = usePress(0.94);
   const playScale = useRef(new Animated.Value(0)).current;
 
@@ -749,15 +762,14 @@ const PlaylistCell = memo(({
           onPressIn={handlePressIn} onPressOut={handlePressOut}
           activeOpacity={1}
           accessibilityRole="button"
-          accessibilityLabel={`Open playlist ${item.name}, ${item.count}`}
+          accessibilityLabel={`Open playlist ${item.name}, ${item.trackIds.length} songs`}
         >
-          {/* Art frame */}
+          {/* Art frame — uses real PlaylistArtwork */}
           <View style={[s.gridArtFrame, { borderRadius: artR }]}>
-            <Image
-              source={{ uri: item.art }}
-              style={[{ width: GRID_ART_W, height: GRID_ART_W }, { borderRadius: artR }]}
-              contentFit="cover"
-              transition={280}
+            <PlaylistArtwork
+              playlist={item}
+              size={GRID_ART_W}
+              borderRadius={artR}
             />
             {/* Rim */}
             <View style={[StyleSheet.absoluteFillObject, { borderRadius: artR, borderWidth:0.8, borderColor:"rgba(255,255,255,0.14)" }]} />
@@ -783,14 +795,82 @@ const PlaylistCell = memo(({
 
           {/* Name + count */}
           <Text style={s.gridName} numberOfLines={1}>{item.name}</Text>
-          <Text style={s.gridCount}>{item.count}</Text>
+          <Text style={s.gridCount}>
+            {item.trackIds.length} {item.trackIds.length === 1 ? 'song' : 'songs'}
+          </Text>
         </TouchableOpacity>
       </Animated.View>
     </Mat>
   );
 });
 
-// ─── Tab bar (animated spring pill, Reanimated worklet) ───────────────────────
+
+// ─── My Playlists section (store-backed) ─────────────────────────────────────────
+
+const MyPlaylistsSection = memo(({ onOpen }: { onOpen: (id: string) => void }) => {
+  const router = useRouter();
+  const playlists = usePlaylistStore(s => s.playlists);
+  const sortBy = usePlaylistStore(s => s.sortBy);
+  const playlistOrder = usePlaylistStore(s => s.playlistOrder);
+  
+  const sortedPlaylists = useMemo(
+    () => usePlaylistStore.getState().getSortedPlaylists(),
+    [playlists, sortBy, playlistOrder]
+  );
+
+  return (
+    <>
+      <SectionHeader
+        title="My Playlists"
+        accentColor={C.accent}
+        delay={340}
+        action={sortedPlaylists.length > 0 ? () => router.push('/create_playlist') : undefined}
+        actionLabel="+ New"
+        style={{ marginTop: 34 }}
+      />
+
+      {sortedPlaylists.length === 0 ? (
+        <Mat delay={380}>
+          <Glass radius={20} blur={50} style={s.emptyPlaylistCard}>
+            <View style={s.emptyPlaylistInner}>
+              <View style={s.emptyPlaylistIconWrap}>
+                <LinearGradient
+                  colors={[h2r(C.accent, 0.14), h2r(C.primary, 0.08)]}
+                  style={s.emptyPlaylistIconBg}
+                />
+                <Ionicons name="musical-notes" size={22} color={C.accent} style={{ position: 'absolute' }} />
+              </View>
+              <Text style={s.emptyPlaylistTitle}>No playlists yet</Text>
+              <Text style={s.emptyPlaylistSub}>Create one to start organizing your music</Text>
+              <TouchableOpacity
+                style={s.emptyPlaylistBtn}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  router.push('/create_playlist');
+                }}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={[C.accent, h2r('#46f5e0', 0.85)]}
+                  style={StyleSheet.absoluteFill}
+                />
+                <Text style={s.emptyPlaylistBtnText}>Create Playlist</Text>
+              </TouchableOpacity>
+            </View>
+          </Glass>
+        </Mat>
+      ) : (
+        <View style={s.playlistGrid}>
+          {sortedPlaylists.slice(0, GRID_COLS * 2).map((playlist, idx) => (
+            <PlaylistCell key={playlist.id} item={playlist} delay={370 + idx * 55} onOpen={onOpen} />
+          ))}
+        </View>
+      )}
+    </>
+  );
+});
+
+// ─── Tab bar (animated spring pill, Reanimated worklet) ─────────────────────────────
 
 const TABS = ["Playlists", "Artists", "Albums", "Songs", "Genres"];
 
@@ -881,19 +961,157 @@ const TRACKS = [
   { id: "3", title: "Nightcall",      artist: "Kavinsky",    time: "04:18" },
 ];
 
-const PLAYLISTS = [
-  { id: "late-night-mix", name: "Late Night Mix", count: "45 Songs",  art: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&q=80" },
-  { id: "focus-flow",     name: "Focus Flow",     count: "120 Songs", art: "https://images.unsplash.com/photo-1493225255756-d9584f8606e9?w=400&q=80" },
-  { id: "late-drive",     name: "Late Drive",     count: "34 Songs",  art: "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=400&q=80" },
-];
+// ─── Get recent downloads ─────────────────────────────────────────────────────
+
+
+const useRecentDownloads = (): DownloadedTrack[] => {
+  const downloadedTracks = useDownloadStore(s => s.downloadedTracks);
+  
+  const recentTracks = useMemo<DownloadedTrack[]>(() => {
+    return Object.values(downloadedTracks)
+      .sort((a, b) => (b.downloadedAt || 0) - (a.downloadedAt || 0))
+      .slice(0, 10);
+  }, [downloadedTracks]);
+  
+  return recentTracks;
+};
+
+// ─── Empty Downloads State ───────────────────────────────────────────────────
+
+const EmptyDownloadsState = memo(() => (
+  <Mat delay={190}>
+    <Glass radius={18} blur={44} style={s.emptyDownloadsCard}>
+      <View style={s.emptyDownloadsInner}>
+        <View style={s.emptyDownloadsIconWrap}>
+          <LinearGradient colors={[h2r(C.primary,0.12), h2r(C.primaryDeep,0.06)]} style={s.emptyDownloadsIconBg}>
+            <Ionicons name="cloud-download-outline" size={22} color={C.muted} />
+          </LinearGradient>
+        </View>
+        <Text style={s.emptyDownloadsTitle}>No downloads yet</Text>
+        <Text style={s.emptyDownloadsSub}>Downloaded songs will appear here</Text>
+      </View>
+    </Glass>
+  </Mat>
+));
+
+// ─── Downloaded Track Row ─────────────────────────────────────────────────────
+
+const DownloadedTrackRow = memo(({
+  track, delay, index,
+}: { track: DownloadedTrack; delay: number; index: number }) => {
+  const p = usePress(0.96);
+  const { play } = useMusic();
+  const { goNowPlaying } = useMusicNavigation("library-download");
+  const currentTrackId = usePlayerStore(s => s.currentTrack?.id);
+  const isActive = currentTrackId === track.id;
+
+  const activeGlow = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (isActive) {
+      Animated.timing(activeGlow, { toValue: 1, duration: 280, easing: EASE_EXPO, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(activeGlow, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+    }
+  }, [isActive]);
+
+  const handlePlay = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      await play({
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        art: track.art || "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=400",
+        url: track.url,
+        duration: track.duration || 0,
+        isLocal: true,
+        dominantColors: [C.primary, C.primaryMid],
+      });
+    } catch (e) {
+      console.error("[Player]", e);
+    }
+    goNowPlaying(track.id);
+  }, [track]);
+
+  return (
+    <Mat delay={delay}>
+      <Animated.View style={{ transform: [{ scale: p.sc }] }}>
+        <TouchableOpacity
+          onPress={handlePlay}
+          onPressIn={p.onIn} onPressOut={p.onOut}
+          activeOpacity={1}
+          accessibilityRole="button"
+          accessibilityLabel={`Play ${track.title} by ${track.artist}`}
+        >
+          <Glass style={s.trackCard} radius={18} blur={44}
+            tintColor={isActive ? C.primary : undefined}
+          >
+            {isActive && (
+              <Animated.View style={[s.trackActiveStrip, { opacity: activeGlow, backgroundColor: C.primary }]} />
+            )}
+
+            <View style={s.trackInner}>
+              <View style={s.trackIndex}>
+                {isActive
+                  ? <EqBars color={C.primary} />
+                  : <Text style={s.trackIndexText}>{index + 1}</Text>
+                }
+              </View>
+
+              <View style={s.trackArtWrap}>
+                <Image
+                  source={{ uri: track.art || "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=200" }}
+                  style={s.trackArt}
+                  contentFit="cover"
+                  transition={220}
+                />
+                <View style={[StyleSheet.absoluteFillObject, { borderRadius:12, borderWidth:0.7, borderColor:"rgba(255,255,255,0.10)" }]} />
+              </View>
+
+              <View style={s.trackCenter}>
+                <View style={s.trackNameRow}>
+                  <Text style={[s.trackName, isActive && { color: C.primary }]} numberOfLines={1}>
+                    {track.title}
+                  </Text>
+                  <Ionicons name="checkmark-circle" size={13} color={C.accent} />
+                </View>
+                <Text style={s.trackArtist} numberOfLines={1}>
+                  {track.artist}
+                </Text>
+              </View>
+
+              <Text style={s.trackDuration}>{formatDuration(track.duration)}</Text>
+
+              <TouchableOpacity
+                hitSlop={{ top:12, bottom:12, left:12, right:8 }}
+                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                accessibilityRole="button"
+                accessibilityLabel={`More options for ${track.title}`}
+                style={s.trackMoreBtn}
+              >
+                <Ionicons name="ellipsis-vertical" size={17} color={C.muted} />
+              </TouchableOpacity>
+            </View>
+          </Glass>
+        </TouchableOpacity>
+      </Animated.View>
+    </Mat>
+  );
+});
 
 // ─── MAIN SCREEN ──────────────────────────────────────────────────────────────
 
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { goPlaylist } = useMusicNavigation("library");
+  const { goPlaylist, goNowPlaying } = useMusicNavigation("library");
   const [activeTab, setActiveTab] = useState("Playlists");
+
+  const recentDownloads = useRecentDownloads();
+
+  const handlePlayLikedSongs = useCallback(async () => {
+    goPlaylist("liked-songs");
+  }, [goPlaylist]);
 
   // Subtitle entrance
   const subOp = useRef(new Animated.Value(0)).current;
@@ -938,7 +1156,7 @@ export default function LibraryScreen() {
         {/* ── Page content ────────────────────────────────────────────────── */}
         <View style={s.content}>
           {/* Hero */}
-          <HeroCard onPress={() => goPlaylist("liked-songs")} />
+          <HeroCard onPress={handlePlayLikedSongs} />
 
           {/* Bento */}
           <BentoRow
@@ -958,25 +1176,18 @@ export default function LibraryScreen() {
             actionLabel="View All"
           />
 
-          <View style={{ gap: 10, marginBottom: 6 }}>
-            {TRACKS.map((track, idx) => (
-              <TrackRow key={track.id} track={track} index={idx} delay={190 + idx * 52} />
-            ))}
-          </View>
+          {recentDownloads.length > 0 ? (
+            <View style={{ gap: 10, marginBottom: 6 }}>
+              {recentDownloads.map((track, idx) => (
+                <DownloadedTrackRow key={track.id} track={track} index={idx} delay={190 + idx * 52} />
+              ))}
+            </View>
+          ) : (
+            <EmptyDownloadsState />
+          )}
 
           {/* My Playlists */}
-          <SectionHeader
-            title="My Playlists"
-            accentColor={C.accent}
-            delay={340}
-            style={{ marginTop: 34 }}
-          />
-
-          <View style={s.playlistGrid}>
-            {PLAYLISTS.slice(0, GRID_COLS * 2).map((item, idx) => (
-              <PlaylistCell key={item.id} item={item} delay={370 + idx * 55} onOpen={goPlaylist} />
-            ))}
-          </View>
+          <MyPlaylistsSection onOpen={goPlaylist} />
         </View>
       </ScrollView>
     </View>
@@ -1240,4 +1451,38 @@ const s = StyleSheet.create({
     fontFamily: Platform.OS === "android" ? "sans-serif-medium" : "System",
   },
   gridCount: { fontSize:12, color:C.muted, marginTop:3 },
+
+  // ── Empty Downloads
+  emptyDownloadsCard: { paddingVertical: 24, paddingHorizontal: 16 },
+  emptyDownloadsInner: { alignItems: "center", gap: 12 },
+  emptyDownloadsIconWrap: { marginBottom: 4 },
+  emptyDownloadsIconBg: {
+    width: 52, height: 52, borderRadius: 16,
+    justifyContent: "center", alignItems: "center",
+  },
+  emptyDownloadsTitle: { fontSize: 15, fontWeight: "700", color: C.text },
+  emptyDownloadsSub: { fontSize: 13, color: C.muted, textAlign: "center" },
+
+  // ── Empty Playlists
+  emptyPlaylistCard: { marginBottom: 20 },
+  emptyPlaylistInner: {
+    alignItems: "center", gap: 12,
+    paddingVertical: 28, paddingHorizontal: 24,
+  },
+  emptyPlaylistIconWrap: {
+    width: 56, height: 56, borderRadius: 18,
+    justifyContent: "center", alignItems: "center",
+    overflow: "hidden",
+  },
+  emptyPlaylistIconBg: { ...StyleSheet.absoluteFillObject },
+  emptyPlaylistTitle: { fontSize: 16, fontWeight: "700", color: C.text },
+  emptyPlaylistSub: { fontSize: 13, color: C.muted, textAlign: "center", lineHeight: 18 },
+  emptyPlaylistBtn: {
+    marginTop: 8, height: 42, borderRadius: 21,
+    paddingHorizontal: 24, overflow: "hidden",
+    justifyContent: "center", alignItems: "center",
+  },
+  emptyPlaylistBtnText: {
+    fontSize: 14, fontWeight: "800", color: "#08080D", letterSpacing: -0.1,
+  },
 });

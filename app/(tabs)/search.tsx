@@ -17,8 +17,10 @@
  * ✓ All animations useNativeDriver — zero JS-thread jank
  */
 
+import { useLikesStore } from "@/src/features/likes/store/likes.store";
 import { useMusic } from "@/src/context/MusicContext";
 import { PlayerTrack } from "@/src/features/player/types/player";
+import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { useRecentSearchStore } from "@/src/features/search/store/recent-search.store";
 import { RecentSearchItem } from "@/src/features/search/types/recent-search";
 import { useSearch } from "@/src/hooks/use-search";
@@ -267,10 +269,15 @@ const usePress = () => {
 
 // ─── Heart toggle hook ────────────────────────────────────────────────────────
 
-const useHeart = () => {
-  const [liked, setLiked] = useState(false);
+const useHeart = (song: any) => {
+  const liked = useLikesStore(
+    (s) => !!(song?.id && s.likedTrackIds[song.id]),
+  );
+  const toggleLike = useLikesStore((s) => s.toggleLike);
   const sc = useRef(new Animated.Value(1)).current;
+
   const toggle = () => {
+    if (!song) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Animated.sequence([
       Animated.spring(sc, {
@@ -280,7 +287,7 @@ const useHeart = () => {
       }),
       Animated.spring(sc, { toValue: 1.0, ...SPR_SNAP, useNativeDriver: true }),
     ]).start();
-    setLiked((v) => !v);
+    toggleLike(song);
   };
   return { liked, toggle, sc };
 };
@@ -415,7 +422,7 @@ const SongRow = ({
   isActive = false,
 }: any) => {
   const p = usePress();
-  const h = useHeart();
+  const h = useHeart(song);
 
   return (
     <Mat delay={delay}>
@@ -750,7 +757,7 @@ const TopResultCard = ({
   goArtistByName,
   delay = 0,
 }: any) => {
-  const h = useHeart();
+  const h = useHeart(song);
   const p = usePress();
   const pb = usePress();
 
@@ -1324,6 +1331,7 @@ export default function SearchScreen() {
   const { goNowPlaying, goArtist, goArtistByName, goAlbum } =
     useMusicNavigation("search");
   const { setQueue, preloadTrack, playNext, addToQueue } = useMusic();
+  const setActiveContext = usePlayerStore((s) => s.setActiveContext);
 
   const { query: initialQuery } = useLocalSearchParams<{ query?: string }>();
   const { query, setQuery, results, isLoading, error } = useSearch(
@@ -1373,24 +1381,19 @@ export default function SearchScreen() {
           ? contextList || currentSongs
           : [track];
 
-      const playerTrack = createPlayerTrack(track);
-
-      // 2. PRELOAD: Resolve stream URL before navigation to avoid blank player
-      await preloadTrack(playerTrack);
-
-      // 3. NAVIGATE instantly
-      goNowPlaying(track.id);
-
-      // 4. SYNC QUEUE in background
       const playerTracks = contextualQueue.map((t) => createPlayerTrack(t));
       const startIndex = playerTracks.findIndex((t) => t.id === track.id);
-      setQueue(playerTracks, startIndex !== -1 ? startIndex : 0).catch(
-        console.error,
-      );
 
+      // 2. NAVIGATE instantly
+      goNowPlaying(track.id);
+
+      // 3. SYNC QUEUE and Resolve
+      setActiveContext({ type: "search", id: query });
+      await setQueue(playerTracks, startIndex !== -1 ? startIndex : 0);
+      
       return contextualQueue;
     },
-    [goNowPlaying, setQueue, results, preloadTrack, createPlayerTrack],
+    [goNowPlaying, setQueue, results, createPlayerTrack, setActiveContext, query],
   );
 
   const handlePlaySong = useCallback(

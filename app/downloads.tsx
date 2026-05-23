@@ -1,8 +1,10 @@
 import { CategoryTabs } from "@/src/components/CategoryTabs";
 import MiniPlayer from "@/src/components/MiniPlayer";
 import { useMusic } from "@/src/context/MusicContext";
+import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { DownloadManager } from "@/src/features/download/services/download.manager";
 import { useDownloadStore } from "@/src/features/download/store/download.store";
+import { usePlaylistStore } from "@/src/features/playlist/store/playlist.store";
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { BlurView } from "expo-blur";
@@ -26,9 +28,16 @@ import {
   Text,
   TouchableOpacity,
   View,
-  ViewStyle
+  ViewStyle,
+  Modal,
+  ScrollView,
+  ActivityIndicator
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LiquidGlass } from "@/src/components/ui/liquid-glass";
+import { useLikesStore } from "@/src/features/likes/store/likes.store";
+import { openAlbum, openArtistByName } from "@/src/navigation/music-navigation";
+import * as Haptics from "expo-haptics";
 
 const { width: SW, height: SH } = Dimensions.get("window");
 
@@ -534,11 +543,13 @@ const TrackRow = React.memo(
     track,
     onPlay,
     onRemove,
+    onShowOptions,
     index,
   }: {
     track: any;
     onPlay: (t: any) => void;
     onRemove: (id: string) => void;
+    onShowOptions: (t: any) => void;
     index: number;
   }) => {
     const entrance = useEntrance(index * 45);
@@ -558,11 +569,14 @@ const TrackRow = React.memo(
         }),
       ]).start(() => onRemove(track.id));
 
+    const isLiked = useLikesStore((s) => !!s.likedTrackIds[track.id]);
+    const toggleLike = useLikesStore((s) => s.toggleLike);
+
     return (
       <Animated.View style={entrance}>
         <SpringPress
           onPress={() => onPlay(track)}
-          style={s.trackRow}
+          style={[s.trackRow, track.isCurrent && { backgroundColor: 'rgba(255,255,255,0.05)' }]}
           accessibilityLabel={`Play ${track.title} by ${track.artist}`}
           accessibilityRole="button"
         >
@@ -573,24 +587,51 @@ const TrackRow = React.memo(
             transition={250}
           />
           <View style={s.trackInfo}>
-            <Text style={s.trackTitle} numberOfLines={1}>
+            <Text style={[s.trackTitle, track.isCurrent && { color: C.primary }]} numberOfLines={1}>
               {track.title}
             </Text>
-            <Text style={s.trackArtist} numberOfLines={1}>
+            <Text style={[s.trackArtist, track.isCurrent && { color: C.primaryMid }]} numberOfLines={1}>
               {track.artist}
             </Text>
           </View>
-          <TouchableOpacity
-            onPress={pressTrash}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            accessibilityLabel={`Remove ${track.title}`}
-            accessibilityRole="button"
-            style={{ padding: 10 }}
-          >
-            <Animated.View style={{ transform: [{ scale: trashScale }] }}>
-              <Ionicons name="trash-outline" size={20} color={C.muted} />
-            </Animated.View>
-          </TouchableOpacity>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                toggleLike(track);
+              }}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+              accessibilityLabel={isLiked ? "Unlike" : "Like"}
+              accessibilityRole="button"
+              style={{ padding: 10 }}
+            >
+              <Ionicons
+                name={isLiked ? "heart" : "heart-outline"}
+                size={20}
+                color={isLiked ? C.primary : C.muted}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => onShowOptions(track)}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+              accessibilityLabel={`Options for ${track.title}`}
+              accessibilityRole="button"
+              style={{ padding: 10 }}
+            >
+              <Ionicons name="ellipsis-horizontal" size={20} color={C.muted} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={pressTrash}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+              accessibilityLabel={`Remove ${track.title}`}
+              accessibilityRole="button"
+              style={{ padding: 10 }}
+            >
+              <Animated.View style={{ transform: [{ scale: trashScale }] }}>
+                <Ionicons name="trash-outline" size={20} color={C.muted} />
+              </Animated.View>
+            </TouchableOpacity>
+          </View>
         </SpringPress>
       </Animated.View>
     );
@@ -811,14 +852,22 @@ export default function DownloadsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const storage = useStorage();
-  const { setTrack } = useMusic();
+  const { setQueue } = useMusic();
+  const setActiveContext = usePlayerStore(s => s.setActiveContext);
+  const activeContext = usePlayerStore(s => s.activeContext);
+  const currentTrack = usePlayerStore(s => s.currentTrack);
   const [activeTab, setActiveTab] = useState("Songs");
   const [isLoading, setIsLoading] = useState(true);
   const tabs = ["Songs", "Albums", "Playlists", "Downloading"];
 
+  const [actionSheetVisible, setActionSheetVisible] = useState(false);
+  const [selectedTrack, setSelectedTrack] = useState<any>(null);
+  const [isSearchingAlbum, setIsSearchingAlbum] = useState(false);
+
   const downloadedTracks = useDownloadStore((s) => s.downloadedTracks);
   const activeTasks = useDownloadStore((s) => s.activeTasks);
   const downloadQueue = useDownloadStore((s) => s.downloadQueue);
+  const playlists = usePlaylistStore((s) => s.playlists);
 
   // Simulate initial load skeleton
   useEffect(() => {
@@ -840,7 +889,7 @@ export default function DownloadsScreen() {
       const key = t.album || "Unknown";
       if (!map[key]) {
         map[key] = {
-          id: key,
+          id: t.albumId || `local-album-${encodeURIComponent(t.album || "unknown")}`,
           title: key,
           artist: t.artist,
           art: t.art,
@@ -860,16 +909,35 @@ export default function DownloadsScreen() {
     [activeTasks, downloadQueue],
   );
 
+  const downloadedPlaylists = useMemo(() => {
+    return Object.values(playlists)
+      .filter((pl) => pl.trackIds.some((tid) => !!downloadedTracks[tid]))
+      .map((pl) => {
+        const firstTrackId = pl.trackIds.find((tid) => !!downloadedTracks[tid]);
+        const art = firstTrackId ? (downloadedTracks[firstTrackId] as any).art : "";
+        return {
+          id: pl.id,
+          title: pl.name,
+          artist: "Local Playlist",
+          art: art,
+          tracks: pl.trackIds,
+        };
+      });
+  }, [playlists, downloadedTracks]);
+
   const handlePlay = useCallback(
     (track: any) => {
-      setTrack({
-        ...track,
-        durationSec: track.durationSec || 0,
-        dominantColors: track.dominantColors || [C.primary, C.primaryMid],
-      } as any);
+      const idx = tracks.findIndex(t => t.id === track.id);
+      setActiveContext({ type: 'downloads', id: 'downloads' });
+      const hydratedTracks = tracks.map(t => ({
+        ...t,
+        duration: t.duration || 0,
+        dominantColors: t.dominantColors || [C.primary, C.primaryMid],
+      }));
+      setQueue(hydratedTracks as any, idx !== -1 ? idx : 0);
       router.push({ pathname: "/now_playing", params: { trackId: track.id } });
     },
-    [setTrack, router],
+    [setQueue, router, tracks, setActiveContext],
   );
 
   const handleRemove = useCallback((trackId: string) => {
@@ -880,15 +948,62 @@ export default function DownloadsScreen() {
     DownloadManager.cancelDownload(trackId);
   }, []);
 
+  const handleShowOptions = useCallback((track: any) => {
+    setSelectedTrack(track);
+    setActionSheetVisible(true);
+  }, []);
+
+  const handleGoToAlbum = useCallback(async () => {
+    if (!selectedTrack) return;
+    if (selectedTrack.albumId) {
+      setActionSheetVisible(false);
+      openAlbum(router, selectedTrack.albumId);
+    } else if (selectedTrack.album) {
+      setIsSearchingAlbum(true);
+      try {
+        const { musicService } = await import("@/src/services/api/music");
+        const search = await musicService.lookupAlbumByName(
+          `${selectedTrack.album} ${selectedTrack.artist}`,
+        );
+        if (search && search.id) {
+          setActionSheetVisible(false);
+          openAlbum(router, search.id);
+        } else {
+          setActionSheetVisible(false);
+          openAlbum(router, `local-album-${encodeURIComponent(selectedTrack.album)}`);
+        }
+      } catch (e) {
+        console.warn(e);
+        setActionSheetVisible(false);
+        openAlbum(router, `local-album-${encodeURIComponent(selectedTrack.album)}`);
+      } finally {
+        setIsSearchingAlbum(false);
+      }
+    }
+  }, [selectedTrack, router]);
+
+  const handleGoToArtist = useCallback(() => {
+    if (!selectedTrack) return;
+    setActionSheetVisible(false);
+    openArtistByName(router, selectedTrack.artist);
+  }, [selectedTrack, router]);
+
+  const handleRemoveSelected = useCallback(() => {
+    if (!selectedTrack) return;
+    setActionSheetVisible(false);
+    handleRemove(selectedTrack.id);
+  }, [selectedTrack, handleRemove]);
+
   const renderItem = useCallback(
     ({ item, index }: { item: any; index: number }) => {
       if (isLoading) return <SkeletonRow />;
       if (activeTab === "Songs")
         return (
           <TrackRow
-            track={item}
+            track={{...item, isCurrent: currentTrack?.id === item.id && activeContext?.type === "downloads"}}
             onPlay={handlePlay}
             onRemove={handleRemove}
+            onShowOptions={handleShowOptions}
             index={index}
           />
         );
@@ -896,7 +1011,7 @@ export default function DownloadsScreen() {
         return (
           <AlbumRow
             album={item}
-            onPress={() => handlePlay(item.tracks[0])}
+            onPress={() => openAlbum(router, item.id)}
             index={index}
           />
         );
@@ -904,18 +1019,27 @@ export default function DownloadsScreen() {
         return (
           <DownloadingRow task={item} onCancel={handleCancel} index={index} />
         );
+      if (activeTab === "Playlists")
+        return (
+          <AlbumRow
+            album={item}
+            onPress={() => router.push(`/playlist/${item.id}`)}
+            index={index}
+          />
+        );
       return null;
     },
-    [activeTab, handlePlay, handleRemove, handleCancel, isLoading],
+    [activeTab, handlePlay, handleRemove, handleCancel, handleShowOptions, isLoading, router, currentTrack, activeContext],
   );
 
   const listData = useMemo(() => {
     if (isLoading) return Array(6).fill({ _skeleton: true });
     if (activeTab === "Songs") return tracks;
     if (activeTab === "Albums") return albums;
+    if (activeTab === "Playlists") return downloadedPlaylists;
     if (activeTab === "Downloading") return downloading;
     return [];
-  }, [activeTab, tracks, albums, downloading, isLoading]);
+  }, [activeTab, tracks, albums, downloading, downloadedPlaylists, isLoading]);
 
   const headerEntrance = useEntrance(0);
 
@@ -1025,6 +1149,125 @@ export default function DownloadsScreen() {
       />
 
       <MiniPlayer />
+
+      <Modal
+        visible={actionSheetVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActionSheetVisible(false)}
+      >
+        <TouchableOpacity
+          style={s.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setActionSheetVisible(false)}
+        >
+          <BlurView
+            intensity={50}
+            tint="dark"
+            style={StyleSheet.absoluteFill}
+          />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              { backgroundColor: "rgba(0,0,0,0.6)" },
+            ]}
+          />
+        </TouchableOpacity>
+        <View style={s.modalCardWrap} pointerEvents="box-none">
+          <LiquidGlass
+            style={s.actionSheetCard}
+            borderRadius={30}
+            intensity={70}
+          >
+            <View style={s.modalHandleWrap}>
+              <View style={s.modalHandle} />
+            </View>
+            {selectedTrack && (
+              <>
+                <View style={s.modalHeaderInfo}>
+                  <Text style={s.modalTitle} numberOfLines={1}>
+                    {selectedTrack.title}
+                  </Text>
+                  <Text style={s.modalSubtitle} numberOfLines={1}>
+                    {selectedTrack.artist}
+                  </Text>
+                </View>
+                <View style={s.modalDivider} />
+                <ScrollView
+                  style={s.modalActionsList}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <TouchableOpacity
+                    style={s.modalActionRow}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      handleGoToAlbum();
+                    }}
+                  >
+                    <Ionicons
+                      name="disc-outline"
+                      size={22}
+                      color="rgba(255,255,255,0.85)"
+                    />
+                    <Text style={s.modalActionLabel}>Go to Album</Text>
+                    {isSearchingAlbum && (
+                      <ActivityIndicator
+                        size="small"
+                        color={C.primary}
+                        style={{ marginLeft: 10 }}
+                      />
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={s.modalActionRow}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      handleGoToArtist();
+                    }}
+                  >
+                    <Ionicons
+                      name="person-outline"
+                      size={22}
+                      color="rgba(255,255,255,0.85)"
+                    />
+                    <Text style={s.modalActionLabel}>Go to Artist</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={s.modalActionRow}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      handleRemoveSelected();
+                    }}
+                  >
+                    <Ionicons
+                      name="trash-outline"
+                      size={22}
+                      color="#ff453a"
+                    />
+                    <Text style={[s.modalActionLabel, { color: "#ff453a" }]}>
+                      Delete Download
+                    </Text>
+                  </TouchableOpacity>
+                </ScrollView>
+              </>
+            )}
+            <TouchableOpacity
+              onPress={() => setActionSheetVisible(false)}
+              style={s.modalDoneBtn}
+            >
+              <LinearGradient
+                colors={[C.primary, C.primaryMid]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={StyleSheet.absoluteFill}
+              />
+              <Text style={s.modalDoneText}>DONE</Text>
+            </TouchableOpacity>
+          </LiquidGlass>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1144,4 +1387,73 @@ const s = StyleSheet.create({
     letterSpacing: -0.2,
   },
   trackArtist: { fontSize: 13, color: C.muted },
+  modalOverlay: { flex: 1, justifyContent: "center", alignItems: "center" },
+  modalCardWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  actionSheetCard: {
+    width: SW * 0.9,
+    maxHeight: SH * 0.8,
+    paddingTop: 12,
+    paddingBottom: 24,
+    paddingHorizontal: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  modalHandleWrap: { alignItems: "center", marginBottom: 20 },
+  modalHandle: {
+    width: 36,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: "rgba(255,255,255,0.22)",
+  },
+  modalHeaderInfo: { alignItems: "center", marginBottom: 24 },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#FFF",
+    textAlign: "center",
+    letterSpacing: -0.5,
+    marginBottom: 6,
+  },
+  modalSubtitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.45)",
+    textAlign: "center",
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    marginBottom: 8,
+  },
+  modalActionsList: { maxHeight: SH * 0.4 },
+  modalActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 16,
+    gap: 16,
+  },
+  modalActionLabel: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.9)",
+  },
+  modalDoneBtn: {
+    height: 54,
+    borderRadius: 27,
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+    marginTop: 16,
+  },
+  modalDoneText: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: "#FFF",
+    letterSpacing: 1.5,
+  },
 });

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -147,10 +147,20 @@ const QualityModal = ({
   );
 };
 
+import { useMediaCacheStore } from '../../src/features/cache/store/media-cache.store';
+import { useDownloadStore } from '../../src/features/download/store/download.store';
+
+// Inside SettingsScreen component
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { themeColors, setAccentColor, accentColor } = useTheme();
+  
+  const cacheStore = useMediaCacheStore();
+  const downloadedTracks = useDownloadStore(s => s.downloadedTracks);
+  
+  const cacheStats = useMemo(() => cacheStore.getCacheStats(), [cacheStore.metadata, cacheStore.albumMap]);
+  const downloadCount = useMemo(() => Object.keys(downloadedTracks).length, [downloadedTracks]);
 
   // State
   const [switches, setSwitches] = useState({
@@ -166,7 +176,6 @@ export default function SettingsScreen() {
   const [downloadQuality, setDownloadQuality] = useState("High (256kbps)");
   const [crossfadeSeconds, setCrossfadeSeconds] = useState(6);
   const [showCrossfadeSlider, setShowCrossfadeSlider] = useState(false);
-  const [storageUsed, setStorageUsed] = useState(12.4);
   const [modalType, setModalType] = useState<null | 'streaming' | 'download'>(null);
   const [cacheAcknowledgement, setCacheAcknowledgement] = useState(false);
 
@@ -175,11 +184,23 @@ export default function SettingsScreen() {
   };
 
   const handleClearCache = () => {
-    if (storageUsed <= 0.1) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setStorageUsed(prev => Number((prev - 0.5).toFixed(1)));
-    setCacheAcknowledgement(true);
-    setTimeout(() => setCacheAcknowledgement(false), 2000);
+    Alert.alert(
+      "Clear Cache",
+      "This will remove all cached metadata, lyrics, and artwork. Your downloaded songs and playlists will remain safe.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Clear", 
+          style: "destructive",
+          onPress: () => {
+            cacheStore.clearCache();
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setCacheAcknowledgement(true);
+            setTimeout(() => setCacheAcknowledgement(false), 2000);
+          }
+        }
+      ]
+    );
   };
 
   const openEqualizer = async () => {
@@ -331,8 +352,13 @@ export default function SettingsScreen() {
 
           <View style={styles.settingItem}>
             <View style={styles.settingItemLeft}>
-              <Text style={styles.settingItemLabel}>Storage Location</Text>
-              <Text style={styles.settingItemSubtext}>{`Internal Storage (${storageUsed.toFixed(1)} GB used)`}</Text>
+              <Text style={styles.settingItemLabel}>Storage Information</Text>
+              <Text style={styles.settingItemSubtext}>
+                {`${cacheStats.metadataCount} Tracks Cached • ${cacheStats.lyricsCount} Lyrics`}
+              </Text>
+              <Text style={[styles.settingItemSubtext, { marginTop: 2 }]}>
+                {`${downloadCount} Songs Downloaded • ${cacheStats.totalSizeEstimate} Cache Used`}
+              </Text>
             </View>
             <MaterialCommunityIcons name="chip" size={24} color={themeColors.on_surface_muted} />
           </View>
@@ -340,12 +366,17 @@ export default function SettingsScreen() {
           <TouchableOpacity 
             style={[styles.clearCacheBtn, cacheAcknowledgement && { borderColor: '#4caf50', borderWidth: 1 }]} 
             onPress={handleClearCache}
+            disabled={cacheStats.metadataCount === 0 && cacheStats.albumCount === 0}
           >
             <LinearGradient
-              colors={cacheAcknowledgement ? ['#1b5e20', '#1b5e20'] : ['#422', '#211']}
+              colors={cacheAcknowledgement ? ['#1b5e20', '#1b5e20'] : (cacheStats.metadataCount === 0 ? ['#222', '#111'] : ['#422', '#211'])}
               style={styles.clearCacheGradient}
             >
-              <Text style={[styles.clearCacheText, cacheAcknowledgement && { color: '#81c784' }]}>
+              <Text style={[
+                styles.clearCacheText, 
+                cacheAcknowledgement && { color: '#81c784' },
+                cacheStats.metadataCount === 0 && !cacheAcknowledgement && { color: '#555' }
+              ]}>
                 {cacheAcknowledgement ? "Cache Cleared! ✓" : "Clear Cache"}
               </Text>
             </LinearGradient>

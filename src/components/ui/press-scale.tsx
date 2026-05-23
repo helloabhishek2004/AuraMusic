@@ -79,3 +79,29 @@ function PressScaleComponent({
 }
 
 export const PressScale = memo(PressScaleComponent);
+
+// Hook variant: returns an object with `scale`, `onIn`, and `onOut` to match legacy callers
+export const usePressScale = (scaleTo = 0.96) => {
+  const scale = useRef(new Animated.Value(1)).current;
+  const reduceMotion = useReducedMotionPreference();
+
+  const onIn = () => {
+    if (reduceMotion) return;
+    Animated.spring(scale, {
+      toValue: scaleTo,
+      ...motion.spring.press,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const onOut = () => {
+    if (reduceMotion) return;
+    Animated.spring(scale, {
+      toValue: 1,
+      ...motion.spring.press,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return { scale, onIn, onOut };
+};

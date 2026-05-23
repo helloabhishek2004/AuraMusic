@@ -6,6 +6,7 @@ import {
   getUriScheme,
   normalizePlaybackUri,
 } from "../utils/track-resolver";
+import { transitionManager } from "./transition-manager";
 
 function validateTrack(track: PlayerTrack): boolean {
   return !!(track && track.id && track.title);
@@ -16,19 +17,23 @@ function validateQueue(queue: PlayerTrack[]): boolean {
 }
 
 function isPlayableUri(uri?: string): boolean {
+  if (!uri) return false;
+  if (uri.startsWith('data:audio')) return true; // Allow dummy data URIs
   const scheme = getUriScheme(normalizePlaybackUri(uri));
   return scheme === "file" || scheme === "content" || scheme === "http" || scheme === "https";
 }
 
-function toMediaItem(track: PlayerTrack) {
+const DUMMY_SILENCE_URI = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIwBRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVF////////+7gQAAAAAAAAAAAAAAAAAAAAAAAWLhA==";
+
+function toMediaItem(track: PlayerTrack, isDummy: boolean = false) {
   return {
     mediaId: track.id,
-    url: normalizePlaybackUri(track.url),
+    url: isDummy ? DUMMY_SILENCE_URI : normalizePlaybackUri(track.url),
     title: track.title,
     artist: track.artist || "Local",
     type: "default" as const,
     artworkUrl: track.art || undefined,
-    duration: track.duration,
+    duration: track.duration ? Number(track.duration) : undefined,
     mimeType: track.mimeType,
   };
 }
@@ -62,6 +67,13 @@ export class PlaybackService {
     return this.isReordering;
   }
 
+  static setReordering(val: boolean) {
+    this.isReordering = val;
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      console.info("[Player] Reordering state:", val);
+    }
+  }
+
   static setupPlayer() {
     if (_playerSetup || this.isSetup) return;
     if (Platform.OS === "web") return;
@@ -88,10 +100,14 @@ export class PlaybackService {
           PlayerCommand.SkipForward,
           PlayerCommand.SkipBackward,
         ],
-
+        handling: 'hybrid',
+        perCommandHandling: {
+          next: 'js',
+          previous: 'js'
+        },
         forwardInterval: 30,
         backwardInterval: 15,
-      });
+      } as any);
     } catch (error) {
       if (
         error instanceof Error &&
@@ -110,7 +126,7 @@ export class PlaybackService {
 
   /**
    * Loads a track and starts playback.
-   * For local tracks, we load the whole queue into the native layer for better stability.
+   * Syncs the full queue to the native layer for stable notification controls.
    */
   static async loadTrack(track: PlayerTrack, queue: PlayerTrack[] = [], startIndex: number = -1): Promise<void> {
     this.setupPlayer();
@@ -125,63 +141,47 @@ export class PlaybackService {
       return;
     }
 
-    const isLocal = !!normalizedTrack.isLocal;
-
     try {
-      if (isLocal) {
-        const isSupportedLocalUri = normalizedTrack.url.startsWith("file://") || normalizedTrack.url.startsWith("content://");
-
-        if (!isSupportedLocalUri) {
-          throw new Error("Invalid local file URI: must be file:// or content://");
-        }
-        
-        const activeItem = await TrackPlayer.getActiveMediaItem();
-        if (activeItem && activeItem.mediaId === normalizedTrack.id) {
-          await TrackPlayer.play();
-          return;
-        }
-
-        const { resolveTrack } = await import("../utils/track-resolver");
-        const queueContainsTrack = queue.some(t => t.id === normalizedTrack.id);
-        const queueForNative = queueContainsTrack ? queue : [normalizedTrack];
-        const resolvedQueue = await Promise.all(
-          queueForNative.map(t => t.id === normalizedTrack.id ? Promise.resolve(normalizedTrack) : resolveTrack(t))
-        );
-        const playableQueue = resolvedQueue
-          .map(t => ({ ...t, url: normalizePlaybackUri(t.url) }))
-          .filter(t => validateTrack(t) && isPlayableUri(t.url));
-
-        if (!playableQueue.some(t => t.id === normalizedTrack.id)) {
-          playableQueue.unshift(normalizedTrack);
-        }
-
-        const targetIndex = Math.max(0, playableQueue.findIndex(t => t.id === normalizedTrack.id));
-        const mediaItems = playableQueue.map(toMediaItem);
-        logSourceDiagnostics(normalizedTrack, mediaItems.length, targetIndex);
-        
-        await TrackPlayer.setMediaItems(mediaItems, targetIndex);
-
-        await new Promise(resolve => setTimeout(resolve, 300));
-        
+      const activeItem = await TrackPlayer.getActiveMediaItem();
+      if (activeItem && activeItem.mediaId === normalizedTrack.id) {
         await TrackPlayer.play();
-      } else {
-        TrackPlayer.clear();
-        logSourceDiagnostics(normalizedTrack, 1, 0);
-        
-        const mediaItem: any = {
-          mediaId: normalizedTrack.id,
-          url: normalizedTrack.url,
-          title: normalizedTrack.title,
-          artist: normalizedTrack.artist,
-        };
-
-        if (normalizedTrack.art && normalizedTrack.art.trim().length > 0) {
-          mediaItem.artworkUrl = normalizedTrack.art;
-        }
-
-        TrackPlayer.setMediaItem(mediaItem);
-        TrackPlayer.play();
+        return;
       }
+
+      // 1. Resolve queue to playable URIs
+      const { resolveTrack } = await import("../utils/track-resolver");
+      const queueContainsTrack = queue.some(t => t.id === normalizedTrack.id);
+      const queueForNative = queueContainsTrack ? queue : [normalizedTrack];
+
+      // We resolve the target track immediately, others can be resolved as needed 
+      // but for setMediaItems we try to have a usable queue.
+      const resolvedQueue = await Promise.all(
+        queueForNative.map(t => t.id === normalizedTrack.id ? Promise.resolve(normalizedTrack) : resolveTrack(t))
+      );
+
+      const playableQueue = resolvedQueue
+        .map(t => {
+            const cached = transitionManager.getCachedTrack(t.id);
+            return cached ? { ...t, url: cached.url } : t;
+        })
+        .map(t => ({ ...t, url: normalizePlaybackUri(t.url) }));
+        // Do not filter out unplayable URIs. Map them to dummy items so Native queue size matches JS.
+
+      if (!playableQueue.some(t => t.id === normalizedTrack.id)) {
+        playableQueue.unshift(normalizedTrack);
+      }
+
+      const targetIndex = Math.max(0, playableQueue.findIndex(t => t.id === normalizedTrack.id));
+      const mediaItems = playableQueue.map(t => toMediaItem(t, !isPlayableUri(t.url)));
+      
+      logSourceDiagnostics(normalizedTrack, mediaItems.length, targetIndex);
+      
+      // 2. Set full queue to native player
+      await TrackPlayer.setMediaItems(mediaItems, targetIndex);
+
+      // 3. Start playback
+      await TrackPlayer.play();
+      
     } catch (error) {
       console.error("[Player] loadTrack failed:", error);
       throw error;
@@ -196,23 +196,29 @@ export class PlaybackService {
       return;
     }
 
+    if (this.isReordering) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        console.warn("[Player] updateQueue skipped: move in progress");
+      }
+      return;
+    }
+
     try {
       const activeItem = await TrackPlayer.getActiveMediaItem();
-      const isCurrentlyPlaying = await TrackPlayer.isPlaying();
+      const playState = await TrackPlayer.getPlaybackState();
+      const isCurrentlyPlaying = (playState as any).state === 'playing' || playState === ('playing' as any);
       
-      const { resolveTrack } = await import("../utils/track-resolver");
-      const resolvedQueue = await Promise.all(queue.map(t => resolveTrack(t)));
-
-      const mediaItems = resolvedQueue
+      const mediaItems = queue
+        .map(t => {
+            const cached = transitionManager.getCachedTrack(t.id);
+            return cached ? { ...t, url: cached.url } : t;
+        })
         .map(t => ({ ...t, url: normalizePlaybackUri(t.url) }))
-        .filter(t => validateTrack(t) && isPlayableUri(t.url))
-        .map(toMediaItem);
+        .map(t => toMediaItem(t, !isPlayableUri(t.url)));
       
+      if (mediaItems.length === 0) return;
+
       const targetIndex = startIndex !== -1 ? startIndex : 0;
-      
-      if (this.isReordering) {
-        return;
-      }
       
       this.isReordering = true;
       
@@ -220,18 +226,58 @@ export class PlaybackService {
       
       if (activeItem && isCurrentlyPlaying) {
         try {
-          await TrackPlayer.play();
+          const newActive = await TrackPlayer.getActiveMediaItem();
+          if (newActive?.mediaId === activeItem.mediaId) {
+             await TrackPlayer.play();
+          }
         } catch (e) {}
       }
       
       setTimeout(() => {
         this.isReordering = false;
-      }, 100);
+      }, 300);
       
     } catch (e) {
       console.error("[Player] Native queue update failed:", e);
       this.isReordering = false;
     }
+  }
+
+  static async updateMediaItem(index: number, track: PlayerTrack): Promise<void> {
+    if (Platform.OS === "web") return;
+    try {
+      const item = toMediaItem({
+        ...track,
+        url: normalizePlaybackUri(track.url)
+      }, !isPlayableUri(track.url));
+      
+      await TrackPlayer.replaceMediaItem(index, item);
+    } catch (e) {
+      console.error("[Player] updateMediaItem failed:", e);
+    }
+  }
+
+  private static moveQueue: Promise<void> = Promise.resolve();
+
+  static async moveTrack(from: number, to: number): Promise<void> {
+    if (Platform.OS === "web") return;
+    
+    // Chain moves to ensure sequential execution on native thread
+    this.moveQueue = this.moveQueue.then(async () => {
+      try {
+        await TrackPlayer.moveMediaItem(from, to);
+        if (typeof __DEV__ !== "undefined" && __DEV__) {
+          console.info(`[Player] Native move confirmed: ${from} -> ${to}`);
+        }
+      } catch (e) {
+        console.error("[Player] Native move failed, forcing full sync:", e);
+        const { usePlayerStore } = await import('../store/player.store');
+        const state = usePlayerStore.getState();
+        await this.updateQueue(state.queue, state.currentIndex);
+      }
+    });
+
+    return this.moveQueue;
   }
 
   static play(): void {
