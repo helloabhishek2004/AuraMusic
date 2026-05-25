@@ -144,7 +144,10 @@ export async function resolveAudioOnly(t: PlayerTrack, preloadedTrack?: PlayerTr
             // Resolve Stream URL if missing
             if (!resolved.url || (!resolved.isLocal && !isResolvedUrl(resolved.url))) {
                 try {
-                    const { streamUrl } = await musicService.resolveStream(resolved.id);
+                    const { getPreferredStreamingQuality } = await import("./audio-quality");
+                    const quality = await getPreferredStreamingQuality();
+                    
+                    const { streamUrl } = await musicService.resolveStream(resolved.id, quality);
                     if (streamUrl) {
                         resolved = { ...resolved, url: streamUrl };
                         const { CacheManager } = await import("../../download/services/cache.manager");

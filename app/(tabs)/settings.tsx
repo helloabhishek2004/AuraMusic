@@ -21,6 +21,13 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../../src/context/ThemeContext";
+import { useSettingsStore, AudioQuality } from "../../src/features/settings/store/settings.store";
+import { useDeviceStateStore } from "../../src/features/device/store/device-state.store";
+import { CacheManager, StorageStats } from "../../src/features/cache/services/cache-manager.service";
+import { useDownloadStore } from "../../src/features/download/store/download.store";
+import { openSystemEqualizer } from "../../src/features/audio/utils/open-system-eq";
+import { downloadCleanupService } from "../../src/features/download/services/download-cleanup.service";
+import { PlaybackService } from "../../src/features/player/services/playback.service";
 import {
   colors as baseColors,
   spacing,
@@ -122,7 +129,6 @@ const QualityModal = ({
   visible,
   onClose,
   title,
-  options,
   selectedOption,
   onSelect,
   activeColor,
@@ -130,11 +136,17 @@ const QualityModal = ({
   visible: boolean;
   onClose: () => void;
   title: string;
-  options: string[];
-  selectedOption: string;
-  onSelect: (opt: string) => void;
+  selectedOption: AudioQuality;
+  onSelect: (opt: AudioQuality) => void;
   activeColor: string;
 }) => {
+  const options: { label: string; value: AudioQuality }[] = [
+    { label: "Low (64kbps)", value: "low" },
+    { label: "Normal (128kbps)", value: "normal" },
+    { label: "High (256kbps)", value: "high" },
+    { label: "Best (High Efficiency)", value: "best" },
+  ];
+
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={styles.modalOverlay}>
@@ -151,26 +163,26 @@ const QualityModal = ({
           </View>
           {options.map((option) => (
             <TouchableOpacity
-              key={option}
+              key={option.value}
               style={styles.modalOption}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                onSelect(option);
+                onSelect(option.value);
                 onClose();
               }}
             >
               <Text
                 style={[
                   styles.modalOptionText,
-                  selectedOption === option && {
+                  selectedOption === option.value && {
                     color: activeColor,
                     fontWeight: "bold",
                   },
                 ]}
               >
-                {option}
+                {option.label}
               </Text>
-              {selectedOption === option && (
+              {selectedOption === option.value && (
                 <Ionicons name="checkmark" size={20} color={activeColor} />
               )}
             </TouchableOpacity>
@@ -190,166 +202,144 @@ const QualityModal = ({
   );
 };
 
-import { MetadataCache } from "../../src/features/cache/services/metadata-cache.service";
-import { useDownloadStore } from "../../src/features/download/store/download.store";
+const accentColors = [
+  "#dab9ff", // Default primary
+  "#46f5e0", // Secondary
+  "#ffb9b9", // Pink
+  "#b9ffb9", // Green
+  "#b9d9ff", // Blue
+  "#ffe6b9", // Yellow
+];
 
-// Inside SettingsScreen component
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { themeColors, setAccentColor, accentColor } = useTheme();
 
+  const settings = useSettingsStore();
+  const deviceState = useDeviceStateStore();
   const downloadedTracks = useDownloadStore((s) => s.downloadedTracks);
 
-  const [cacheStats, setCacheStats] = useState({
-    metadataCount: 0,
-    lyricsCount: 0,
-    totalSizeEstimate: "0 MB"
-  });
+  const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
+  const [modalType, setModalType] = useState<null | "streamingWifi" | "streamingCellular" | "downloadWifi" | "downloadCellular">(null);
+  const [isClearing, setIsClearing] = useState(false);
 
   useEffect(() => {
-    MetadataCache.getMetrics().then(metrics => {
-      setCacheStats({
-        ...metrics,
-        totalSizeEstimate: `${((metrics.metadataCount + metrics.lyricsCount) * 0.05).toFixed(1)} MB`
-      });
-    });
+    refreshStats();
   }, []);
+
+  const refreshStats = async () => {
+    const stats = await CacheManager.getCacheStats();
+    setStorageStats(stats);
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes === 0) return "0 MB";
+    const mb = bytes / (1024 * 1024);
+    if (mb < 1) return "< 1 MB";
+    if (mb > 1024) return `${(mb / 1024).toFixed(1)} GB`;
+    return `${mb.toFixed(1)} MB`;
+  };
 
   const downloadCount = useMemo(
     () => Object.keys(downloadedTracks).length,
     [downloadedTracks],
   );
 
-  // State
-  const [switches, setSwitches] = useState({
-    crossfade: true,
-    gapless: true,
-    normalize: true,
-    dataSaver: false,
-    wifiOnly: true,
-    lockScreenArt: true,
-  });
-
-  const [streamingQuality, setStreamingQuality] = useState("Extreme (320kbps)");
-  const [downloadQuality, setDownloadQuality] = useState("High (256kbps)");
-  const [crossfadeSeconds, setCrossfadeSeconds] = useState(6);
-  const [showCrossfadeSlider, setShowCrossfadeSlider] = useState(false);
-  const [modalType, setModalType] = useState<null | "streaming" | "download">(
-    null,
-  );
-  const [cacheAcknowledgement, setCacheAcknowledgement] = useState(false);
-  const [tapCount, setTapCount] = useState(0);
-
-  const runStressTest = async () => {
-    const { usePlayerStore } = await import("../../src/features/player/store/player.store");
-    
-    Alert.alert("Stress Test Initiated", "Injecting 1000 tracks and rapidly skipping.");
-    
-    // Create 1000 tracks
-    const mockTracks = Array.from({ length: 1000 }).map((_, i) => ({
-      id: `stress-${i}`,
-      videoId: `stress-${i}`,
-      title: `Stress Track ${i}`,
-      artist: `Stress Artist`,
-      duration: 180,
-      art: 'https://via.placeholder.com/150',
-      source: 'local'
-    } as any));
-
-    const playerStore = usePlayerStore.getState();
-    playerStore.setActiveContext({ type: "search", id: "stress-test" });
-    await playerStore.setQueue(mockTracks, 0);
-
-    // Rapidly skip 50 times every 150ms
-    let skips = 0;
-    const interval = setInterval(() => {
-      playerStore.next();
-      skips++;
-      if (skips >= 50) {
-        clearInterval(interval);
-        Alert.alert("Stress Test Completed", "Check for UI jank or crashes.");
-      }
-    }, 150);
-  };
-
-  const toggleSwitch = (key: keyof typeof switches) => {
-    setSwitches((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const handleClearCache = () => {
+  const handleClearCache = (type: 'song' | 'metadata' | 'artwork' | 'lyrics') => {
     Alert.alert(
       "Clear Cache",
-      "This will remove all cached metadata, lyrics, and artwork. Your downloaded songs and playlists will remain safe.",
+      `Are you sure you want to clear the ${type} cache? This action cannot be undone.`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Clear",
           style: "destructive",
           onPress: async () => {
-            await MetadataCache.clearAll();
-            setCacheStats({ metadataCount: 0, lyricsCount: 0, totalSizeEstimate: "0 MB" });
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            setCacheAcknowledgement(true);
-            setTimeout(() => setCacheAcknowledgement(false), 2000);
+            setIsClearing(true);
+            try {
+              if (type === 'song') await CacheManager.clearSongCache();
+              else if (type === 'metadata') await CacheManager.clearMetadataCache();
+              else if (type === 'artwork') await CacheManager.clearArtworkCache();
+              else if (type === 'lyrics') await CacheManager.clearLyricsCache();
+              
+              await refreshStats();
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } finally {
+              setIsClearing(false);
+            }
           },
         },
       ],
     );
   };
 
-  const openEqualizer = async () => {
-    if (Platform.OS === "android") {
-      try {
-        await Linking.sendIntent("android.media.action.DISPLAY_AUDIO_EFFECTS");
-      } catch (e) {
-        Alert.alert(
-          "Equalizer",
-          "Your device equalizer could not be opened directly.",
-        );
-      }
-    } else {
-      Alert.alert("Equalizer", "System equalizer is managed by iOS settings.");
+  const handleClearDownloads = () => {
+    Alert.alert(
+      "Clear Downloads",
+      `Are you sure you want to delete all ${downloadCount} downloaded songs? They will still be playable online.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete All",
+          style: "destructive",
+          onPress: async () => {
+            setIsClearing(true);
+            try {
+              const res = await downloadCleanupService.clearAllDownloads();
+              if (res.success) {
+                await refreshStats();
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              }
+            } finally {
+              setIsClearing(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleToggleMono = async () => {
+    const newVal = !settings.monoAudio;
+    settings.toggleSetting("monoAudio");
+    
+    const { MonoAudioController } = await import("../../src/features/audio/native/MonoAudioModule");
+    await MonoAudioController.setEnabled(newVal);
+
+    if (newVal && typeof __DEV__ !== "undefined" && __DEV__) {
+       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   };
 
-  // Slider logic
-  const SLIDER_WIDTH = SCREEN_WIDTH - 80;
-  const pan = useRef(new Animated.Value((6 / 12) * SLIDER_WIDTH)).current;
+  const handleOpenEQ = async () => {
+    const res = await openSystemEqualizer();
+    if (!res.success) {
+      Alert.alert("Equalizer", "No compatible equalizer found on this device.");
+    } else {
+       if (typeof __DEV__ !== "undefined" && __DEV__) {
+         console.info(`[Settings] EQ Result: ${res.opened}`);
+       }
+    }
+  };
 
-  const panResponder = useRef(
+  const crossfadePanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onPanResponderMove: (_, gestureState) => {
-        let newValue = gestureState.moveX - 40;
-        if (newValue < 0) newValue = 0;
-        if (newValue > SLIDER_WIDTH) newValue = SLIDER_WIDTH;
-        pan.setValue(newValue);
-        const seconds = Math.round((newValue / SLIDER_WIDTH) * 12);
-
-        if (seconds !== crossfadeSeconds) {
-          Haptics.selectionAsync();
-          setCrossfadeSeconds(seconds);
-        }
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const x = evt.nativeEvent.locationX;
+        const val = Math.round((x / (SCREEN_WIDTH - 80)) * 12);
+        settings.setCrossfadeDuration(Math.max(0, Math.min(12, val)));
+        Haptics.selectionAsync();
       },
-      onPanResponderRelease: () => {},
-    }),
+      onPanResponderMove: (evt) => {
+        const x = evt.nativeEvent.locationX;
+        const val = Math.round((x / (SCREEN_WIDTH - 80)) * 12);
+        settings.setCrossfadeDuration(Math.max(0, Math.min(12, val)));
+      },
+    })
   ).current;
-
-  const accentColors = ["#B19CD9", "#E57373", "#4DB5A6", "#FFB74D", "#64B5F6"];
-  const expandAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.spring(expandAnim, {
-      toValue: showCrossfadeSlider ? 1 : 0,
-      useNativeDriver: false,
-    }).start();
-  }, [showCrossfadeSlider]);
-
-  const crossfadeHeight = expandAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 80],
-  });
 
   return (
     <View
@@ -364,7 +354,9 @@ export default function SettingsScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <View style={styles.headerTopRow}>
           <Text style={styles.headerTitle}>Settings</Text>
-          <View style={{ width: 40 }} />
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="close" size={28} color={themeColors.on_surface} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -376,44 +368,84 @@ export default function SettingsScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <SettingSection title="Audio" index={0}>
-          <TouchableOpacity
-            style={styles.settingItem}
-            onPress={() => setModalType("streaming")}
-          >
+        {/* PLAYBACK SECTION */}
+        <SettingSection title="Playback" index={0}>
+          <View style={styles.settingItem}>
             <View style={styles.settingItemLeft}>
-              <Text style={styles.settingItemLabel}>Streaming Quality</Text>
-              <Text style={[styles.settingItemSubtext, { color: accentColor }]}>
-                {streamingQuality}
+              <Text style={styles.settingItemLabel}>Crossfade</Text>
+              <Text style={styles.settingItemSubtext}>
+                {settings.crossfadeEnabled ? `${settings.crossfadeDuration} seconds` : "Disabled"}
               </Text>
             </View>
-            <Ionicons
-              name="chevron-forward"
-              size={20}
-              color={themeColors.on_surface_muted}
+            <CustomSwitch
+              value={settings.crossfadeEnabled}
+              onValueChange={() => settings.toggleSetting("crossfadeEnabled")}
+              activeColor={accentColor}
             />
-          </TouchableOpacity>
+          </View>
 
-          <TouchableOpacity
-            style={styles.settingItem}
-            onPress={() => setModalType("download")}
-          >
-            <View style={styles.settingItemLeft}>
-              <Text style={styles.settingItemLabel}>Download Quality</Text>
-              <Text style={[styles.settingItemSubtext, { color: accentColor }]}>
-                {downloadQuality}
-              </Text>
+          {settings.crossfadeEnabled && (
+            <View style={styles.sliderContainer}>
+              <View style={styles.sliderRow}>
+                <Text style={styles.sliderValue}>0s</Text>
+                <View style={styles.sliderTrackBg}>
+                  <View 
+                    style={[
+                      styles.sliderFill, 
+                      { 
+                        width: `${(settings.crossfadeDuration / 12) * 100}%`,
+                        backgroundColor: accentColor 
+                      }
+                    ]} 
+                  />
+                  <View 
+                    style={[
+                      styles.sliderKnob,
+                      { 
+                        left: `${(settings.crossfadeDuration / 12) * 100}%`,
+                        backgroundColor: "#fff",
+                        borderColor: accentColor,
+                      }
+                    ]}
+                  />
+                  <View 
+                    style={StyleSheet.absoluteFill}
+                    {...crossfadePanResponder.panHandlers}
+                  />
+                </View>
+                <Text style={styles.sliderValue}>12s</Text>
+              </View>
             </View>
-            <Ionicons
-              name="chevron-forward"
-              size={20}
-              color={themeColors.on_surface_muted}
-            />
-          </TouchableOpacity>
+          )}
 
-          <TouchableOpacity style={styles.settingItem} onPress={openEqualizer}>
+          <View style={styles.settingItem}>
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>Gapless Playback</Text>
+              <Text style={styles.settingItemSubtext}>Continuous audio experience</Text>
+            </View>
+            <CustomSwitch
+              value={settings.gaplessPlayback}
+              onValueChange={() => settings.toggleSetting("gaplessPlayback")}
+              activeColor={accentColor}
+            />
+          </View>
+
+          <View style={styles.settingItem}>
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>Normalize Volume</Text>
+              <Text style={styles.settingItemSubtext}>Maintain consistent loudness</Text>
+            </View>
+            <CustomSwitch
+              value={settings.normalizeVolume}
+              onValueChange={() => settings.toggleSetting("normalizeVolume")}
+              activeColor={accentColor}
+            />
+          </View>
+
+          <TouchableOpacity style={styles.settingItem} onPress={handleOpenEQ}>
             <View style={styles.settingItemLeft}>
               <Text style={styles.settingItemLabel}>Equalizer</Text>
+              <Text style={styles.settingItemSubtext}>System audio effects</Text>
             </View>
             <MaterialCommunityIcons
               name="waveform"
@@ -422,160 +454,193 @@ export default function SettingsScreen() {
             />
           </TouchableOpacity>
 
-          <View>
-            <View style={styles.settingItem}>
-              <Pressable
-                style={styles.settingItemLeft}
-                onPress={() => setShowCrossfadeSlider(!showCrossfadeSlider)}
-              >
-                <Text style={styles.settingItemLabel}>Crossfade</Text>
-                <Text style={styles.settingItemSubtext}>
-                  {crossfadeSeconds} seconds
-                </Text>
-              </Pressable>
-              <CustomSwitch
-                value={switches.crossfade}
-                onValueChange={() => toggleSwitch("crossfade")}
-                activeColor={accentColor}
-              />
-            </View>
-            <Animated.View
-              style={[styles.sliderContainer, { height: crossfadeHeight }]}
-            >
-              <View style={styles.sliderRow}>
-                <Text style={styles.sliderValue}>0s</Text>
-                <View
-                  style={[
-                    styles.sliderTrack,
-                    { backgroundColor: "rgba(255,255,255,0.1)" },
-                  ]}
-                >
-                  <Animated.View
-                    style={[
-                      styles.sliderFill,
-                      { width: pan, backgroundColor: accentColor },
-                    ]}
-                  />
-                  <Animated.View
-                    {...panResponder.panHandlers}
-                    style={[
-                      styles.sliderKnob,
-                      {
-                        transform: [{ translateX: Animated.subtract(pan, 10) }],
-                        backgroundColor: "#fff",
-                        borderColor: accentColor,
-                      },
-                    ]}
-                  />
-                </View>
-                <Text style={styles.sliderValue}>12s</Text>
-              </View>
-            </Animated.View>
-          </View>
-
           <View style={styles.settingItem}>
             <View style={styles.settingItemLeft}>
-              <Text style={styles.settingItemLabel}>Gapless Playback</Text>
+              <Text style={styles.settingItemLabel}>Mono Audio</Text>
+              <Text style={styles.settingItemSubtext}>Use device mono accessibility</Text>
             </View>
             <CustomSwitch
-              value={switches.gapless}
-              onValueChange={() => toggleSwitch("gapless")}
-              activeColor={accentColor}
-            />
-          </View>
-
-          <View style={styles.settingItem}>
-            <View style={styles.settingItemLeft}>
-              <Text style={styles.settingItemLabel}>Normalize Volume</Text>
-            </View>
-            <CustomSwitch
-              value={switches.normalize}
-              onValueChange={() => toggleSwitch("normalize")}
+              value={settings.monoAudio}
+              onValueChange={handleToggleMono}
               activeColor={accentColor}
             />
           </View>
         </SettingSection>
 
-        <SettingSection title="Data & Storage" index={1}>
-          <View style={styles.settingItem}>
+        {/* AUDIO QUALITY SECTION */}
+        <SettingSection title="Audio Quality" index={1}>
+          <TouchableOpacity
+            style={styles.settingItem}
+            onPress={() => setModalType("streamingWifi")}
+          >
             <View style={styles.settingItemLeft}>
-              <Text style={styles.settingItemLabel}>Data Saver</Text>
-            </View>
-            <CustomSwitch
-              value={switches.dataSaver}
-              onValueChange={() => toggleSwitch("dataSaver")}
-              activeColor={accentColor}
-            />
-          </View>
-
-          <View style={styles.settingItem}>
-            <View style={styles.settingItemLeft}>
-              <Text style={styles.settingItemLabel}>
-                Download over Wi-Fi only
+              <Text style={styles.settingItemLabel}>Streaming (Wi-Fi)</Text>
+              <Text style={[styles.settingItemSubtext, { color: accentColor }]}>
+                {settings.streamingQualityWifi.toUpperCase()}
               </Text>
             </View>
-            <CustomSwitch
-              value={switches.wifiOnly}
-              onValueChange={() => toggleSwitch("wifiOnly")}
-              activeColor={accentColor}
-            />
-          </View>
-
-          <View style={styles.settingItem}>
-            <View style={styles.settingItemLeft}>
-              <Text style={styles.settingItemLabel}>Storage Information</Text>
-              <Text style={styles.settingItemSubtext}>
-                {`${cacheStats.metadataCount} Tracks Cached • ${cacheStats.lyricsCount} Lyrics`}
-              </Text>
-              <Text style={[styles.settingItemSubtext, { marginTop: 2 }]}>
-                {`${downloadCount} Songs Downloaded • ${cacheStats.totalSizeEstimate} Cache Used`}
-              </Text>
-            </View>
-            <MaterialCommunityIcons
-              name="chip"
-              size={24}
+            <Ionicons
+              name="chevron-forward"
+              size={20}
               color={themeColors.on_surface_muted}
             />
-          </View>
+          </TouchableOpacity>
 
           <TouchableOpacity
-            style={[
-              styles.clearCacheBtn,
-              cacheAcknowledgement && {
-                borderColor: "#4caf50",
-                borderWidth: 1,
-              },
-            ]}
-            onPress={handleClearCache}
-            disabled={
-              cacheStats.metadataCount === 0 && cacheStats.lyricsCount === 0
-            }
+            style={styles.settingItem}
+            onPress={() => setModalType("streamingCellular")}
           >
-            <LinearGradient
-              colors={
-                cacheAcknowledgement
-                  ? ["#1b5e20", "#1b5e20"]
-                  : cacheStats.metadataCount === 0
-                    ? ["#222", "#111"]
-                    : ["#422", "#211"]
-              }
-              style={styles.clearCacheGradient}
-            >
-              <Text
-                style={[
-                  styles.clearCacheText,
-                  cacheAcknowledgement && { color: "#81c784" },
-                  cacheStats.metadataCount === 0 &&
-                    !cacheAcknowledgement && { color: "#555" },
-                ]}
-              >
-                {cacheAcknowledgement ? "Cache Cleared! ✓" : "Clear Cache"}
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>Streaming (Cellular)</Text>
+              <Text style={[styles.settingItemSubtext, { color: accentColor }]}>
+                {settings.streamingQualityCellular.toUpperCase()}
               </Text>
-            </LinearGradient>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={themeColors.on_surface_muted}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.settingItem}
+            onPress={() => setModalType("downloadWifi")}
+          >
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>Download (Wi-Fi)</Text>
+              <Text style={[styles.settingItemSubtext, { color: accentColor }]}>
+                {settings.downloadQualityWifi.toUpperCase()}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={themeColors.on_surface_muted}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.settingItem}
+            onPress={() => setModalType("downloadCellular")}
+          >
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>Download (Cellular)</Text>
+              <Text style={[styles.settingItemSubtext, { color: accentColor }]}>
+                {settings.downloadQualityCellular.toUpperCase()}
+              </Text>
+            </View>
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={themeColors.on_surface_muted}
+            />
           </TouchableOpacity>
         </SettingSection>
 
-        <SettingSection title="Appearance" index={2}>
+        {/* DOWNLOADS & STORAGE SECTION */}
+        <SettingSection title="Downloads & Storage" index={2}>
+          <View style={styles.settingItem}>
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>Download over Wi-Fi only</Text>
+            </View>
+            <CustomSwitch
+              value={settings.downloadOnlyOnWifi}
+              onValueChange={() => settings.toggleSetting("downloadOnlyOnWifi")}
+              activeColor={accentColor}
+            />
+          </View>
+
+          <View style={styles.settingItem}>
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>Auto-download Liked Songs</Text>
+            </View>
+            <CustomSwitch
+              value={settings.autoDownloadLikedSongs}
+              onValueChange={() => settings.toggleSetting("autoDownloadLikedSongs")}
+              activeColor={accentColor}
+            />
+          </View>
+
+          <View style={styles.storageInfoContainer}>
+            <Text style={styles.storageTitle}>Storage Usage</Text>
+            <View style={styles.storageBar}>
+               <View 
+                 style={[
+                   styles.storageSegment, 
+                   { 
+                     width: `${Math.max(2, ((storageStats?.downloads || 0) / (storageStats?.totalSize || 1)) * 100)}%`, 
+                     backgroundColor: accentColor 
+                   }
+                 ]} 
+               />
+               <View 
+                 style={[
+                   styles.storageSegment, 
+                   { 
+                     width: `${Math.max(2, ((storageStats?.songCache || 0) / (storageStats?.totalSize || 1)) * 100)}%`, 
+                     backgroundColor: '#555' 
+                   }
+                 ]} 
+               />
+            </View>
+            
+            <View style={styles.storageDetailRow}>
+              <View style={styles.storageDetailItem}>
+                <View style={[styles.storageDot, { backgroundColor: accentColor }]} />
+                <Text style={styles.storageDetailLabel}>Downloads</Text>
+                <Text style={styles.storageDetailValue}>{formatSize(storageStats?.downloads || 0)}</Text>
+              </View>
+              <View style={styles.storageDetailItem}>
+                <View style={[styles.storageDot, { backgroundColor: '#555' }]} />
+                <Text style={styles.storageDetailLabel}>Cache</Text>
+                <Text style={styles.storageDetailValue}>{formatSize(storageStats?.songCache || 0)}</Text>
+              </View>
+            </View>
+
+            <View style={styles.cacheActions}>
+              <TouchableOpacity style={styles.cacheActionBtn} onPress={() => handleClearCache('song')}>
+                <Text style={styles.cacheActionText}>Clear Cache</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.cacheActionBtn, { backgroundColor: 'rgba(255,59,48,0.1)' }]} onPress={handleClearDownloads}>
+                <Text style={[styles.cacheActionText, { color: '#FF3B30' }]}>Clear Downloads</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.settingItem}>
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>Max Song Cache</Text>
+              <Text style={styles.settingItemSubtext}>{settings.maxSongCacheGB} GB</Text>
+            </View>
+            <View style={styles.cacheLimitButtons}>
+               {[2, 5, 10].map(val => (
+                 <TouchableOpacity 
+                   key={val} 
+                   style={[styles.limitBtn, settings.maxSongCacheGB === val && { backgroundColor: accentColor }]}
+                   onPress={() => settings.setMaxSongCache(val)}
+                 >
+                   <Text style={[styles.limitText, settings.maxSongCacheGB === val && { color: '#000' }]}>{val}G</Text>
+                 </TouchableOpacity>
+               ))}
+            </View>
+          </View>
+        </SettingSection>
+
+        {/* ACCESSIBILITY SECTION */}
+        <SettingSection title="Accessibility" index={3}>
+           <View style={styles.settingItem}>
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>Reduce Motion</Text>
+              <Text style={styles.settingItemSubtext}>Simplify animations and transitions</Text>
+            </View>
+            <CustomSwitch
+              value={settings.reduceMotion}
+              onValueChange={() => settings.toggleSetting("reduceMotion")}
+              activeColor={accentColor}
+            />
+          </View>
+
           <View style={styles.accentColorContainer}>
             <Text style={styles.settingItemLabel}>Accent Color</Text>
             <View style={styles.colorRow}>
@@ -585,6 +650,7 @@ export default function SettingsScreen() {
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
                     setAccentColor(color);
+                    settings.setAccentColor(color);
                   }}
                   style={[
                     styles.colorCircle,
@@ -602,50 +668,62 @@ export default function SettingsScreen() {
               ))}
             </View>
           </View>
-          <View style={styles.settingItem}>
-            <View style={styles.settingItemLeft}>
-              <Text style={styles.settingItemLabel}>Lock Screen Art</Text>
-            </View>
-            <CustomSwitch
-              value={switches.lockScreenArt}
-              onValueChange={() => toggleSwitch("lockScreenArt")}
-              activeColor={accentColor}
-            />
-          </View>
         </SettingSection>
 
-        <Pressable 
-          style={styles.footer} 
-          onPress={() => {
-            const newCount = (tapCount || 0) + 1;
-            setTapCount(newCount);
-            if (newCount >= 7) {
-              setTapCount(0);
-              runStressTest();
-            }
-          }}
-        >
+        {/* SUPPORT & ABOUT */}
+        <SettingSection title="Support & About" index={4}>
+          <TouchableOpacity style={styles.settingItem} onPress={() => Alert.alert("FAQ", "Online help center coming soon.")}>
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>Frequently Asked Questions</Text>
+            </View>
+            <Ionicons name="help-circle-outline" size={22} color={themeColors.on_surface_muted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingItem} onPress={() => Alert.alert("AuraMusic", "AuraMusic v1.0.0\nBuilt with Expo SDK 55\nPlayback Engine: RNTP 5.0")}>
+            <View style={styles.settingItemLeft}>
+              <Text style={styles.settingItemLabel}>About AuraMusic</Text>
+              <Text style={styles.settingItemSubtext}>Version 1.0.0 (Build 2405)</Text>
+            </View>
+            <Ionicons name="information-circle-outline" size={22} color={themeColors.on_surface_muted} />
+          </TouchableOpacity>
+        </SettingSection>
+
+        <View style={styles.footer}>
+          <View style={styles.diagnosticContainer}>
+            <Text style={styles.diagnosticText}>
+              Connection: {deviceState.isWifi ? 'Wi-Fi' : (deviceState.isCellular ? 'Cellular' : 'None')}
+            </Text>
+            <Text style={styles.diagnosticText}>
+              Audio Route: {deviceState.audioRoute.toUpperCase()} {deviceState.bluetoothCodec ? `(${deviceState.bluetoothCodec})` : ''}
+            </Text>
+            <Text style={styles.diagnosticText}>
+              Streaming Quality: {deviceState.isWifi ? settings.streamingQualityWifi.toUpperCase() : settings.streamingQualityCellular.toUpperCase()}
+            </Text>
+          </View>
           <Text style={styles.footerBrand}>AuraMusic</Text>
-          <Text style={styles.footerVersion}>Version 1.0.0 (Build 2405)</Text>
-        </Pressable>
+          <Text style={styles.footerVersion}>Made with ❤️ for Music Lovers</Text>
+        </View>
       </ScrollView>
 
       <QualityModal
-        visible={modalType === "streaming"}
+        visible={!!modalType}
         onClose={() => setModalType(null)}
-        title="Streaming Quality"
-        options={["Normal (96kbps)", "High (160kbps)", "Extreme (320kbps)"]}
-        selectedOption={streamingQuality}
-        onSelect={setStreamingQuality}
-        activeColor={accentColor}
-      />
-      <QualityModal
-        visible={modalType === "download"}
-        onClose={() => setModalType(null)}
-        title="Download Quality"
-        options={["Normal (96kbps)", "High (160kbps)", "Extreme (256kbps)"]}
-        selectedOption={downloadQuality}
-        onSelect={setDownloadQuality}
+        title={
+          modalType === "streamingWifi" ? "Streaming (Wi-Fi)" :
+          modalType === "streamingCellular" ? "Streaming (Cellular)" :
+          modalType === "downloadWifi" ? "Download (Wi-Fi)" : "Download (Cellular)"
+        }
+        selectedOption={
+          modalType === "streamingWifi" ? settings.streamingQualityWifi :
+          modalType === "streamingCellular" ? settings.streamingQualityCellular :
+          modalType === "downloadWifi" ? settings.downloadQualityWifi : settings.downloadQualityCellular
+        }
+        onSelect={(q) => {
+          if (modalType === "streamingWifi") settings.setStreamingQuality("wifi", q);
+          else if (modalType === "streamingCellular") settings.setStreamingQuality("cellular", q);
+          else if (modalType === "downloadWifi") settings.setDownloadQuality("wifi", q);
+          else if (modalType === "downloadCellular") settings.setDownloadQuality("cellular", q);
+        }}
         activeColor={accentColor}
       />
     </View>
@@ -660,11 +738,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  headerIcon: { padding: spacing.xs },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 28,
     fontFamily: typography.headlineFont,
     color: baseColors.on_surface,
+    fontWeight: 'bold'
   },
   scrollContent: { paddingHorizontal: spacing.md },
   sectionContainer: { marginTop: spacing.xl },
@@ -700,6 +778,7 @@ const styles = StyleSheet.create({
   settingItemSubtext: {
     fontSize: 12,
     fontFamily: typography.bodyFont,
+    color: baseColors.on_surface_muted,
     marginTop: 4,
   },
   switchTrack: {
@@ -716,18 +795,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   sliderContainer: {
-    overflow: "hidden",
     paddingHorizontal: 20,
-    justifyContent: "center",
+    paddingBottom: 16,
   },
   sliderRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   sliderValue: {
     color: baseColors.on_surface_muted,
-    fontSize: 12,
-    width: 30,
+    fontSize: 10,
+    width: 24,
     textAlign: "center",
   },
-  sliderTrack: { flex: 1, height: 4, borderRadius: 2, position: "relative" },
+  sliderTrackBg: { 
+    flex: 1, 
+    height: 4, 
+    borderRadius: 2, 
+    backgroundColor: "rgba(255,255,255,0.1)",
+    position: 'relative'
+  },
   sliderFill: { height: "100%", borderRadius: 2 },
   sliderKnob: {
     position: "absolute",
@@ -737,15 +821,68 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 2,
     zIndex: 10,
+    marginLeft: -10
   },
-  clearCacheBtn: { margin: 20, borderRadius: 16, overflow: "hidden" },
-  clearCacheGradient: { paddingVertical: 14, alignItems: "center" },
-  clearCacheText: {
-    color: "#ff9999",
-    fontSize: 16,
-    fontFamily: typography.labelFont,
-    fontWeight: "bold",
+  storageInfoContainer: {
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255, 255, 255, 0.02)",
   },
+  storageTitle: {
+    fontSize: 14,
+    color: baseColors.on_surface,
+    marginBottom: 12,
+    fontFamily: typography.labelFont
+  },
+  storageBar: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    flexDirection: 'row',
+    overflow: 'hidden',
+    marginBottom: 16
+  },
+  storageSegment: { height: '100%' },
+  storageDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20
+  },
+  storageDetailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  storageDot: { width: 8, height: 8, borderRadius: 4 },
+  storageDetailLabel: { fontSize: 12, color: baseColors.on_surface_muted },
+  storageDetailValue: { fontSize: 12, color: baseColors.on_surface, fontWeight: 'bold' },
+  cacheActions: {
+    flexDirection: 'row',
+    gap: 12
+  },
+  cacheActionBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center'
+  },
+  cacheActionText: {
+    fontSize: 12,
+    color: baseColors.on_surface,
+    fontFamily: typography.labelFont
+  },
+  cacheLimitButtons: {
+    flexDirection: 'row',
+    gap: 8
+  },
+  limitBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)'
+  },
+  limitText: { fontSize: 12, color: baseColors.on_surface },
   accentColorContainer: { padding: 20 },
   colorRow: { flexDirection: "row", marginTop: spacing.md, gap: 12 },
   colorCircle: {
@@ -762,14 +899,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.1)",
   },
-  footer: { marginTop: 60, alignItems: "center", opacity: 0.6 },
+  diagnosticContainer: {
+    marginBottom: 20,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    width: '100%',
+    alignItems: 'center'
+  },
+  diagnosticText: {
+    fontSize: 10,
+    color: baseColors.on_surface_muted,
+    fontFamily: typography.bodyFont,
+    lineHeight: 14
+  },
+  footer: { marginTop: 40, alignItems: "center", opacity: 0.5 },
   footerBrand: {
-    fontSize: 20,
+    fontSize: 18,
     fontFamily: typography.headlineFont,
     color: baseColors.on_surface,
   },
   footerVersion: {
-    fontSize: 12,
+    fontSize: 10,
     fontFamily: typography.bodyFont,
     color: baseColors.on_surface_muted,
     marginTop: 4,

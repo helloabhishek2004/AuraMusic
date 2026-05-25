@@ -4,7 +4,6 @@ import { PlayerTrack } from "../types/player";
 import { transitionManager } from "./transition-manager";
 
 let _controllerInitialized = false;
-let _listenersRegistered = false;
 
 /**
  * PlaybackController - The authoritative bridge between native RNTP and Zustand store.
@@ -13,7 +12,6 @@ let _listenersRegistered = false;
  */
 export class PlaybackController {
   private static isInitialized = false;
-  private static pollInterval: NodeJS.Timeout | null = null;
   private static lastState: PlaybackState | null = null;
 
   static initialize() {
@@ -39,10 +37,8 @@ export class PlaybackController {
               isTransitioning: false,
               isBuffering: false
             });
-            this.startManualPolling();
           } else {
             store.setStatus("paused");
-            this.stopManualPolling();
           }
           break;
         case PlaybackState.Buffering:
@@ -52,18 +48,15 @@ export class PlaybackController {
           if (store.isTransitioning) return;
           
           store.updateProgress(0, store.duration, 0);
-          this.stopManualPolling();
           store.next();
           break;
         case PlaybackState.Idle:
           if (store.status !== "idle") {
             store.setStatus("idle");
           }
-          this.stopManualPolling();
           break;
         case PlaybackState.Error:
           store.setStatus("error");
-          this.stopManualPolling();
           break;
       }
     });
@@ -75,20 +68,67 @@ export class PlaybackController {
       
       if (store.isPlaying !== playing) {
         store.setStatus(playing ? "playing" : "paused");
-        
-        if (playing) {
-          this.startManualPolling();
-        } else {
-          this.stopManualPolling();
-        }
       }
     });
 
-    // 2.5. Player Error Handling
-    TrackPlayer.addEventListener(Event.PlaybackError, (error) => {
+    // 2.5. Player Error Handling (with self-healing re-resolution for expired stream URLs)
+    TrackPlayer.addEventListener(Event.PlaybackError, async (error) => {
       console.error("[Player] Native Error:", error.message, error.code);
       const store = usePlayerStore.getState();
-      
+      const currentTrack = store.currentTrack;
+
+      // Self-healing: If this is an online streaming track, attempt to re-resolve the stream URL and resume
+      if (currentTrack && !currentTrack.isLocal && currentTrack.id) {
+        console.info(`[PlayerController] Stream error detected for ${currentTrack.title} (${currentTrack.id}). Attempting self-healing re-resolution...`);
+        
+        try {
+          // 1. Invalidate backend stream URL cache
+          const { musicService } = require("../../../services/api/music");
+          musicService.invalidateStreamCache(currentTrack.id);
+          
+          // 2. Invalidate local media-cache store cached record so we don't fetch expired url again
+          const { useMediaCacheStore } = require("../../cache/store/media-cache.store");
+          const cacheStore = useMediaCacheStore.getState();
+          const cachedRecord = cacheStore.getCachedTrack(currentTrack.id);
+          if (cachedRecord && cachedRecord.track) {
+            cacheStore.cacheTrack({ ...cachedRecord.track, url: "" });
+          }
+
+          // 3. Clear preloaded transitioning states to prevent skips and show loading indicator
+          usePlayerStore.setState({ isTransitioning: false, isBuffering: true });
+
+          // 4. Resolve a fresh signed stream URL from the backend (bypassing caches)
+          const { resolveAudioOnly } = require("../utils/track-resolver");
+          const resolvedTrack = await resolveAudioOnly({ ...currentTrack, url: "" });
+          
+          if (resolvedTrack && resolvedTrack.url && resolvedTrack.url.startsWith("http")) {
+            console.info(`[PlayerController] Successfully resolved fresh stream URL: ${resolvedTrack.url.substring(0, 60)}...`);
+            
+            // Get current active native item and current playback position
+            const progress = await TrackPlayer.getProgress();
+            const currentPosition = progress.position;
+            
+            // Mutate the store track reference so future UI checks are updated
+            store.updateTrackMetadata(currentTrack.id, { url: resolvedTrack.url });
+            
+            // Force load the resolved track natively (this will re-inject queue and play resolved URL)
+            const { PlaybackService } = require("./playback.service");
+            await PlaybackService.loadTrack(resolvedTrack, store.queue, store.currentIndex);
+            
+            // Seek back to where the error occurred
+            if (currentPosition > 0) {
+              await PlaybackService.seek(currentPosition);
+            }
+            
+            console.info("[PlayerController] Self-healing completed. Resumed playback successfully!");
+            return; // Recovered successfully!
+          }
+        } catch (healError: any) {
+          console.error("[PlayerController] Self-healing re-resolution failed:", healError.message || healError);
+        }
+      }
+
+      // Default error state fallback if self-healing is not applicable or fails
       store.setStatus("error");
       usePlayerStore.setState({ 
         error: error.message || "Native playback error",
@@ -96,20 +136,27 @@ export class PlaybackController {
         isTransitioning: false,
         isPlaying: false
       });
-      
-      this.stopManualPolling();
     });
 
     // 3. Media Item Transition (Sync currentIndex)
-    TrackPlayer.addEventListener(Event.MediaItemTransition, (data) => {
+    TrackPlayer.addEventListener(Event.MediaItemTransition, async (data) => {
       const { PlaybackService } = require('./playback.service');
       if (PlaybackService.isReorderingQueue()) return;
 
       const store = usePlayerStore.getState();
       if (!data.item) return;
 
-      const newIndex = store.queue.findIndex((t: PlayerTrack) => t.id === data.item?.mediaId);
-      if (newIndex !== -1 && newIndex !== store.currentIndex) {
+      const mediaId = data.item?.mediaId || data.item?.id || (data.item as any)?.mediaId || (data.item as any)?.id;
+      if (!mediaId) {
+        console.warn("[PlayerController] Event.MediaItemTransition: data.item contains no identity ID.");
+        return;
+      }
+
+      const newIndex = store.queue.findIndex((t: PlayerTrack) => t.id === mediaId);
+      const isDifferentTrack = store.currentTrack?.id !== mediaId;
+      const isDifferentIndex = newIndex !== -1 && newIndex !== store.currentIndex;
+
+      if (newIndex !== -1 && (isDifferentIndex || isDifferentTrack)) {
         const nextTrack = store.queue[newIndex];
         if (!nextTrack) return;
         
@@ -128,17 +175,32 @@ export class PlaybackController {
             return;
         }
 
+        // [Aura_Stabilization] Authoritatively synchronize native active track to store
+        // We set lyrics to null immediately to prevent wrong lyrics framing or flicker on the UI
         usePlayerStore.setState({ 
           currentIndex: newIndex, 
           currentTrack: validTrack,
           preloadedTrack: null,
           isTransitioning: false,
           status: "playing",
-          isPlaying: true
+          isPlaying: true,
+          lyrics: null,
+          isLyricsLoading: false
         });
+        
+        // Trigger progressive hydration in background
+        try {
+          const { HydrationScheduler } = require("./hydration.service");
+          HydrationScheduler.scheduleHydration(validTrack);
+        } catch (e) {
+          console.warn("[playback.controller] Background hydration failed to schedule", e);
+        }
         
         transitionManager.setTransitioning(false);
         transitionManager.clearCache([validTrack.id]);
+        
+        // Asynchronously print forensic logs
+        PlaybackController.logForensicState(`transition: ${validTrack.title}`);
         
         store.preloadNext();
       }
@@ -149,6 +211,7 @@ export class PlaybackController {
       TrackPlayer.play();
     });
 
+    // 5. Remote Pause
     TrackPlayer.addEventListener(Event.RemotePause, () => {
       TrackPlayer.pause();
     });
@@ -175,42 +238,75 @@ export class PlaybackController {
       TrackPlayer.seekTo(Math.max(0, pos - event.interval));
     });
 
+    TrackPlayer.addEventListener(Event.RemoteCustomAction, (event) => {
+      const store = usePlayerStore.getState();
+      if (event.customAction === "like") {
+         // handle like
+         console.log("Like triggered from notification");
+      } else if (event.customAction === "loop") {
+         const nextMode = store.repeatMode === "off" ? "track" : "off";
+         store.setRepeatMode(nextMode);
+      }
+    });
+
+    TrackPlayer.addEventListener(Event.RemoteDuck, async (event) => {
+      console.log("[Player] [Aura_Stabilization] RemoteDuck event:", event);
+      const store = usePlayerStore.getState();
+      
+      if (event.permanent) {
+        // Permanent audio focus loss - e.g., phone call or other exclusive audio player.
+        await store.pause();
+      } else if (event.ducking) {
+        // Transient focus loss - e.g., navigation chime or system notification.
+        // Lower volume to 0.2 natively without updating store preference.
+        await TrackPlayer.setVolume(0.2);
+      } else if (event.paused) {
+        // Temporary focus loss - pause until focus is regained.
+        await store.pause();
+      } else {
+        // Focus restored! Restore native volume back to user preference and resume.
+        await TrackPlayer.setVolume(store.volume);
+        if (store.isPlaying) {
+          await TrackPlayer.play();
+          store.setStatus("playing");
+        }
+      }
+    });
+
     this.isInitialized = true;
   }
 
-  private static startManualPolling() {
-    if (this.pollInterval) return;
-    
-    this.pollInterval = setInterval(async () => {
-      try {
-        const store = usePlayerStore.getState();
-        const progress = TrackPlayer.getProgress();
-        
-        const posMs = progress.position * 1000;
-        const durMs = progress.duration * 1000;
-        const bufMs = progress.buffered * 1000;
-        
-        if (Math.abs(store.position - posMs) > 200 || Math.abs(store.duration - durMs) > 500) {
-          store.updateProgress(posMs, durMs, bufMs);
-        }
-
-        const nativeVolume = await TrackPlayer.getVolume();
-        if (Math.abs(store.volume - nativeVolume) > 0.05) {
-           usePlayerStore.setState({ volume: nativeVolume });
-        }
-      } catch (e) {}
-    }, 250);
-  }
-
-  private static stopManualPolling() {
-    if (this.pollInterval) {
-      clearInterval(this.pollInterval);
-      this.pollInterval = null;
+  static async logForensicState(context: string) {
+    try {
+      const store = usePlayerStore.getState();
+      const TrackPlayer = require("@rntp/player").default;
+      const { getCanonicalTrackId } = require("../utils/track-identity");
+      
+      const nativeIndex = await TrackPlayer.getActiveMediaItemIndex().catch(() => -1);
+      const activeItem = await TrackPlayer.getActiveMediaItem().catch(() => null);
+      
+      const { useMediaCacheStore } = require("../../cache/store/media-cache.store");
+      const cacheStore = useMediaCacheStore.getState();
+      const canonicalId = store.currentTrack ? getCanonicalTrackId(store.currentTrack) : 'none';
+      const cached = store.currentTrack ? cacheStore.getCachedTrack(canonicalId) : null;
+      
+      console.info(`========================================
+[FORENSIC STATE TRACE] - ${context.toUpperCase()}
+[PLAYER] status: "${store.status}", isPlaying: ${store.isPlaying}, isBuffering: ${store.isBuffering}
+[PLAYER] currentTrack: "${store.currentTrack?.title}" (${store.currentTrack?.id})
+[PLAYER] canonicalTrackId: "${canonicalId}"
+[QUEUE] JS index: ${store.currentIndex}, queueSize: ${store.queue.length}
+[RNTP] nativeIndex: ${nativeIndex}, activeMediaId: "${activeItem?.mediaId || activeItem?.id}"
+[METADATA] artworkSource: "${store.currentTrack?.art ? 'online/local url' : 'fallback picsum'}"
+[LYRICS] state: ${store.lyrics ? `loaded (${store.lyrics.lyrics?.length || 0} lines)` : 'null'}, isLyricsLoading: ${store.isLyricsLoading}
+[LYRICS] cacheStatus: ${cached?.lyrics ? (cached.lyrics.unavailable ? 'cached negative (unavailable)' : 'cached positive') : 'miss'}
+========================================`);
+    } catch (e) {
+      console.warn("[Forensic Log] Failed to retrieve full state:", e);
     }
   }
 
-  static logNativeState(_context: string) {
-    // Diagnostics disabled for production - can be enabled for debugging
+  static logNativeState(context: string) {
+    this.logForensicState(context);
   }
 }
-

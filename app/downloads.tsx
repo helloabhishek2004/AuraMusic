@@ -955,32 +955,58 @@ export default function DownloadsScreen() {
 
   const handleGoToAlbum = useCallback(async () => {
     if (!selectedTrack) return;
-    if (selectedTrack.albumId) {
+    
+    // Check if albumId is available directly or cached
+    const { useMediaCacheStore } = require("@/src/features/cache/store/media-cache.store");
+    const cacheStore = useMediaCacheStore.getState();
+    const cachedTrack = cacheStore.getCachedTrack(selectedTrack.id);
+    const targetAlbumId =
+      selectedTrack.albumId ||
+      cachedTrack?.track?.albumId ||
+      (selectedTrack.album && selectedTrack.artist ? cacheStore.getAlbumId(selectedTrack.album, selectedTrack.artist) : null);
+
+    if (targetAlbumId) {
       setActionSheetVisible(false);
-      openAlbum(router, selectedTrack.albumId);
-    } else if (selectedTrack.album) {
+      openAlbum(router, targetAlbumId);
+    } else {
       setIsSearchingAlbum(true);
       try {
         const { musicService } = await import("@/src/services/api/music");
         const { MetadataCache } = await import("@/src/features/cache/services/metadata-cache.service");
         const { usePlayerStore } = await import("@/src/features/player/store/player.store");
         
-        const search = await musicService.lookupAlbumByName(
-          `${selectedTrack.album} ${selectedTrack.artist || ''}`.trim()
-        );
+        let search = null;
+        if (selectedTrack.album && selectedTrack.album !== 'Unknown' && selectedTrack.album !== '') {
+          search = await musicService.lookupAlbumByName(
+            `${selectedTrack.album} ${selectedTrack.artist || ''}`.trim()
+          );
+        }
+
+        // Title + Artist fuzzy search fallback
+        if (!search || !search.id) {
+          const searchQuery = `${selectedTrack.title || ''} ${selectedTrack.artist || ''}`.trim();
+          const songSearch = await musicService.searchSongs(searchQuery);
+          const bestMatch = songSearch && songSearch[0];
+          if (bestMatch && bestMatch.albumId) {
+            search = { id: bestMatch.albumId, title: bestMatch.album || 'Album' };
+          }
+        }
+
         if (search && search.id) {
-          MetadataCache.mergeEntry(selectedTrack, { albumId: search.id });
-          usePlayerStore.getState().updateTrackMetadata(selectedTrack.id, { albumId: search.id });
+          MetadataCache.mergeEntry(selectedTrack, { albumId: search.id, album: search.title });
+          usePlayerStore.getState().updateTrackMetadata(selectedTrack.id, { albumId: search.id, album: search.title });
           setActionSheetVisible(false);
           openAlbum(router, search.id);
         } else {
           setActionSheetVisible(false);
-          openAlbum(router, `local-album-${encodeURIComponent(selectedTrack.album)}`);
+          const fallbackAlbum = selectedTrack.album || 'Unknown Album';
+          openAlbum(router, `local-album-${encodeURIComponent(fallbackAlbum)}`);
         }
       } catch (e) {
         console.warn(e);
         setActionSheetVisible(false);
-        openAlbum(router, `local-album-${encodeURIComponent(selectedTrack.album)}`);
+        const fallbackAlbum = selectedTrack.album || 'Unknown Album';
+        openAlbum(router, `local-album-${encodeURIComponent(fallbackAlbum)}`);
       } finally {
         setIsSearchingAlbum(false);
       }
@@ -1202,29 +1228,23 @@ export default function DownloadsScreen() {
                   style={s.modalActionsList}
                   showsVerticalScrollIndicator={false}
                 >
-                  {(selectedTrack.albumId || selectedTrack.album) && (
-                    <TouchableOpacity
-                      style={s.modalActionRow}
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        handleGoToAlbum();
-                      }}
-                    >
-                      <Ionicons
-                        name="disc-outline"
-                        size={22}
-                        color="rgba(255,255,255,0.85)"
-                      />
-                      <Text style={s.modalActionLabel}>Go to Album</Text>
-                      {isSearchingAlbum && (
-                        <ActivityIndicator
-                          size="small"
-                          color={C.primary}
-                          style={{ marginLeft: 10 }}
-                        />
-                      )}
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={[s.modalActionRow, isSearchingAlbum && { opacity: 0.6 }]}
+                    disabled={isSearchingAlbum}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      handleGoToAlbum();
+                    }}
+                  >
+                    <Ionicons
+                      name="disc-outline"
+                      size={22}
+                      color="rgba(255,255,255,0.85)"
+                    />
+                    <Text style={s.modalActionLabel}>
+                      {isSearchingAlbum ? "Searching..." : "Go to Album"}
+                    </Text>
+                  </TouchableOpacity>
 
                   <TouchableOpacity
                     style={s.modalActionRow}

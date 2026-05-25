@@ -2236,8 +2236,14 @@ const LocalPlaylistView = React.memo(
       (track: PlayerTrack) => {
         const store = usePlayerStore.getState();
         const activeTrackId = store.currentTrack?.albumId;
+        
+        const { useMediaCacheStore } = require("@/src/features/cache/store/media-cache.store");
+        const cacheStore = useMediaCacheStore.getState();
+        const cachedTrack = cacheStore.getCachedTrack(track.id);
         const targetAlbumId =
           track.albumId ||
+          cachedTrack?.track?.albumId ||
+          (track.album && track.artist ? cacheStore.getAlbumId(track.album, track.artist) : null) ||
           (store.currentTrack?.id === track.id ? activeTrackId : null);
 
         const options: any[] = [
@@ -2261,33 +2267,53 @@ const LocalPlaylistView = React.memo(
               openArtistByName(router, track.artist);
             },
           },
-        ];
-
-        if (targetAlbumId || track.album) {
-          options.push({
+          {
             label: "Go to Album",
             icon: "disc-outline",
             onPress: async () => {
               setActionSheetVisible(false);
               if (targetAlbumId) {
                 router.push(`/album/${targetAlbumId}`);
-              } else if (track.album) {
-                const { musicService } = await import("@/src/services/api/music");
-                const { MetadataCache } = await import("@/src/features/cache/services/metadata-cache.service");
-                const { usePlayerStore } = await import("@/src/features/player/store/player.store");
-                
-                const albumSearch = await musicService.lookupAlbumByName(`${track.album} ${track.artist || ''}`.trim());
-                if (albumSearch && albumSearch.id) {
-                  MetadataCache.mergeEntry(track, { albumId: albumSearch.id });
-                  usePlayerStore.getState().updateTrackMetadata(track.id, { albumId: albumSearch.id });
-                  router.push(`/album/${albumSearch.id}`);
-                } else {
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              } else {
+                try {
+                  const { musicService } = await import("@/src/services/api/music");
+                  const { MetadataCache } = await import("@/src/features/cache/services/metadata-cache.service");
+                  const { usePlayerStore } = await import("@/src/features/player/store/player.store");
+                  
+                  let search = null;
+                  if (track.album && track.album !== 'Unknown' && track.album !== '') {
+                    search = await musicService.lookupAlbumByName(
+                      `${track.album} ${track.artist || ''}`.trim()
+                    );
+                  }
+
+                  // Title + Artist fuzzy search fallback
+                  if (!search || !search.id) {
+                    const searchQuery = `${track.title || ''} ${track.artist || ''}`.trim();
+                    const songSearch = await musicService.searchSongs(searchQuery);
+                    const bestMatch = songSearch && songSearch[0];
+                    if (bestMatch && bestMatch.albumId) {
+                      search = { id: bestMatch.albumId, title: bestMatch.album || 'Album' };
+                    }
+                  }
+
+                  if (search && search.id) {
+                    MetadataCache.mergeEntry(track, { albumId: search.id, album: search.title });
+                    usePlayerStore.getState().updateTrackMetadata(track.id, { albumId: search.id, album: search.title });
+                    router.push(`/album/${search.id}`);
+                  } else {
+                    const fallbackAlbum = track.album || 'Unknown Album';
+                    router.push(`/album/local-album-${encodeURIComponent(fallbackAlbum)}`);
+                  }
+                } catch (e) {
+                  console.warn(e);
+                  const fallbackAlbum = track.album || 'Unknown Album';
+                  router.push(`/album/local-album-${encodeURIComponent(fallbackAlbum)}`);
                 }
               }
             },
-          });
-        }
+          }
+        ];
 
         showActionSheet(track.title, options, `by ${track.artist}`);
       },

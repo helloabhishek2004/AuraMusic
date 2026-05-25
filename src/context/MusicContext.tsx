@@ -167,20 +167,16 @@ export function usePlaybackState() {
 }
 
 export function useMusicProgress(): MusicProgressContextType {
-  // Subscribe directly to the store for high-frequency updates
-  // This prevents the main Provider from re-rendering the entire app
-  const position = usePlayerStore((s) => s.position);
-  const duration = usePlayerStore((s) => s.duration);
-  const bufferedPosition = usePlayerStore((s) => s.bufferedPosition);
+  const rntpProgress = require("@rntp/player").useProgress(0.5);
 
   return useMemo(
     () => ({
-      progress: duration > 0 ? position / duration : 0,
-      elapsedSec: position / 1000,
-      durationSec: duration / 1000,
-      bufferedSec: bufferedPosition / 1000,
+      progress: rntpProgress.duration > 0 ? rntpProgress.position / rntpProgress.duration : 0,
+      elapsedSec: rntpProgress.position,
+      durationSec: rntpProgress.duration,
+      bufferedSec: rntpProgress.buffered,
     }),
-    [position, duration, bufferedPosition],
+    [rntpProgress.position, rntpProgress.duration, rntpProgress.buffered],
   );
 }
 

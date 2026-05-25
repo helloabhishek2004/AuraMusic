@@ -872,13 +872,14 @@ export default function LocalLibraryScreen() {
         setIsLoading(true);
         spinOnce();
         try {
-            const folderUris = await LocalMusicService.getPersistedFolderUris();
-            setGrantedFolders(folderUris);
-            if (folderUris.length > 0) {
+            const hasPerm = await LocalMusicService.hasPermission();
+            if (hasPerm) {
+                setGrantedFolders(["Device Storage"]);
                 const localTracks = await LocalMusicService.getLocalTracks();
                 setTracks(localTracks);
                 setFolders(LocalMusicService.groupByFolder(localTracks));
             } else {
+                setGrantedFolders([]);
                 setTracks([]);
                 setFolders({});
             }
@@ -894,10 +895,10 @@ export default function LocalLibraryScreen() {
     useEffect(() => {
         const checkFirstAccess = async () => {
             const hasAccess = await LocalMusicService.hasAccessedBefore();
-            const folderUris = await LocalMusicService.getPersistedFolderUris();
+            const hasPerm = await LocalMusicService.hasPermission();
             
-            // If first time AND no folders granted yet, show onboarding
-            if (!hasAccess && folderUris.length === 0) {
+            // If first time AND no permission granted yet, show onboarding
+            if (!hasAccess && !hasPerm) {
                 setShowOnboarding(true);
             } else {
                 loadLocalMedia();
@@ -915,23 +916,11 @@ export default function LocalLibraryScreen() {
             // First request media permissions
             const hasPerm = await LocalMusicService.requestPermissions();
             
-            if (!hasPerm) {
-                setShowPermissionDenied(true);
-                return;
-            }
-            
-            // Then grant folder access
-            const uri = await LocalMusicService.grantFolderPermission();
-            
-            if (uri) {
+            if (hasPerm) {
                 await LocalMusicService.markFirstAccess();
                 loadLocalMedia();
             } else {
-                // User cancelled SAF picker - check if any folders exist
-                const folderUris = await LocalMusicService.getPersistedFolderUris();
-                if (folderUris.length === 0) {
-                    setShowOnboarding(true);
-                }
+                setShowPermissionDenied(true);
             }
         } catch (e) {
             console.error("[LocalLibrary] Grant access failed:", e);
@@ -957,9 +946,11 @@ export default function LocalLibraryScreen() {
     };
 
     const handleRemoveFolder = async (uri: string) => {
+        // Clear media state since we only have Device Storage
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        await LocalMusicService.removeFolderUri(uri);
-        loadLocalMedia();
+        setGrantedFolders([]);
+        setTracks([]);
+        setFolders({});
     };
 
     const handlePlayTrack = useCallback(

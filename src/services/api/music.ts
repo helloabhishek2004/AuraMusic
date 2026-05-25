@@ -456,17 +456,21 @@ export const musicService = {
   /**
    * Resolves a videoId to a playable stream URL.
    */
-  resolveStream: async (videoId: string): Promise<{ streamUrl: string; duration?: number }> => {
-    const cached = streamUrlCache.get(videoId);
+  resolveStream: async (videoId: string, quality?: string): Promise<{ streamUrl: string; duration?: number }> => {
+    // Cache key includes quality hint
+    const cacheKey = `${videoId}:${quality || 'default'}`;
+    const cached = streamUrlCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < STREAM_CACHE_TTL) {
       return { streamUrl: cached.url };
     }
 
     try {
-      const response = await apiClient.get(`/resolve/${videoId}`);
+      const response = await apiClient.get(`/resolve/${videoId}`, {
+          params: { quality }
+      });
       const result = response.data;
       if (result.streamUrl) {
-        streamUrlCache.set(videoId, { url: result.streamUrl, timestamp: Date.now() });
+        streamUrlCache.set(cacheKey, { url: result.streamUrl, timestamp: Date.now() });
       }
       return result;
     } catch (error) {
@@ -476,20 +480,22 @@ export const musicService = {
   },
 
   /**
+   * Invalidates the stream URL cache for a specific videoId.
+   */
+  invalidateStreamCache: (videoId: string) => {
+    streamUrlCache.delete(videoId);
+    console.info(`[MusicAPI] Invalidated stream URL cache for: ${videoId}`);
+  },
+
+  /**
    * Resolves lyrics for a track.
    */
-  resolveLyrics: async (track: { id: string; title: string; artist: string; duration?: number }) => {
+  resolveLyrics: async (track: { id: string; title: string; artist: string; duration?: any }) => {
     try {
-      const response = await apiClient.get(`/lyrics/${track.id}`, {
-        params: {
-          title: track.title,
-          artist: track.artist,
-          duration: track.duration,
-        },
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error resolving lyrics:", error);
+      const { lyricsService } = require("../../features/lyrics/services/lyrics.service");
+      return await lyricsService.fetchLyrics(track.id, track.title, track.artist, track.duration);
+    } catch (error: any) {
+      console.warn("[MusicAPI] Error resolving lyrics through centralized service:", error.message || error);
       throw error;
     }
   },

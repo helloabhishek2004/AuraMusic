@@ -19,6 +19,8 @@ export const DownloadButton = memo(({ track, size = 24, color = palette.ink, sty
   const activeTasks = useDownloadStore(s => s.activeTasks);
   const addDownload = useDownloadStore(s => s.addDownload);
 
+  const cancelDownload = useDownloadStore(s => s.cancelDownload);
+
   const downloaded = !!downloadedTracks[track.id];
   const task = activeTasks[track.id];
   const downloading = task?.status === 'downloading' || task?.status === 'queued';
@@ -51,9 +53,12 @@ export const DownloadButton = memo(({ track, size = 24, color = palette.ink, sty
     ]).start();
 
     if (downloaded) {
-      // Show option to remove? For now, we'll keep it as "completed"
-      // In the requirements it says "allow remove download option on long press"
-    } else if (!downloading) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      DownloadManager.removeDownload(track.id);
+    } else if (downloading) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      DownloadManager.cancelDownload(track.id);
+    } else {
       addDownload(track);
     }
   }, [downloaded, downloading, track, addDownload]);

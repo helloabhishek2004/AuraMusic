@@ -59,6 +59,36 @@ export const useLyricsStore = create<LyricsStoreState>((set, get) => ({
       
       const data = await lyricsService.fetchLyrics(trackId, title, artist, duration);
       
+      // Strict active track check!
+      const { usePlayerStore } = require("../../player/store/player.store");
+      const { getCanonicalTrackId } = require("../../player/utils/track-identity");
+      const currentActiveTrack = usePlayerStore.getState().currentTrack;
+      if (!currentActiveTrack) {
+        set({ isLoading: false });
+        return;
+      }
+      const activeCanonical = getCanonicalTrackId(currentActiveTrack);
+      const fetchedCanonical = getCanonicalTrackId({ id: trackId, title, artist });
+      if (activeCanonical !== fetchedCanonical && currentActiveTrack.id !== trackId) {
+        if (typeof __DEV__ !== "undefined" && __DEV__) {
+          console.warn(`[Lyrics Store] Discarding fetched lyrics for ${trackId} because active track changed to ${currentActiveTrack.id}`);
+        }
+        return;
+      }
+
+      if (data && (data as any).unavailable === true) {
+        set({
+          lyrics: null,
+          isLoading: false,
+          error: "Lyrics unavailable",
+          activeLineIndex: -1,
+          currentProgress: 0,
+          hasUserScrolled: false,
+          isFollowingPlayback: true,
+        });
+        return;
+      }
+
       set({
         lyrics: data,
         isLoading: false,
@@ -69,12 +99,20 @@ export const useLyricsStore = create<LyricsStoreState>((set, get) => ({
       });
     } catch (error) {
       console.error("[Lyrics Store] Failed to fetch lyrics:", error);
-      set({
-        lyrics: null,
-        error: error instanceof Error ? error.message : "Failed to fetch lyrics",
-        isLoading: false,
-        activeLineIndex: -1,
-      });
+      
+      // Strict active track check for catch block!
+      const { usePlayerStore } = require("../../player/store/player.store");
+      const currentActiveTrack = usePlayerStore.getState().currentTrack;
+      if (currentActiveTrack && currentActiveTrack.id === trackId) {
+        set({
+          lyrics: null,
+          error: error instanceof Error ? error.message : "Failed to fetch lyrics",
+          isLoading: false,
+          activeLineIndex: -1,
+        });
+      } else {
+        set({ isLoading: false });
+      }
     }
   },
 

@@ -258,6 +258,7 @@ def get_stream_url(video_id: str):
         'log_tostderr': False,
         'socket_timeout': 10,
         'geo_bypass': True,
+        'extractor_args': {'youtube': {'player_client': ['android', 'mweb']}},
     }
     
     # Try multiple extraction strategies

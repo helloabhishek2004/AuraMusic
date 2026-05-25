@@ -55,6 +55,9 @@ import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withRepeat,
+  withTiming,
+  withSequence,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
@@ -467,16 +470,83 @@ const BentoRow = memo(({
   const pCreate = usePress(0.94);
   const pDl     = usePress(0.94);
   const addRot  = useRef(new Animated.Value(0)).current;
+
   // Shimmer on Downloads
   const shimmer = useRef(new Animated.Value(0)).current;
 
+  // Get active tasks to detect if any song is actively downloading
+  const downloadQueue = useDownloadStore(s => s.downloadQueue);
+  const activeTasks = useDownloadStore(s => s.activeTasks);
+
+  const isDownloading = useMemo(() => {
+    return downloadQueue.length > 0 && Object.values(activeTasks).some(
+      task => (task.status === 'downloading' || task.status === 'queued') && downloadQueue.includes(task.track.id)
+    );
+  }, [activeTasks, downloadQueue]);
+
+  // Fetch real available disk storage dynamically
+  const [freeSpace, setFreeSpace] = useState<string>("84 GB");
+
   useEffect(() => {
-    Animated.loop(
-      Animated.timing(shimmer, { toValue: 1, duration: 1800, easing: Easing.linear, useNativeDriver: true })
-    ).start();
+    let active = true;
+    async function getStorage() {
+      try {
+        const FileSystem = require("expo-file-system/legacy");
+        const bytes = await FileSystem.getFreeDiskStorageAsync();
+        const gb = bytes / (1024 * 1024 * 1024);
+        if (active) {
+          setFreeSpace(`${Math.round(gb)} GB`);
+        }
+      } catch (err) {
+        console.warn("[Library] Failed to get free disk space:", err);
+      }
+    }
+    getStorage();
+    return () => { active = false; };
   }, []);
 
+  // Control shimmer loop dynamically based on downloading state
+  useEffect(() => {
+    let anim: Animated.CompositeAnimation | null = null;
+    if (isDownloading) {
+      shimmer.setValue(0);
+      anim = Animated.loop(
+        Animated.timing(shimmer, { toValue: 1, duration: 1800, easing: Easing.linear, useNativeDriver: true })
+      );
+      anim.start();
+    } else {
+      shimmer.setValue(0);
+    }
+    return () => {
+      if (anim) anim.stop();
+    };
+  }, [isDownloading]);
+
   const shimX = shimmer.interpolate({ inputRange: [0, 1], outputRange: [-SW, SW * 0.5] });
+
+  // Download Micro-animation: Pulsing arrow scale for standard premium feel
+  const dlPulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (isDownloading) {
+      dlPulse.value = withRepeat(
+        withSequence(
+          withTiming(1.2, { duration: 600 }),
+          withTiming(0.9, { duration: 600 })
+        ),
+        -1,
+        true
+      );
+    } else {
+      dlPulse.value = 1;
+    }
+  }, [isDownloading]);
+
+  const dlIconStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: dlPulse.value }]
+    };
+  });
 
   const handleCreate = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -488,6 +558,11 @@ const BentoRow = memo(({
   };
 
   const rotate = addRot.interpolate({ inputRange: [0,1], outputRange: ["0deg","135deg"] });
+
+  // Styling based on state: Green double tick if idle, Cyan downloading icon if active
+  const ringBg = isDownloading ? h2r(C.accent, 0.10) : h2r("#30D158", 0.10);
+  const ringBorder = isDownloading ? h2r(C.accent, 0.24) : h2r("#30D158", 0.24);
+  const accentColor = isDownloading ? C.accent : "#30D158";
 
   return (
     <Mat delay={100}>
@@ -519,38 +594,46 @@ const BentoRow = memo(({
         </Glass>
 
         {/* Downloads */}
-        <Glass style={s.bentoHalf} radius={22} blur={60} glowColor={C.accent}>
-          {/* Shimmer sweep */}
-          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { overflow:"hidden", borderRadius:22 }]}>
-            <Animated.View style={{
-              position:"absolute", top:0, bottom:0, width:120,
-              transform: [{ translateX: shimX }, { skewX: "-16deg" }],
-              backgroundColor: "rgba(70,245,224,0.06)",
-            }} />
-          </Animated.View>
+        <Glass style={s.bentoHalf} radius={22} blur={60} glowColor={accentColor}>
+          {/* Shimmer sweep - only rendered when actively downloading */}
+          {isDownloading && (
+            <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { overflow:"hidden", borderRadius:22 }]}>
+              <Animated.View style={{
+                position:"absolute", top:0, bottom:0, width:120,
+                transform: [{ translateX: shimX }, { skewX: "-16deg" }],
+                backgroundColor: "rgba(70,245,224,0.06)",
+              }} />
+            </Animated.View>
+          )}
 
           <Animated.View style={[{ flex:1 }, { transform: [{ scale: pDl.sc }] }]}>
             <TouchableOpacity
               style={{ flex:1 }} activeOpacity={1}
               onPressIn={pDl.onIn} onPressOut={pDl.onOut}
               onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onDownloads(); }}
-              accessibilityRole="button" accessibilityLabel="Open Downloads, 84 GB available"
+              accessibilityRole="button" accessibilityLabel={`Open Downloads, ${freeSpace} available`}
             >
               <View style={s.dlInner}>
                 <View style={s.dlTop}>
-                  <View style={s.dlIconRing}>
-                    <Ionicons name="checkmark-done" size={17} color={C.accent} />
+                  <View style={[s.dlIconRing, { backgroundColor: ringBg, borderColor: ringBorder }]}>
+                    <Reanimated.View style={dlIconStyle}>
+                      <Ionicons 
+                        name={isDownloading ? "download" : "checkmark-done"} 
+                        size={17} 
+                        color={accentColor} 
+                      />
+                    </Reanimated.View>
                   </View>
                   <View style={s.livePill}>
                     <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
-                    <View style={[StyleSheet.absoluteFillObject, { borderRadius:12, borderWidth:0.7, borderColor:h2r(C.accent,0.28), backgroundColor:h2r(C.accent,0.07) }]} />
-                    <LiveDot color={C.accent} />
-                    <Text style={s.liveText}>LIVE</Text>
+                    <View style={[StyleSheet.absoluteFillObject, { borderRadius:12, borderWidth:0.7, borderColor:h2r(accentColor,0.28), backgroundColor:h2r(accentColor,0.07) }]} />
+                    <LiveDot color={accentColor} />
+                    <Text style={[s.liveText, { color: accentColor }]}>LIVE</Text>
                   </View>
                 </View>
                 <View>
                   <Text style={s.dlTitle}>Downloads</Text>
-                  <Text style={s.dlMeta}>84 GB Available</Text>
+                  <Text style={s.dlMeta}>{freeSpace} Available</Text>
                 </View>
               </View>
             </TouchableOpacity>

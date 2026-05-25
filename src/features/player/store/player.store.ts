@@ -16,6 +16,7 @@ import { useMediaCacheStore } from "../../cache/store/media-cache.store";
 interface ExtendedPlayerStore extends PlayerStore {
   isPreloading: boolean;
   isReordering: boolean;
+  isRestoringSession: boolean;
   _hasHydrated: boolean;
   setHasHydrated: (val: boolean) => void;
   // Playlist-aware playback context
@@ -55,6 +56,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       isTransitioning: false,
       isPreloading: false,
       isReordering: false,
+      isRestoringSession: false,
       _lastVolumeSync: 0,
 
       // Playback context (for playlist-aware queue tracking)
@@ -76,14 +78,66 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
                if (typeof __DEV__ !== "undefined" && __DEV__) {
                  console.info("[Player] Store synced with Native:", foundIndex);
                }
-               set({ currentIndex: foundIndex, currentTrack: store.queue[foundIndex] });
+               set({ 
+                 currentIndex: foundIndex, 
+                 currentTrack: store.queue[foundIndex],
+                 lyrics: null,
+                 isLyricsLoading: false
+               });
             }
           }
         } catch (e) {}
       },
-      updateTrackMetadata: (trackId: string, partial: Partial<PlayerTrack>) => set((state) => {
-        if (state.currentTrack && state.currentTrack.id === trackId) {
-          // Shallow equality check to prevent re-renders if no actual change
+      updateTrackMetadata: (trackId: string, partial: Partial<PlayerTrack>) => {
+        const { getCanonicalTrackId } = require("../utils/track-identity");
+        const state = get();
+        
+        const matchesTrack = (track: PlayerTrack) => {
+          return track.id === trackId || getCanonicalTrackId(track) === trackId;
+        };
+
+        // 1. Update track in queue if it exists
+        let queueChanged = false;
+        const newQueue = state.queue.map(track => {
+          if (matchesTrack(track)) {
+            let changed = false;
+            for (const key of Object.keys(partial)) {
+              if ((track as any)[key] !== (partial as any)[key]) {
+                changed = true;
+                break;
+              }
+            }
+            if (changed) {
+              queueChanged = true;
+              return { ...track, ...partial };
+            }
+          }
+          return track;
+        });
+
+        // 2. Update track in originalQueue if it exists
+        let originalChanged = false;
+        const newOriginal = state.originalQueue.map(track => {
+          if (matchesTrack(track)) {
+            let changed = false;
+            for (const key of Object.keys(partial)) {
+              if ((track as any)[key] !== (partial as any)[key]) {
+                changed = true;
+                break;
+              }
+            }
+            if (changed) {
+              originalChanged = true;
+              return { ...track, ...partial };
+            }
+          }
+          return track;
+        });
+
+        // 3. Update currentTrack if it matches
+        let currentChanged = false;
+        let newCurrent = state.currentTrack;
+        if (state.currentTrack && matchesTrack(state.currentTrack)) {
           let changed = false;
           for (const key of Object.keys(partial)) {
             if ((state.currentTrack as any)[key] !== (partial as any)[key]) {
@@ -92,11 +146,24 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
             }
           }
           if (changed) {
-            return { currentTrack: { ...state.currentTrack, ...partial } };
+            currentChanged = true;
+            newCurrent = { ...state.currentTrack, ...partial };
           }
         }
-        return state;
-      }),
+
+        if (queueChanged || originalChanged || currentChanged) {
+          const updates: Partial<ExtendedPlayerStore> = {};
+          if (queueChanged) updates.queue = newQueue;
+          if (originalChanged) updates.originalQueue = newOriginal;
+          if (currentChanged) updates.currentTrack = newCurrent;
+          set(updates);
+
+          // 4. Mirror to native media item if it's the currently playing track
+          if (currentChanged) {
+            PlaybackService.updateMetadata(state.currentIndex, partial);
+          }
+        }
+      },
 
       // Actions
       setTrack: async (track: PlayerTrack) => {
@@ -197,26 +264,51 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
       fetchLyrics: async (track: PlayerTrack) => {
         if (!track) return;
+        const { getCanonicalTrackId } = require("../utils/track-identity");
+        const canonicalId = getCanonicalTrackId(track);
         
-        // Use cache first
+        // Use cache first (including negative cache)
         const cacheStore = useMediaCacheStore.getState();
-        const cached = cacheStore.getCachedTrack(track.id);
+        const cached = cacheStore.getCachedTrack(canonicalId) || cacheStore.getCachedTrack(track.id);
         if (cached?.lyrics) {
-            set({ lyrics: cached.lyrics, isLyricsLoading: false });
-            return;
+            if (cached.lyrics.unavailable === true) {
+                const NEGATIVE_CACHE_TTL = 60 * 60 * 1000;
+                const age = Date.now() - (cached.lyrics.cachedAt || 0);
+                if (age < NEGATIVE_CACHE_TTL) {
+                    set({ lyrics: null, isLyricsLoading: false });
+                    return;
+                }
+            } else {
+                const { parseLyricsData } = require("../utils/lyrics-parser");
+                const parsed = parseLyricsData(cached.lyrics);
+                set({ lyrics: parsed, isLyricsLoading: false });
+                return;
+            }
         }
 
         set({ isLyricsLoading: true, lyrics: null });
         try {
-          const response = await musicService.resolveLyrics(track);
-          if (response) {
-              cacheStore.cacheLyrics(track.id, response);
+          const { lyricsService } = require("../../lyrics/services/lyrics.service");
+          const response = await lyricsService.fetchLyrics(
+            track.id,
+            track.title,
+            track.artist,
+            track.duration
+          );
+          
+          let parsed = null;
+          if (response && response.unavailable !== true) {
+              const { parseLyricsData } = require("../utils/lyrics-parser");
+              parsed = parseLyricsData(response);
           }
-          if (get().currentTrack?.id === track.id) {
-            set({ lyrics: response, isLyricsLoading: false });
+          
+          const activeTrack = get().currentTrack;
+          if (activeTrack && getCanonicalTrackId(activeTrack) === canonicalId) {
+            set({ lyrics: parsed, isLyricsLoading: false });
           }
         } catch (error) {
-          if (get().currentTrack?.id === track.id) {
+          const activeTrack = get().currentTrack;
+          if (activeTrack && getCanonicalTrackId(activeTrack) === canonicalId) {
             set({ isLyricsLoading: false, lyrics: null });
           }
         }
@@ -266,8 +358,6 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       },
 
       setQueue: async (tracks: PlayerTrack[], startIndex: number = 0) => {
-        const isShuffle = get().isShuffle;
-        
         // Hydrate from cache immediately for responsive UI
         const cacheStore = useMediaCacheStore.getState();
         const hydratedTracks = tracks.map(t => {
@@ -275,124 +365,123 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
             return cached ? { ...t, ...cached.track } : t;
         });
 
-        let activeQueue = [...hydratedTracks];
-        let newStartIndex = startIndex;
-
-        if (isShuffle) {
-          const selectedTrack = hydratedTracks[startIndex];
-          const otherTracks = hydratedTracks.filter((_, i) => i !== startIndex);
-          for (let i = otherTracks.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [otherTracks[i], otherTracks[j]] = [otherTracks[j], otherTracks[i]];
-          }
-          activeQueue = [selectedTrack, ...otherTracks];
-          newStartIndex = 0;
-        }
+        const activeQueue = [...hydratedTracks];
+        const newStartIndex = startIndex;
 
         set({
-          originalQueue: hydratedTracks,
           queue: activeQueue,
-          currentIndex: newStartIndex
+          originalQueue: [...hydratedTracks],
+          currentIndex: newStartIndex,
         });
 
-        if (activeQueue[newStartIndex]) {
-          await get().setTrack(activeQueue[newStartIndex]);
-        }
+        await get().setTrack(activeQueue[newStartIndex]);
       },
 
-      playNext: (track: PlayerTrack) => {
+      playNext: async (track: PlayerTrack) => {
         const { queue, originalQueue, currentIndex } = get();
         
         const cacheStore = useMediaCacheStore.getState();
         const cached = cacheStore.getCachedTrack(track.id);
         const hydratedTrack = cached ? { ...track, ...cached.track } as PlayerTrack : track;
 
-        const newQueue = [...queue];
-        newQueue.splice(currentIndex + 1, 0, hydratedTrack);
+        try {
+          await PlaybackService.insertTrack(currentIndex + 1, hydratedTrack);
+          console.info("[PlayerStore] Native insertTrack succeeded");
+          
+          const newQueue = [...queue];
+          newQueue.splice(currentIndex + 1, 0, hydratedTrack);
 
-        const newOriginal = [...originalQueue];
-        if (!newOriginal.find(t => t.id === hydratedTrack.id)) {
-          newOriginal.push(hydratedTrack);
+          const newOriginal = [...originalQueue];
+          if (!newOriginal.find(t => t.id === hydratedTrack.id)) {
+            newOriginal.push(hydratedTrack);
+          }
+
+          set({ queue: newQueue, originalQueue: newOriginal });
+        } catch (e) {
+          console.error("[PlayerStore] Native playNext failed", e);
         }
-
-        set({ queue: newQueue, originalQueue: newOriginal });
-
-        PlaybackService.updateQueue(newQueue, currentIndex);
       },
 
-      addToQueue: (track: PlayerTrack) => {
-        const { queue, originalQueue, currentIndex } = get();
+      addToQueue: async (track: PlayerTrack) => {
+        const { queue, originalQueue } = get();
 
         const cacheStore = useMediaCacheStore.getState();
         const cached = cacheStore.getCachedTrack(track.id);
         const hydratedTrack = cached ? { ...track, ...cached.track } as PlayerTrack : track;
 
-        const newQueue = [...queue, hydratedTrack];
-        const newOriginal = [...originalQueue];
-        if (!newOriginal.find(t => t.id === hydratedTrack.id)) {
-          newOriginal.push(hydratedTrack);
+        try {
+          await PlaybackService.addTrack(hydratedTrack);
+          console.info("[PlayerStore] Native addTrack succeeded");
+
+          const newQueue = [...queue, hydratedTrack];
+          const newOriginal = [...originalQueue];
+          if (!newOriginal.find(t => t.id === hydratedTrack.id)) {
+            newOriginal.push(hydratedTrack);
+          }
+
+          set({ queue: newQueue, originalQueue: newOriginal });
+        } catch (e) {
+          console.error("[PlayerStore] Native addToQueue failed", e);
         }
-
-        set({ queue: newQueue, originalQueue: newOriginal });
-
-        PlaybackService.updateQueue(newQueue, currentIndex);
       },
 
-      removeFromQueue: (index: number) => {
+      removeFromQueue: async (index: number) => {
         const { queue, currentIndex } = get();
         if (index < 0 || index >= queue.length) return;
 
         if (index === currentIndex) return;
 
-        const newQueue = [...queue];
-        newQueue.splice(index, 1);
+        try {
+          await PlaybackService.removeTrack(index);
+          console.info(`[PlayerStore] Native removeTrack(${index}) succeeded`);
 
-        let newIndex = currentIndex;
-        if (index < currentIndex) newIndex--;
+          const newQueue = [...queue];
+          newQueue.splice(index, 1);
 
-        set({ queue: newQueue, currentIndex: newIndex });
+          let newIndex = currentIndex;
+          if (index < currentIndex) newIndex--;
 
-        PlaybackService.updateQueue(newQueue, newIndex);
+          set({ queue: newQueue, currentIndex: newIndex });
+        } catch (e) {
+          console.error("[PlayerStore] Native removeFromQueue failed", e);
+        }
       },
 
-      reorderQueue: (from: number, to: number) => {
+      reorderQueue: async (from: number, to: number) => {
         const { queue, originalQueue, currentIndex, isReordering } = get();
 
         if (isReordering || from === to) return;
-
-        // 1. Update queue order
-        const newQueue = [...queue];
-        const [movedItem] = newQueue.splice(from, 1);
-        newQueue.splice(to, 0, movedItem);
-
-        // 2. Adjust currentIndex if necessary
-        let newIndex = currentIndex;
-        if (currentIndex === from) {
-          newIndex = to;
-        } else if (currentIndex > from && currentIndex <= to) {
-          newIndex--;
-        } else if (currentIndex < from && currentIndex >= to) {
-          newIndex++;
-        }
-
-        // 3. Update state
-        set({
-          queue: newQueue,
-          currentIndex: newIndex,
-          isReordering: true
-        });
-        
-        // 3.5 Set global service lock to prevent race conditions during move
+        set({ isReordering: true });
         PlaybackService.setReordering(true);
 
-        // 4. Sync with Native Player using atomic move
-        PlaybackService.moveTrack(from, to).finally(async () => {
-          // 5. Verification & Repair step: Ensure native index matches JS expectation
+        try {
+          // 1. Sync with Native Player natively first (Authority)
+          await PlaybackService.moveTrack(from, to);
+          console.info(`[PlayerStore] Native moveTrack(${from}, ${to}) succeeded`);
+
+          // 2. Mirror into Zustand atomically only after native success
+          const newQueue = [...queue];
+          const [movedItem] = newQueue.splice(from, 1);
+          newQueue.splice(to, 0, movedItem);
+
+          let newIndex = currentIndex;
+          if (currentIndex === from) {
+            newIndex = to;
+          } else if (currentIndex > from && currentIndex <= to) {
+            newIndex--;
+          } else if (currentIndex < from && currentIndex >= to) {
+            newIndex++;
+          }
+
+          set({
+            queue: newQueue,
+            currentIndex: newIndex,
+          });
+
+          // Verification & Repair
           try {
               const TrackPlayer = (await import("@rntp/player")).default;
               const active = await TrackPlayer.getActiveMediaItem();
-              const nativeIndex = await TrackPlayer.getActiveMediaItemIndex();
-              
               if (active) {
                   const verifiedIndex = newQueue.findIndex(t => t.id === (active as any).id || t.id === (active as any).mediaId);
                   if (verifiedIndex !== -1 && verifiedIndex !== newIndex) {
@@ -410,23 +499,31 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
                       PlaybackService.updateMediaItem(repairIndex, resolved);
                   }
               }
-
           } catch (e) {}
 
-          // Wait for native side to settle before releasing lock
-          setTimeout(() => {
-            PlaybackService.setReordering(false);
-            set({ isReordering: false });
-            get().preloadNext(); 
-          }, 400); 
-        });
+        } catch (e) {
+          console.error("[PlayerStore] Native reorderQueue failed", e);
+        } finally {
+          PlaybackService.setReordering(false);
+          set({ isReordering: false });
+          get().preloadNext();
+        }
       },
 
       jumpToQueueIndex: async (index: number) => {
         const { queue } = get();
         if (index < 0 || index >= queue.length) return;
 
-        set({ currentIndex: index });
+        // [Aura_Transition_Hardening] Optimistically update store metadata instantly
+        set({
+          currentIndex: index,
+          currentTrack: queue[index],
+          lyrics: null,
+          isLyricsLoading: false,
+          isTransitioning: true,
+          status: "buffering",
+          isBuffering: true,
+        });
         await get().setTrack(queue[index]);
       },
 
@@ -467,89 +564,71 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       },
 
       next: async () => {
-        const { queue, currentIndex, repeatMode, isTransitioning, currentTrack } = get();
+        const { queue, isTransitioning, currentIndex } = get();
 
         if (queue.length === 0 || isTransitioning) return;
-
         if (transitionManager.getTransitionState()) return;
 
-        transitionManager.setTransitioning(true);
-        set({ isTransitioning: true });
+        const nextIndex = (currentIndex + 1) % queue.length;
+        const nextTrack = queue[nextIndex];
+        if (nextTrack) {
+          // [Aura_Transition_Hardening] Optimistically update store metadata instantly
+          set({
+            currentIndex: nextIndex,
+            currentTrack: nextTrack,
+            lyrics: null,
+            isLyricsLoading: false,
+            isTransitioning: true,
+            status: "buffering",
+            isBuffering: true,
+          });
+        }
 
-        if (repeatMode === "track" && currentTrack) {
-          transitionManager.setTransitioning(false);
-          set({ isTransitioning: false });
+        try {
+          await PlaybackService.skipToNext();
+        } catch (e) {
+          console.warn("[PlayerStore] Native skipToNext failed:", e);
+        }
+      },
+
+      previous: async () => {
+        const { queue, isTransitioning, position, currentIndex } = get();
+        if (queue.length === 0 || isTransitioning) return;
+
+        let posMs = position;
+        try {
+          const TrackPlayer = require("@rntp/player").default;
+          const p = await TrackPlayer.getProgress();
+          if (p && p.position) posMs = p.position * 1000;
+        } catch(e) {}
+
+        // If we are more than 5 seconds into the track, seeking to 0 is standard behavior
+        if (posMs > 5000) {
           await get().seek(0);
           await get().play();
           return;
         }
 
-        let nextIndex = currentIndex + 1;
-
-        if (nextIndex >= queue.length) {
-          if (repeatMode === "queue") {
-            nextIndex = 0;
-          } else {
-            transitionManager.setTransitioning(false);
-            set({ isTransitioning: false });
-            return;
-          }
-        }
-
-        const nextTrack = queue[nextIndex];
-        if (!nextTrack) {
-          transitionManager.setTransitioning(false);
-          set({ isTransitioning: false });
-          return;
-        }
-
-        const cachedPreload = transitionManager.getCachedTrack(nextTrack.id);
-        const hasUrl = (t: PlayerTrack) => !!(t.url && t.url.length > 10 && !t.url.startsWith('data:'));
-
-        if (nextTrack.isLocal || (cachedPreload && hasUrl(cachedPreload))) {
-          // SEAMLESS PATH: Native queue already has the resolved URL
-          await PlaybackService.skipToNext();
-          return;
-        }
-
-        // RESOLUTION PATH: Must resolve and reload queue
-        set({ currentIndex: nextIndex });
-        await get().setTrack(nextTrack);
-      },
-
-      previous: async () => {
-        const { queue, currentIndex, position, isTransitioning, repeatMode, currentTrack } = get();
-        if (queue.length === 0 || isTransitioning) return;
-
-        if (position > 5000 || repeatMode === "track") {
-          await get().seek(0);
-          return;
-        }
-
-        transitionManager.setTransitioning(true);
-        set({ isTransitioning: true });
-
-        let prevIndex = currentIndex - 1;
-        if (prevIndex < 0) {
-          if (repeatMode === "queue" && queue.length > 0) {
-            prevIndex = queue.length - 1;
-          } else {
-            transitionManager.setTransitioning(false);
-            set({ isTransitioning: false });
-            await get().seek(0);
-            return;
-          }
-        }
-
+        const prevIndex = (currentIndex - 1 + queue.length) % queue.length;
         const prevTrack = queue[prevIndex];
-        if (prevTrack?.isLocal || (prevTrack?.url && prevTrack.url.length > 10 && !prevTrack.url.startsWith('data:'))) {
-          // SEAMLESS PATH
-          await PlaybackService.skipToPrevious();
-          return;
+        if (prevTrack) {
+          // [Aura_Transition_Hardening] Optimistically update store metadata instantly
+          set({
+            currentIndex: prevIndex,
+            currentTrack: prevTrack,
+            lyrics: null,
+            isLyricsLoading: false,
+            isTransitioning: true,
+            status: "buffering",
+            isBuffering: true,
+          });
         }
 
-        set({ currentIndex: prevIndex });
-        await get().setTrack(queue[prevIndex]);
+        try {
+          await PlaybackService.skipToPrevious();
+        } catch (e) {
+          console.warn("[PlayerStore] Native skipToPrevious failed:", e);
+        }
       },
 
       seek: async (position: number) => {
@@ -580,32 +659,59 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         set({ repeatMode: mode });
       },
 
+      toggleRepeatMode: () => {
+        const { repeatMode } = get();
+        let newMode: RepeatMode = "off";
+        if (repeatMode === "off") newMode = "queue";
+        else if (repeatMode === "queue") newMode = "track";
+        else if (repeatMode === "track") newMode = "off";
+
+        PlaybackService.setRepeatMode(newMode);
+        set({ repeatMode: newMode });
+      },
+
       toggleShuffle: () => {
-        const { isShuffle, originalQueue, currentTrack } = get();
+        const { isShuffle } = get();
         const newShuffle = !isShuffle;
 
-        let newQueue = [...originalQueue];
-        let newIndex = originalQueue.findIndex((t: PlayerTrack) => t.id === currentTrack?.id);
-
-        if (newShuffle) {
-          const otherTracks = originalQueue.filter((t: PlayerTrack) => t.id !== currentTrack?.id);
-          for (let i = otherTracks.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [otherTracks[i], otherTracks[j]] = [otherTracks[j], otherTracks[i]];
-          }
-          newQueue = currentTrack ? [currentTrack, ...otherTracks] : otherTracks;
-          newIndex = 0;
-        }
-
-        set({ isShuffle: newShuffle, queue: newQueue, currentIndex: newIndex });
-
-        PlaybackService.updateQueue(newQueue, newIndex);
+        PlaybackService.setShuffleMode(newShuffle);
+        set({ isShuffle: newShuffle });
       },
 
       updateProgress: (position: number, duration: number, buffered: number) => {
         const s = get();
         if (Math.abs(s.position - position) > 100 || Math.abs(s.duration - duration) > 100) {
           set({ position, duration, bufferedPosition: buffered });
+        }
+
+        // Handle Crossfade / Fade logic
+        const { useSettingsStore } = require("../../settings/store/settings.store");
+        const settings = useSettingsStore.getState();
+
+        if (settings.crossfadeEnabled && duration > 0) {
+          const remainingSeconds = (duration - position) / 1000;
+          const currentSeconds = position / 1000;
+          
+          // FADE OUT
+          if (remainingSeconds <= settings.crossfadeDuration && remainingSeconds > 0) {
+             const targetVol = s.volume * (remainingSeconds / settings.crossfadeDuration);
+             PlaybackService.setVolume(targetVol);
+             
+             if (remainingSeconds < 0.5 && !s.isTransitioning) {
+                 if (typeof __DEV__ !== "undefined" && __DEV__) {
+                     console.info(`[CROSSFADE] Fading out: ${s.currentTrack?.title}. Remaining: ${remainingSeconds.toFixed(1)}s`);
+                 }
+             }
+          } 
+          // FADE IN
+          else if (currentSeconds <= 1.0) {
+             const targetVol = s.volume * currentSeconds;
+             PlaybackService.setVolume(targetVol);
+          }
+          // SUSTAIN
+          else if (s.status === 'playing') {
+             PlaybackService.setVolume(s.volume);
+          }
         }
 
         if (s.isPlaying && !s.isTransitioning && !s.isPreloading && transitionManager.shouldPreload(position, duration)) {
@@ -632,27 +738,80 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       clearPreviousTrack: () => {
         set({ previousTrack: null });
       },
+
+      restoreSession: async () => {
+        if (get().isRestoringSession) return;
+        set({ isRestoringSession: true });
+
+        const { currentTrack, queue, currentIndex, position, volume, repeatMode } = get();
+        if (currentTrack && queue.length > 0) {
+           console.info("[PlayerStore] Restoring session natively...");
+           try {
+             // Let PlaybackService handle the silent queue injection
+             const { PlaybackService } = await import("../services/playback.service");
+             
+             // Use updateQueue instead of loadTrack so it doesn't auto-play
+             await PlaybackService.updateQueue(queue, currentIndex);
+             
+             if (position > 0) {
+               await PlaybackService.seek(position);
+             }
+             if (volume !== undefined) {
+               await PlaybackService.setVolume(volume);
+             }
+             if (repeatMode) {
+               PlaybackService.setRepeatMode(repeatMode);
+             }
+
+             // Explicitly force pause to guarantee that the music does not auto-play on app start.
+             const TrackPlayer = (await import("@rntp/player")).default;
+             await TrackPlayer.pause();
+             set({ isPlaying: false, status: "paused" });
+             
+             console.info("[PlayerStore] Session restored in paused state at position:", position);
+           } catch (e) {
+             console.error("[PlayerStore] Failed to restore session", e);
+           }
+        }
+        set({ isRestoringSession: false });
+      },
     }),
     {
       name: 'aura-player',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({
-        currentTrack: state.currentTrack,
-        originalQueue: state.originalQueue,
-        queue: state.queue,
-        currentIndex: state.currentIndex,
-        position: state.position,
-        duration: state.duration,
-        volume: state.volume,
-        repeatMode: state.repeatMode,
-        isShuffle: state.isShuffle,
-        activeContext: state.activeContext,
-      }),
+      partialize: (state) => {
+        // Grab real position from RNTP natively right before saving (AppState backgrounding triggers saves usually, or periodic debounce)
+        try {
+          const TrackPlayer = require("@rntp/player").default;
+          if (state.isPlaying) {
+            const p = TrackPlayer.getProgress();
+            if (p && p.position) state.position = p.position * 1000;
+          }
+        } catch(e) {}
+        
+        return {
+          currentTrack: state.currentTrack,
+          originalQueue: state.originalQueue,
+          queue: state.queue,
+          currentIndex: state.currentIndex,
+          position: state.position,
+          duration: state.duration,
+          volume: state.volume,
+          repeatMode: state.repeatMode,
+          isShuffle: state.isShuffle,
+          activeContext: state.activeContext,
+        };
+      },
       onRehydrateStorage: (state) => {
         return (hydratedState, error) => {
           if (!error && hydratedState) {
             hydratedState.setHasHydrated(true);
             hydratedState.setStatus("paused");
+            hydratedState.isPlaying = false;
+            // Restore session asynchronously
+            setTimeout(() => {
+              hydratedState.restoreSession();
+            }, 1000);
           }
         };
       },

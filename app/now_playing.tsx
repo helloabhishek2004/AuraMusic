@@ -23,6 +23,7 @@
  */
 
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
+import { useDownloadStore } from "@/src/features/download/store/download.store";
 import { DownloadButton } from "@/src/components/ui/download-button";
 import { useMusicActions } from "@/src/context/MusicContext";
 import { InsightPanel } from "@/src/features/player/components/InsightPanel";
@@ -59,6 +60,7 @@ import {
   GestureDetector,
   GestureHandlerRootView,
 } from "react-native-gesture-handler";
+import { useProgress } from "@rntp/player";
 import Animated, {
   Easing as REasing,
   runOnJS,
@@ -67,6 +69,8 @@ import Animated, {
   useSharedValue,
   withSpring,
   withTiming,
+  cancelAnimation,
+  withRepeat,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -92,6 +96,12 @@ const h2r = (hex: string, a: number) => {
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${a})`;
+};
+
+const isDeviceTrack = (track: any) => {
+  if (!track) return false;
+  const downloadedTracks = useDownloadStore.getState().downloadedTracks;
+  return !!track.isLocal && !downloadedTracks[track.id];
 };
 
 const DEFAULT_ACCENT = "#BF5AF2";
@@ -204,6 +214,89 @@ const Glass = ({
   </View>
 );
 
+// ─── Looping horizontal marquee for overflowing text/content ───────────────
+const MarqueeView = memo(
+  ({
+    children,
+    speed = 22,
+    gap = 48,
+  }: {
+    children: React.ReactNode;
+    speed?: number;
+    gap?: number;
+  }) => {
+    const [containerWidth, setContainerWidth] = useState(0);
+    const [contentWidth, setContentWidth] = useState(0);
+    const translateX = useSharedValue(0);
+
+    const shouldAnimate = contentWidth > containerWidth && containerWidth > 0;
+
+    useEffect(() => {
+      if (!shouldAnimate) {
+        translateX.value = 0;
+        return;
+      }
+
+      translateX.value = 0;
+
+      const distance = contentWidth + gap;
+      const duration = (distance / speed) * 1000;
+
+      translateX.value = withRepeat(
+        withTiming(-distance, {
+          duration,
+          easing: REasing.linear,
+        }),
+        -1,
+        false
+      );
+
+      return () => {
+        cancelAnimation(translateX);
+      };
+    }, [shouldAnimate, contentWidth, containerWidth, speed, gap]);
+
+    const animatedStyle = useAnimatedStyle(() => {
+      return {
+        transform: [{ translateX: translateX.value }],
+        flexDirection: "row",
+        alignItems: "center",
+      };
+    });
+
+    return (
+      <View
+        style={{ overflow: "hidden", width: "100%" }}
+        onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+      >
+        <Animated.View style={animatedStyle}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              marginRight: shouldAnimate ? gap : 0,
+            }}
+            onLayout={(e) => setContentWidth(e.nativeEvent.layout.width)}
+          >
+            {children}
+          </View>
+          {shouldAnimate && (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                marginRight: gap,
+              }}
+            >
+              {children}
+            </View>
+          )}
+        </Animated.View>
+      </View>
+    );
+  }
+);
+
 // ─── Interactive artist names ─────────────────────────────────────────────────
 const ArtistNames = memo(
   ({
@@ -267,11 +360,10 @@ const TimeLabel = memo(
 // ─── Playback Scrubber ────────────────────────────────────────────────────────
 const PlaybackScrubber = memo(({ accentColor }: { accentColor: string }) => {
   const seek = usePlayerStore((s) => s.seek);
-  const progress = usePlayerStore((s) =>
-    s.duration > 0 ? s.position / s.duration : 0,
-  );
-  const elapsed = usePlayerStore((s) => s.position / 1000);
-  const durationSec = usePlayerStore((s) => s.duration / 1000);
+  const rntpProgress = useProgress(0.25);
+  const progress = rntpProgress.duration > 0 ? rntpProgress.position / rntpProgress.duration : 0;
+  const elapsed = rntpProgress.position;
+  const durationSec = rntpProgress.duration;
 
   const scrubX = useSharedValue(0);
   const scrubW = useSharedValue(0);
@@ -723,44 +815,135 @@ const InfoModal = memo(
     };
 
     const handleGoToAlbum = async () => {
-      if (track?.albumId) {
-        onClose();
-        openAlbum(router, track.albumId);
-      } else if (track?.album) {
-        setIsSearchingAlbum(true);
+      if (!track) return;
+      
+      const { useMediaCacheStore } = require("@/src/features/cache/store/media-cache.store");
+      const { getCanonicalTrackId } = require("@/src/features/player/utils/track-identity");
+      const cacheStore = useMediaCacheStore.getState();
+      const canonicalId = getCanonicalTrackId(track);
+      
+      let albumId = track.albumId;
+      let albumTitle = track.album;
+
+      // 1. Check Zustand Media Cache Store
+      const cachedTrack = cacheStore.getCachedTrack(canonicalId) || cacheStore.getCachedTrack(track.id);
+      if (cachedTrack?.track?.albumId) {
+        albumId = cachedTrack.track.albumId;
+        albumTitle = cachedTrack.track.album || albumTitle;
+      }
+
+      // Check album map cache: name::artist
+      if (!albumId && track.album && track.artist) {
+        const cachedMapId = cacheStore.getAlbumId(track.album, track.artist);
+        if (cachedMapId) {
+          albumId = cachedMapId;
+        }
+      }
+
+      // 2. Check persistent MetadataCache
+      if (!albumId) {
         try {
-          const { musicService } = await import("@/src/services/api/music");
-          const { MetadataCache } = await import("@/src/features/cache/services/metadata-cache.service");
-          
-          const albumSearch = await musicService.lookupAlbumByName(`${track.album} ${track.artist || ''}`.trim());
-          
-          if (albumSearch && albumSearch.id) {
-            // Cache the retrieved album ID so we don't look it up again
-            MetadataCache.mergeEntry(track, { albumId: albumSearch.id });
-            usePlayerStore.getState().updateTrackMetadata(track.id, { albumId: albumSearch.id });
-            
-            onClose();
-            openAlbum(router, albumSearch.id);
-          } else {
-            onClose();
-            setTimeout(() => {
-              Alert.alert("No Album Found", "This track does not appear to belong to any official album catalog.");
-            }, 300);
+          const { MetadataCache } = require("@/src/features/cache/services/metadata-cache.service");
+          const cachedEntry = await MetadataCache.getEntry(track);
+          if (cachedEntry && cachedEntry.albumId) {
+            albumId = cachedEntry.albumId;
+            albumTitle = cachedEntry.album || albumTitle;
           }
         } catch (e) {
-          console.warn(e);
+          console.warn("[NowPlaying] Failed to check MetadataCache:", e);
+        }
+      }
+
+      if (albumId) {
+        if (typeof __DEV__ !== "undefined" && __DEV__) {
+          console.info(`[Forensic Album] Cache Hit for "${track.title}": "${albumTitle}" (${albumId})`);
+        }
+        onClose();
+        openAlbum(router, albumId);
+        return;
+      }
+
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        console.info(`[Forensic Album] Cache Miss for "${track.title}" / "${track.album}". Performing fallback confidence lookup...`);
+      }
+
+      setIsSearchingAlbum(true);
+      try {
+        const { musicService } = await import("@/src/services/api/music");
+        const { MetadataCache } = await import("@/src/features/cache/services/metadata-cache.service");
+        const { calculateStringSimilarity } = require("@/src/features/player/services/hydration.service");
+        
+        let resolvedAlbumId = null;
+        let resolvedAlbumTitle = null;
+
+        // Heuristic 1: Use direct album search if name is available
+        if (track?.album && track.album !== 'Unknown' && track.album !== '') {
+          const albumSearch = await musicService.lookupAlbumByName(`${track.album} ${track.artist || ''}`.trim());
+          if (albumSearch && albumSearch.id) {
+            resolvedAlbumId = albumSearch.id;
+            resolvedAlbumTitle = albumSearch.title || track.album;
+          }
+        }
+
+        // Heuristic 2: Fall back to title + artist name search to find the parent album with high confidence matching
+        if (!resolvedAlbumId) {
+          const searchQuery = `${track?.title || ''} ${track?.artist || ''}`.trim();
+          const songSearch = await musicService.searchSongs(searchQuery);
+          if (songSearch && songSearch.length > 0) {
+            let bestMatch = null;
+            let bestScore = 0;
+
+            for (const res of songSearch) {
+              if (res.albumId && res.album && res.album !== 'Unknown') {
+                const titleScore = calculateStringSimilarity(track.title, res.title || '');
+                const artistScore = calculateStringSimilarity(track.artist, res.artist || '');
+                
+                // Weighted average score: title (40%) and artist (60%)
+                const confidence = (titleScore * 0.4) + (artistScore * 0.6);
+                if (confidence > bestScore) {
+                  bestScore = confidence;
+                  bestMatch = res;
+                }
+              }
+            }
+
+            if (bestMatch && bestScore > 0.85) {
+              console.log(`[NowPlaying] Fallback matched album "${bestMatch.album}" with score ${bestScore.toFixed(2)}`);
+              resolvedAlbumId = bestMatch.albumId;
+              resolvedAlbumTitle = bestMatch.album || 'Album';
+            }
+          }
+        }
+        
+        if (resolvedAlbumId) {
+          // Persist the resolved album ID permanently so next time is a cache hit
+          MetadataCache.mergeEntry(track, { albumId: resolvedAlbumId, album: resolvedAlbumTitle });
+          usePlayerStore.getState().updateTrackMetadata(track.id, { albumId: resolvedAlbumId, album: resolvedAlbumTitle });
+          
+          if (track.album && track.artist) {
+            cacheStore.cacheAlbumId(track.album, track.artist, resolvedAlbumId);
+          }
+          
+          cacheStore.cacheTrack(track, {
+            track: { ...track, albumId: resolvedAlbumId, album: resolvedAlbumTitle }
+          });
+
+          onClose();
+          openAlbum(router, resolvedAlbumId);
+        } else {
           onClose();
           setTimeout(() => {
-            Alert.alert("Connection Error", "Please connect to the internet to view online albums.");
+            Alert.alert("No Album Found", "This track does not appear to belong to any official album catalog.");
           }, 300);
-        } finally {
-          setIsSearchingAlbum(false);
         }
-      } else {
+      } catch (e) {
+        console.warn("[NowPlaying] Album search failed:", e);
         onClose();
         setTimeout(() => {
-          Alert.alert("No Album", "This track does not have an associated album.");
+          Alert.alert("Connection Error", "Please connect to the internet to view online albums.");
         }, 300);
+      } finally {
+        setIsSearchingAlbum(false);
       }
     };
 
@@ -775,28 +958,28 @@ const InfoModal = memo(
         icon: "add-circle-outline",
         onPress: handleAddToPlaylist,
       },
-      {
+      !isDeviceTrack(track) ? {
         label: "Go to Artist",
         icon: "person-outline",
         onPress: handleGoToArtist,
-      },
-      (track?.albumId || track?.album) ? {
+      } : null,
+      track && !isDeviceTrack(track) ? {
         label: isSearchingAlbum ? "Searching..." : "Go to Album",
         icon: "disc-outline",
         onPress: handleGoToAlbum,
         disabled: isSearchingAlbum,
       } : null,
-      {
+      !isDeviceTrack(track) ? {
         label: "Share Track",
         icon: "share-social-outline",
         onPress: handleShare,
-      },
-      {
+      } : null,
+      !isDeviceTrack(track) ? {
         label: "Not Interested",
         icon: "heart-dislike-outline",
         onPress: handleNotInterested,
         color: "#ff453a",
-      },
+      } : null,
       {
         label: "View Credits",
         icon: "information-circle-outline",
@@ -1005,7 +1188,7 @@ export default function NowPlayingScreen() {
 
   // Track change
   useEffect(() => {
-    setIsImageLoading(true);
+    setIsImageLoading(!!currentTrack?.art);
     artTranslateX.value = 0;
     artOpacity.value = 0;
     artOpacity.value = withTiming(1, { duration: 360 });
@@ -1076,8 +1259,8 @@ export default function NowPlayingScreen() {
 
   const artworkUri = useMemo(() => {
     if (currentTrack?.art) return currentTrack.art;
-    return `https://picsum.photos/seed/${encodeURIComponent(currentTrack?.title ?? "music")}/800`;
-  }, [currentTrack?.art, currentTrack?.title]);
+    return null;
+  }, [currentTrack?.art]);
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (!currentTrack) {
@@ -1125,14 +1308,21 @@ export default function NowPlayingScreen() {
         {/* ── FULL-SCREEN ART BACKGROUND ─────────────────────────────────── */}
         <View style={StyleSheet.absoluteFill}>
           {/* Full bleed art */}
-          <Image
-            source={{ uri: artworkUri }}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-            priority="high"
-            cachePolicy="memory-disk"
-            accessibilityElementsHidden
-          />
+          {artworkUri ? (
+            <Image
+              source={{ uri: artworkUri }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              priority="high"
+              cachePolicy="memory-disk"
+              accessibilityElementsHidden
+            />
+          ) : (
+            <LinearGradient
+              colors={["#1A0A2E", "#0C061A", "#05030A"]}
+              style={StyleSheet.absoluteFill}
+            />
+          )}
 
           {/* Desaturate + darken base so text is always legible */}
           <View
@@ -1244,17 +1434,44 @@ export default function NowPlayingScreen() {
               />
 
               <Animated.View style={[s.artFrame, artStyle]}>
-                <Image
-                  source={{ uri: artworkUri }}
-                  style={StyleSheet.absoluteFill}
-                  contentFit="cover"
-                  transition={360}
-                  priority="high"
-                  cachePolicy="memory-disk"
-                  onLoad={() => setIsImageLoading(false)}
-                  onError={() => setIsImageLoading(false)}
-                  accessibilityLabel={`${currentTrack.title} album art`}
-                />
+                {artworkUri ? (
+                  <Image
+                    source={{ uri: artworkUri }}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    transition={360}
+                    priority="high"
+                    cachePolicy="memory-disk"
+                    onLoad={() => setIsImageLoading(false)}
+                    onError={() => setIsImageLoading(false)}
+                    accessibilityLabel={`${currentTrack.title} album art`}
+                  />
+                ) : (
+                  <LinearGradient
+                    colors={["rgba(255,255,255,0.08)", "rgba(255,255,255,0.02)"]}
+                    style={[
+                      StyleSheet.absoluteFill,
+                      { justifyContent: "center", alignItems: "center" },
+                    ]}
+                  >
+                    <Ionicons
+                      name="musical-notes"
+                      size={100}
+                      color="rgba(255,255,255,0.22)"
+                    />
+                    <Text
+                      style={{
+                        color: "rgba(255,255,255,0.45)",
+                        fontSize: 14,
+                        fontFamily: "Inter-Medium",
+                        marginTop: 14,
+                        letterSpacing: 0.5,
+                      }}
+                    >
+                      No Cover Art Available
+                    </Text>
+                  </LinearGradient>
+                )}
 
                 {/* Fallback */}
                 {status === "error" && (
@@ -1329,18 +1546,22 @@ export default function NowPlayingScreen() {
 
             {/* Track title + like */}
             <View style={s.songInfoRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.trackTitle} numberOfLines={1}>
-                  {currentTrack.title}
-                </Text>
-                <ArtistNames
-                  names={currentTrack.artist}
-                  accentColor={accentColor}
-                  onPress={(name) => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    openArtistByName(router, name);
-                  }}
-                />
+              <View style={{ flex: 1, overflow: "hidden", marginRight: 8 }}>
+                <MarqueeView speed={18}>
+                  <Text style={s.trackTitle} numberOfLines={1}>
+                    {currentTrack.title}
+                  </Text>
+                </MarqueeView>
+                <MarqueeView speed={18}>
+                  <ArtistNames
+                    names={currentTrack.artist}
+                    accentColor={accentColor}
+                    onPress={(name) => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      openArtistByName(router, name);
+                    }}
+                  />
+                </MarqueeView>
               </View>
               <View
                 style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
@@ -1350,11 +1571,13 @@ export default function NowPlayingScreen() {
                   onToggle={() => toggleLike(currentTrack)}
                   accentColor={accentColor}
                 />
-                <DownloadButton
-                  track={currentTrack}
-                  size={26}
-                  color="rgba(255,255,255,0.65)"
-                />
+                {!isDeviceTrack(currentTrack) && (
+                  <DownloadButton
+                    track={currentTrack}
+                    size={26}
+                    color="rgba(255,255,255,0.65)"
+                  />
+                )}
               </View>
             </View>
 
@@ -1403,14 +1626,16 @@ export default function NowPlayingScreen() {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }}
               />
-              <SecondaryBtn
-                icon="musical-notes"
-                label="Open lyrics"
-                onPress={() => {
-                  router.push("/lyrics");
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                }}
-              />
+              {!isDeviceTrack(currentTrack) && (
+                <SecondaryBtn
+                  icon="musical-notes"
+                  label="Open lyrics"
+                  onPress={() => {
+                    router.push("/lyrics");
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                />
+              )}
               <SecondaryBtn
                 icon="list"
                 label="Open queue"
@@ -1609,7 +1834,6 @@ const s = StyleSheet.create({
   },
   artistRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     alignItems: "center",
   },
   artistSep: {

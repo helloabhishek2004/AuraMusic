@@ -14,11 +14,25 @@ export const useDownloadStore = create<DownloadStore>()(
       notification: null,
 
       // Actions
-      addDownload: (track: PlayerTrack) => {
-        const { downloadedTracks, activeTasks, downloadQueue } = get();
+      addDownload: async (track: PlayerTrack) => {
+        const { downloadedTracks, activeTasks } = get();
         
         // Prevent duplicate downloads
         if (downloadedTracks[track.id] || activeTasks[track.id]) return;
+
+        // GLOBAL AUTHORITY: Check Wi-Fi restriction
+        const { isDownloadAllowed } = await import("../../player/utils/audio-quality");
+        const allowed = await isDownloadAllowed();
+        
+        if (!allowed) {
+          const { Alert } = require('react-native');
+          Alert.alert(
+            "Download Paused",
+            "Downloads are restricted to Wi-Fi only in your settings.",
+            [{ text: "OK" }]
+          );
+          return;
+        }
 
         set((state) => ({
           downloadQueue: [...state.downloadQueue, track.id],
@@ -156,12 +170,6 @@ export const useDownloadStore = create<DownloadStore>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         downloadedTracks: state.downloadedTracks,
-        // We don't persist activeTasks or downloadQueue to avoid weird states on restart,
-        // unless we want to resume them. The requirement says "app restart restores download states".
-        // Let's persist them but set status to 'queued' or 'paused' on load?
-        // Actually, let's persist them and the DownloadManager will handle initialization.
-        downloadQueue: state.downloadQueue,
-        activeTasks: state.activeTasks,
       }),
     }
   )

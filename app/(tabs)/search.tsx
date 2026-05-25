@@ -39,6 +39,7 @@ import React, {
   useMemo,
   useRef,
   useState,
+  memo,
 } from "react";
 import {
   Animated,
@@ -96,6 +97,8 @@ const C = {
 const SPR_SOFT = { tension: 60, friction: 9 };
 const SPR_SNAP = { tension: 200, friction: 10 };
 const SPR_TAB = { damping: 22, stiffness: 280, mass: 0.8 };
+const SPR_POP = { tension: 220, friction: 8 };
+const SPR_SLIDE = { tension: 66, friction: 9 };
 
 const h2r = (hex: string, a: number) => {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -990,9 +993,8 @@ const TopResultCard = ({
 };
 
 // ─── Category Filter Bar ──────────────────────────────────────────────────────
-// Animated sliding pill indicator — Reanimated spring, worklet-safe
-
-const FilterBar = ({
+// Exact matching animation/design of library tab bar but with search categories
+const FilterBar = memo(({
   categories,
   active,
   onSelect,
@@ -1001,79 +1003,81 @@ const FilterBar = ({
   active: string;
   onSelect: (c: string) => void;
 }) => {
-  const [tabW, setTabW] = useState(0);
-  const pillX = useSharedValue(0);
+  const [layouts, setLayouts]   = useState<Record<number, { x: number; width: number }>>({});
+  const slideX   = useRef(new Animated.Value(0)).current;
+  const slideW   = useRef(new Animated.Value(72)).current;
+  const pillSc   = useRef(new Animated.Value(1)).current;
+  const inited   = useRef(false);
 
-  useEffect(() => {
-    if (tabW === 0) return;
-    const idx = categories.indexOf(active);
-    pillX.value = withSpring(idx * tabW, SPR_TAB);
-  }, [active, tabW]);
+  const handleLayout = useCallback((idx: number, e: any) => {
+    const { x, width } = e.nativeEvent.layout;
+    setLayouts(prev => {
+      const next = { ...prev, [idx]: { x, width } };
+      if (idx === 0 && !inited.current) {
+        slideX.setValue(x + 4);
+        slideW.setValue(width - 8);
+        inited.current = true;
+      }
+      return next;
+    });
+  }, []);
 
-  const pillStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: pillX.value }],
-  }));
+  const selectTab = useCallback((tab: string, idx: number) => {
+    const layout = layouts[idx];
+    if (!layout) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onSelect(tab);
+    Animated.parallel([
+      Animated.sequence([
+        Animated.timing(pillSc, { toValue: 0.88, duration: 70, useNativeDriver: false }),
+        Animated.spring(pillSc, { toValue: 1, ...SPR_POP, useNativeDriver: false }),
+      ]),
+      Animated.spring(slideX, { toValue: layout.x + 4, ...SPR_SLIDE, useNativeDriver: false }),
+      Animated.spring(slideW, { toValue: layout.width - 8, ...SPR_SLIDE, useNativeDriver: false }),
+    ]).start();
+  }, [layouts]);
 
   return (
-    <View style={s.filterBar}>
-      <Glass r={24} blur={55} style={s.filterGlass}>
-        <View
-          style={s.filterInner}
-          onLayout={(e) =>
-            setTabW(e.nativeEvent.layout.width / categories.length)
-          }
-        >
-          {tabW > 0 && (
-            <Reanimated.View
-              style={[s.filterPill, { width: tabW }, pillStyle]}
-              pointerEvents="none"
-            >
-              <LinearGradient
-                colors={[h2r(C.primary, 0.88), h2r(C.primaryMid, 0.88)]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFill}
-              />
-              {/* Pill specular */}
-              <View
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 10,
-                  right: 10,
-                  height: 1.2,
-                  backgroundColor: "rgba(255,255,255,0.35)",
-                  borderRadius: 1,
-                }}
-              />
-            </Reanimated.View>
-          )}
+    <View style={s.tabBarOuter}>
+      {/* Glass backing for sticky tab bar */}
+      <BlurView intensity={52} tint="dark" style={StyleSheet.absoluteFill} />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(8,8,13,0.72)" }]} />
+      {/* Top & bottom edges */}
+      <View style={s.tabEdgeTop} />
+      <View style={s.tabEdgeBottom} />
 
-          {categories.map((cat) => {
-            const isActive = cat === active;
-            return (
-              <Pressable
-                key={cat}
-                style={s.filterBtn}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  onSelect(cat);
-                }}
-                accessibilityRole="tab"
-                accessibilityLabel={cat}
-                accessibilityState={{ selected: isActive }}
-              >
-                <Text style={[s.filterTxt, isActive && s.filterTxtActive]}>
-                  {cat}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </Glass>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabScroll}>
+        {/* Sliding pill */}
+        <Animated.View style={[s.tabPill, { width: slideW, transform: [{ translateX: slideX }, { scale: pillSc }] }]}>
+          <LinearGradient colors={[C.primary, C.primaryMid]} start={{x:0,y:0}} end={{x:1,y:1}} style={StyleSheet.absoluteFill} />
+          {/* Specular top */}
+          <View style={{ position:"absolute", top:3, left:10, right:10, height:2, borderRadius:1, backgroundColor:"rgba(255,255,255,0.30)" }} />
+          {/* Left fresnel */}
+          <View style={{ position:"absolute", left:8, top:5, bottom:5, width:18, borderRadius:6, backgroundColor:"rgba(255,255,255,0.15)", transform:[{skewX:"-8deg"}] }} />
+          {/* Border */}
+          <View style={[StyleSheet.absoluteFillObject, { borderRadius:17, borderWidth:0.7, borderTopColor:"rgba(255,255,255,0.24)", borderLeftColor:"rgba(255,255,255,0.06)", borderRightColor:"rgba(255,255,255,0.06)", borderBottomColor:"rgba(255,255,255,0.04)" }]} />
+        </Animated.View>
+
+        {categories.map((tab, idx) => (
+          <TouchableOpacity
+            key={tab}
+            onLayout={e => handleLayout(idx, e)}
+            onPress={() => selectTab(tab, idx)}
+            style={[s.tabItem, { paddingHorizontal: isTablet ? 26 : 18 }]}
+            activeOpacity={1}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active === tab }}
+            accessibilityLabel={tab}
+          >
+            <Text style={[s.tabText, active === tab && s.tabActive]}>
+              {tab.toUpperCase()}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
     </View>
   );
-};
+});
 
 // ─── State Panels ─────────────────────────────────────────────────────────────
 
@@ -1862,43 +1866,56 @@ const s = StyleSheet.create({
     alignItems: "center",
   },
 
-  // ── Filter bar (category tabs)
-  filterBar: { marginBottom: 22 },
-  filterGlass: {
-    height: 48,
+  // ── Filter bar (category tabs replica of library TabBar)
+  tabBarOuter: {
+    height: 54,
     overflow: "hidden",
-    borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.09)",
+    marginHorizontal: -PAD,
+    marginBottom: 22,
   },
-  filterInner: {
-    flex: 1,
+  tabEdgeTop: {
+    position:"absolute", top:0, left:0, right:0,
+    height: 0.6,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    zIndex: 10,
+  },
+  tabEdgeBottom: {
+    position:"absolute", bottom:0, left:0, right:0,
+    height: 0.5,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    zIndex: 10,
+  },
+  tabScroll: {
+    paddingHorizontal: PAD,
+    alignItems: "center",
     flexDirection: "row",
-    margin: 4,
-    position: "relative",
+    height: 54,
   },
-  filterPill: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    borderRadius: 18,
+  tabPill: {
+    position:"absolute",
+    height: 34,
+    borderRadius: 17,
+    top: 10,
+    left: 0,
     overflow: "hidden",
+    zIndex: 0,
   },
-  filterBtn: {
-    flex: 1,
+  tabItem: {
+    height: 54,
     justifyContent: "center",
     alignItems: "center",
+    zIndex: 1,
+    minWidth: 44,
     minHeight: 44,
   },
-  filterTxt: {
-    fontSize: 13,
-    fontWeight: "700",
+  tabText: {
+    fontSize: isTablet ? 13 : 11,
+    fontWeight: "600",
     color: C.muted,
-    letterSpacing: 0.1,
+    letterSpacing: 0.6,
+    fontFamily: Platform.OS === "android" ? "sans-serif-medium" : "System",
   },
-  filterTxtActive: {
-    color: "#FFFFFF",
-    fontWeight: "800",
-  },
+  tabActive: { color: C.text, fontWeight: "800" },
 
   // ── Sections
   section: { marginBottom: 24 },

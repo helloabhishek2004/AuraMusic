@@ -164,35 +164,67 @@ export class LocalMusicService {
   }
 
   /**
-   * Scan all granted folders recursively
+   * Scan all device audio folders dynamically using MediaLibrary
+   * This covers older and newer Android versions (and iOS) at production level.
    */
   static async getLocalTracks(): Promise<MusicTrack[]> {
-    if (Platform.OS !== "android") return [];
+    try {
+      // 1. Ensure permissions
+      const hasPerm = await this.requestPermissions();
+      if (!hasPerm) return [];
 
-    const SAF = this.saf;
-    if (!SAF) return [];
+      // 2. Fetch all audio assets on the device
+      let allAssets: MediaLibrary.Asset[] = [];
+      let hasNextPage = true;
+      let after: string | undefined = undefined;
 
-    const folderUris = await this.getPersistedFolderUris();
-    if (folderUris.length === 0) return [];
+      // Fetch albums to map albumId -> folder/album name
+      const albums = await MediaLibrary.getAlbumsAsync();
+      const albumMap = new Map(albums.map(a => [a.id, a.title]));
 
-    logger.info("[LocalSAF] Starting scan for", folderUris.length, "folders");
-    let allTracks: MusicTrack[] = [];
-
-    for (const folderUri of folderUris) {
-      try {
-        const tracks = await this.scanDirectoryRecursive(folderUri);
-        allTracks = [...allTracks, ...tracks];
-      } catch (e) {
-        logger.error(`[LocalSAF] Failed to scan folder ${folderUri}:`, e);
+      while (hasNextPage) {
+        const response = await MediaLibrary.getAssetsAsync({
+          mediaType: 'audio',
+          first: 150,
+          after,
+        });
+        allAssets = [...allAssets, ...response.assets];
+        hasNextPage = response.hasNextPage;
+        after = response.endCursor;
       }
-    }
 
-    // Deduplicate by URI (id)
-    const uniqueTracks = Array.from(
-      new Map(allTracks.map((t) => [t.id, t])).values(),
-    );
-    
-    return uniqueTracks;
+      // Convert assets to MusicTracks
+      const tracks: MusicTrack[] = allAssets.map(asset => {
+        const filename = asset.filename || "Unknown Track";
+        const title = filename.replace(/\.[^/.]+$/, "").trim();
+        const extension = filename.split(".").pop()?.toLowerCase() || "mp3";
+        const folderName = (asset.albumId ? albumMap.get(asset.albumId) : null) || "Local Library";
+
+        // Convert duration to standard mm:ss format
+        const durSec = Math.floor(asset.duration);
+        const m = Math.floor(durSec / 60);
+        const s = durSec % 60;
+        const timeStr = `${m}:${s.toString().padStart(2, "0")}`;
+
+        return {
+          id: asset.uri,
+          title: title || filename,
+          artist: "Local Artist",
+          art: "",
+          isLocal: true,
+          localUri: asset.uri,
+          url: asset.uri,
+          mimeType: `audio/${extension === "m4a" ? "mp4" : (extension === "mp3" ? "mpeg" : extension)}`,
+          time: timeStr,
+          folderName: folderName,
+        };
+      });
+
+      return tracks;
+    } catch (e) {
+      logger.error("[LocalMusicService] Failed to get local tracks:", e);
+      return [];
+    }
   }
 
   /**

@@ -26,16 +26,31 @@ export class DownloadManager {
 
     await StorageService.initialize();
 
-    // Reset any 'downloading' states to 'queued' on startup
-    const activeTasks = useDownloadStore.getState().activeTasks;
+    const store = useDownloadStore.getState();
+    const downloadedTracks = { ...store.downloadedTracks };
+    let hasChanges = false;
 
-    Object.keys(activeTasks).forEach((trackId) => {
-      if (activeTasks[trackId].status === "downloading") {
-        useDownloadStore.getState().updateStatus(trackId, "queued");
+    // Reconcile downloadedTracks with physical files on disk
+    for (const trackId of Object.keys(downloadedTracks)) {
+      const track = downloadedTracks[trackId];
+      const audioExists = await StorageService.fileExists(track.localAudioPath);
+      if (!audioExists) {
+        delete downloadedTracks[trackId];
+        hasChanges = true;
+        logger.info(`[DownloadManager] Reconciled missing local track: ${track.title} (${trackId})`);
       }
+    }
+
+    if (hasChanges) {
+      useDownloadStore.setState({ downloadedTracks });
+    }
+
+    // Force clear transient active tasks and download queue on startup to prevent auto-starting legacy downloads restored from backup
+    useDownloadStore.setState({
+      activeTasks: {},
+      downloadQueue: [],
     });
 
-    this.processQueue();
     this.isInitialized = true;
 
     // Listen for store changes to process queue
@@ -56,6 +71,18 @@ export class DownloadManager {
 
     if (downloadQueue.length === 0 && this.activeDownloadCount === 0) {
       DownloadNotificationService.clear();
+      return;
+    }
+
+    // Check if download is allowed (Wi-Fi restriction)
+    const { isDownloadAllowed } = await import("../../player/utils/audio-quality");
+    const allowed = await isDownloadAllowed();
+    
+    if (!allowed && downloadQueue.some(id => activeTasks[id]?.status === 'queued')) {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        console.info("[DownloadManager] Queue processing paused: Network restriction");
+      }
+      return;
     }
 
     for (const trackId of downloadQueue) {
@@ -71,6 +98,17 @@ export class DownloadManager {
   private static async startDownload(task: DownloadTask) {
     const trackId = task.track.id;
     const store = useDownloadStore.getState();
+
+    // Ensure notifications permission dynamically when starting download
+    try {
+      const Notifications = require('expo-notifications');
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') {
+        await Notifications.requestPermissionsAsync();
+      }
+    } catch (e) {
+      console.warn("[DownloadManager] Failed to request notification permission:", e);
+    }
 
     this.activeDownloadCount++;
     store.updateStatus(trackId, "downloading");

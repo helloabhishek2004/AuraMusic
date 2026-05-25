@@ -54,6 +54,13 @@ export const useLikesStore = create<LikesState & LikesActions>()(
             },
           },
         }));
+
+        // Trigger Auto-Download if enabled
+        const { useSettingsStore } = require('../../settings/store/settings.store');
+        if (useSettingsStore.getState().autoDownloadLikedSongs) {
+          const { useDownloadStore } = require('../../download/store/download.store');
+          useDownloadStore.getState().addDownload(track);
+        }
       },
 
       unlikeTrack: (trackId: string) => {
