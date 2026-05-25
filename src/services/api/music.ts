@@ -495,7 +495,12 @@ export const musicService = {
       const { lyricsService } = require("../../features/lyrics/services/lyrics.service");
       return await lyricsService.fetchLyrics(track.id, track.title, track.artist, track.duration);
     } catch (error: any) {
-      console.warn("[MusicAPI] Error resolving lyrics through centralized service:", error.message || error);
+      const { isAbortError } = require("../../utils/logger");
+      if (isAbortError(error)) {
+        console.info(`[Lyrics] stale request cancelled: ${track.id}`);
+      } else {
+        console.warn("[MusicAPI] Error resolving lyrics through centralized service:", error.message || error);
+      }
       throw error;
     }
   },

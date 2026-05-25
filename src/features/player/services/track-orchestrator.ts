@@ -78,7 +78,12 @@ export class TrackOrchestrator {
                 }
             }
         } catch (e) {
-            console.warn("[TrackOrchestrator] Prefetch failed for", track.id, e);
+            const { isAbortError } = require("../../../utils/logger");
+            if (isAbortError(e)) {
+                console.info(`[TrackOrchestrator] Prefetch cancelled for stale track: ${track.id}`);
+            } else {
+                console.warn("[TrackOrchestrator] Prefetch failed for", track.id, e);
+            }
         }
     }
 

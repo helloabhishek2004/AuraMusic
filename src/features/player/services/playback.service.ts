@@ -231,7 +231,7 @@ export class PlaybackService {
         let isSame = true;
         for (let i = 0; i < queue.length; i++) {
           const nativeItem = nativeQueue[i];
-          const nativeId = nativeItem?.mediaId || nativeItem?.id || (nativeItem as any)?.mediaId || (nativeItem as any)?.id;
+          const nativeId = (nativeItem as any)?.mediaId || (nativeItem as any)?.id;
           if (nativeItem && nativeId !== queue[i].id) {
             isSame = false;
             break;
@@ -458,8 +458,8 @@ export class PlaybackService {
   }
 
   static async openEqualizer(): Promise<void> {
-    const { openSystemEqualizer } = await import('../../audio/utils/open-system-eq');
-    await openSystemEqualizer();
+    const { AudioSessionController } = await import('../../audio/native/audio-session');
+    await AudioSessionController.openEqualizer();
   }
 
   static setRepeatMode(mode: string): void {

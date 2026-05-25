@@ -20,7 +20,6 @@ export interface SettingsState {
   crossfadeDuration: number; // 0–12
   gaplessPlayback: boolean;
   normalizeVolume: boolean;
-  monoAudio: boolean;
 
   // STORAGE
   maxSongCacheGB: number | 'unlimited';
@@ -52,7 +51,6 @@ export const useSettingsStore = create<SettingsState>()(
       crossfadeDuration: 6,
       gaplessPlayback: true,
       normalizeVolume: true,
-      monoAudio: false,
       maxSongCacheGB: 5,
       reduceMotion: false,
       accentColor: '#B19CD9',

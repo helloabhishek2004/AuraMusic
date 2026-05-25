@@ -25,9 +25,8 @@ import { useSettingsStore, AudioQuality } from "../../src/features/settings/stor
 import { useDeviceStateStore } from "../../src/features/device/store/device-state.store";
 import { CacheManager, StorageStats } from "../../src/features/cache/services/cache-manager.service";
 import { useDownloadStore } from "../../src/features/download/store/download.store";
-import { openSystemEqualizer } from "../../src/features/audio/utils/open-system-eq";
+import { AudioSessionController } from "../../src/features/audio/native/audio-session";
 import { downloadCleanupService } from "../../src/features/download/services/download-cleanup.service";
-import { PlaybackService } from "../../src/features/player/services/playback.service";
 import {
   colors as baseColors,
   spacing,
@@ -300,26 +299,10 @@ export default function SettingsScreen() {
     );
   };
 
-  const handleToggleMono = async () => {
-    const newVal = !settings.monoAudio;
-    settings.toggleSetting("monoAudio");
-    
-    const { MonoAudioController } = await import("../../src/features/audio/native/MonoAudioModule");
-    await MonoAudioController.setEnabled(newVal);
-
-    if (newVal && typeof __DEV__ !== "undefined" && __DEV__) {
-       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-  };
-
   const handleOpenEQ = async () => {
-    const res = await openSystemEqualizer();
+    const res = await AudioSessionController.openEqualizer();
     if (!res.success) {
       Alert.alert("Equalizer", "No compatible equalizer found on this device.");
-    } else {
-       if (typeof __DEV__ !== "undefined" && __DEV__) {
-         console.info(`[Settings] EQ Result: ${res.opened}`);
-       }
     }
   };
 
@@ -453,18 +436,6 @@ export default function SettingsScreen() {
               color={accentColor}
             />
           </TouchableOpacity>
-
-          <View style={styles.settingItem}>
-            <View style={styles.settingItemLeft}>
-              <Text style={styles.settingItemLabel}>Mono Audio</Text>
-              <Text style={styles.settingItemSubtext}>Use device mono accessibility</Text>
-            </View>
-            <CustomSwitch
-              value={settings.monoAudio}
-              onValueChange={handleToggleMono}
-              activeColor={accentColor}
-            />
-          </View>
         </SettingSection>
 
         {/* AUDIO QUALITY SECTION */}

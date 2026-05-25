@@ -26,5 +26,18 @@ export function error(...args: any[]) {
   console.error("[ERROR]", ...args);
 }
 
+/**
+ * Checks if an error is a result of a request being intentionally aborted.
+ */
+export function isAbortError(err: any): boolean {
+  if (!err) return false;
+  return (
+    err.name === "AbortError" ||
+    err.message === "Request aborted" ||
+    err.code === "ERR_CANCELED" ||
+    err.__CANCEL__ === true // Axios cancellation
+  );
+}
+
 // Enable info in development by default
 if (typeof __DEV__ !== "undefined" && __DEV__) setLogLevel("info");

@@ -59,7 +59,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "./plugins/withAuraAudio",
+      "./plugins/withAuraNative",
       "expo-router",
       [
         "expo-splash-screen",

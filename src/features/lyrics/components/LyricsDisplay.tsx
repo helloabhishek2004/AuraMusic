@@ -1,463 +1,295 @@
-import { FlashList } from "@shopify/flash-list";
-import React, { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import React, { memo, useCallback, useRef, useEffect } from "react";
 import {
-    Dimensions,
-    StyleSheet,
-    Text,
-    View
+  StyleSheet,
+  View,
+  Pressable,
+  LayoutChangeEvent,
+  useWindowDimensions
 } from "react-native";
-
-import { palette, radius, spacing, typography } from "@/src/design/tokens";
-import { BlurView } from "expo-blur";
-import { LinearGradient } from "expo-linear-gradient";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-    runOnJS,
-    useAnimatedStyle,
-    useSharedValue,
-    withSpring,
-    withTiming
+  useAnimatedStyle,
+  useAnimatedScrollHandler,
+  useAnimatedReaction,
+  scrollTo,
+  useAnimatedRef,
+  withTiming,
+  SharedValue,
+  interpolate,
+  Extrapolation,
+  runOnJS,
+  useSharedValue
 } from "react-native-reanimated";
+import { palette, spacing, typography } from "@/src/design/tokens";
 
-const { width, height } = Dimensions.get("window");
+interface LyricLineData {
+  time: number;
+  text: string;
+}
+
+interface LyricLineProps {
+  item: LyricLineData;
+  index: number;
+  activeLineIndex: SharedValue<number>;
+  lineOffsets: SharedValue<number[]>;
+  isFollowing: SharedValue<boolean>;
+  onPress: (time: number) => void;
+}
+
+const LyricLine = memo(({ item, index, activeLineIndex, lineOffsets, isFollowing, onPress }: LyricLineProps) => {
+  const animatedStyle = useAnimatedStyle(() => {
+    const distance = Math.abs(activeLineIndex.value - index);
+    const isActive = activeLineIndex.value === index;
+    
+    return {
+      opacity: withTiming(interpolate(
+        distance,
+        [0, 1, 3],
+        [1, 0.5, 0.3],
+        Extrapolation.CLAMP
+      ), { duration: 200 }),
+      transform: [
+        { scale: withTiming(isActive ? 1.05 : 1.0, { duration: 200 }) }
+      ],
+    };
+  });
+
+  const textStyle = useAnimatedStyle(() => {
+    const isActive = activeLineIndex.value === index;
+    return {
+      color: isActive ? palette.primary : palette.ink,
+      fontWeight: isActive ? "700" : "500" as any,
+    };
+  });
+
+  const handleLayout = useCallback((e: LayoutChangeEvent) => {
+    if (lineOffsets.value[index] === undefined) {
+      lineOffsets.value[index] = e.nativeEvent.layout.y;
+      // Force trigger reaction by reassigning reference
+      lineOffsets.value = [...lineOffsets.value];
+
+      if (lineOffsets.value.length > 0 && !isFollowing.value) {
+        isFollowing.value = true;
+      }
+    }
+  }, [index, lineOffsets, isFollowing]);
+
+  return (
+    <Pressable onPress={() => onPress(item.time)} onLayout={handleLayout}>
+      <Animated.View style={[styles.lineWrapper, animatedStyle]}>
+        <Animated.Text style={[styles.lineText, textStyle]}>
+          {item.text || "♪"}
+        </Animated.Text>
+      </Animated.View>
+    </Pressable>
+  );
+});
+
+LyricLine.displayName = "LyricLine";
 
 interface LyricsDisplayProps {
-  lyrics: Array<{ time: number; text: string }> | null;
+  lyrics: LyricLineData[];
   isSynced: boolean;
-  currentProgress: number;
-  activeLineIndex: number;
-  isFollowingPlayback: boolean;
-  onUserScroll: (scrolled: boolean) => void;
+  activeLineIndex: SharedValue<number>;
+  isFollowing: SharedValue<boolean>;
+  seekToLine: (time: number) => void;
   isLoading?: boolean;
   error?: string | null;
 }
 
-/**
- * Individual lyric line row component with animation.
- * Memoized to prevent unnecessary rerenders.
- */
-interface LyricLineProps {
-  text: string;
-  isActive: boolean;
-  isSynced: boolean;
-  isPast: boolean;
-}
+export const LyricsDisplay = memo(({
+  lyrics,
+  isSynced,
+  activeLineIndex,
+  isFollowing,
+  seekToLine,
+  isLoading,
+  error
+}: LyricsDisplayProps) => {
+  const scrollRef = useAnimatedRef<Animated.ScrollView>();
+  const resumeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
-const LyricLine = memo(
-  ({ text, isActive, isSynced, isPast }: LyricLineProps) => {
-    const opacityAnim = useSharedValue(isPast ? 0.35 : 0.6);
-    const scaleAnim = useSharedValue(isActive ? 1.08 : 1.0);
+  // Cached layout values
+  const containerHeight = useSharedValue(0);
+  const lineOffsets = useSharedValue<number[]>([]);
+  const lastScrolledIndex = useSharedValue(-1);
 
-    useEffect(() => {
-      if (isActive) {
-        opacityAnim.value = withSpring(1.0, {
-          damping: 12,
-          stiffness: 150,
-          mass: 0.8,
+  // Clear offsets and scroll state when lyrics change or orientation changes
+  useEffect(() => {
+    lineOffsets.value = [];
+    lastScrolledIndex.value = -1;
+  }, [lyrics, windowWidth, windowHeight, lineOffsets, lastScrolledIndex]);
+
+  const handleContainerLayout = useCallback((e: LayoutChangeEvent) => {
+    containerHeight.value = e.nativeEvent.layout.height;
+  }, [containerHeight]);
+
+  const startResumeTimer = useCallback(() => {
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    resumeTimerRef.current = setTimeout(() => {
+      isFollowing.value = true;
+    }, 2000);
+  }, [isFollowing]);
+
+  const clearResumeTimer = useCallback(() => {
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+  }, []);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    };
+  }, []);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onBeginDrag: () => {
+      isFollowing.value = false;
+      runOnJS(clearResumeTimer)();
+    },
+    onEndDrag: () => {
+      runOnJS(startResumeTimer)();
+    },
+    onMomentumEnd: () => {
+      runOnJS(startResumeTimer)();
+    }
+  });
+
+  // Reaction for active line changes with Force Retry (Critical Fix #1)
+  useAnimatedReaction(
+    () => ({
+      index: activeLineIndex.value,
+      following: isFollowing.value,
+      offsetsReady: lineOffsets.value.length,
+    }),
+    (curr, prev) => {
+      const next = curr.index;
+      const prevIndex = prev ? prev.index : -1;
+      const following = curr.following;
+      const offsetsReady = curr.offsetsReady;
+      const prevOffsetsReady = prev ? prev.offsetsReady : 0;
+      const wasFollowing = prev ? prev.following : false;
+
+      if (next < 0) return;
+      const offset = lineOffsets.value[next];
+      const validOffset = Number.isFinite(offset);
+
+      const shouldScroll =
+        following &&
+        offsetsReady > 0 &&
+        validOffset &&
+        (
+          next !== prevIndex ||
+          offsetsReady !== prevOffsetsReady ||
+          (following && !wasFollowing)
+        );
+
+      if (shouldScroll) {
+        // Scroll Spam Protection (Critical Fix #5)
+        if (lastScrolledIndex.value === next) return;
+
+        const targetY = offset - containerHeight.value * 0.38;
+
+        // Temporary forensic verification logging
+        console.log({
+          activeIndex: next,
+          following: following,
+          offset: offset,
+          containerHeight: containerHeight.value,
         });
-        scaleAnim.value = withSpring(1.08, {
-          damping: 12,
-          stiffness: 150,
-          mass: 0.8,
-        });
-      } else if (isPast) {
-        opacityAnim.value = withTiming(0.35, { duration: 240 });
-        scaleAnim.value = withTiming(1.0, { duration: 240 });
-      } else {
-        opacityAnim.value = withTiming(0.6, { duration: 240 });
-        scaleAnim.value = withTiming(1.0, { duration: 240 });
+
+        scrollTo(scrollRef, 0, Math.max(0, targetY), true);
+        lastScrolledIndex.value = next;
       }
-    }, [isActive, isPast]);
-
-    const animatedStyle = useAnimatedStyle(() => ({
-      opacity: opacityAnim.value,
-      transform: [{ scale: scaleAnim.value }],
-    }));
-
-    return (
-      <Animated.View style={[styles.lyricLineContainer, animatedStyle]}>
-        <Text
-          style={[styles.lyricText, isActive && styles.lyricTextActive]}
-          numberOfLines={3}
-        >
-          {text || "♪"}
-        </Text>
-      </Animated.View>
-    );
-  },
-);
-
-LyricLine.displayName = "LyricLine";
-
-/**
- * Empty state for when no lyrics are available.
- */
-const LyricsEmpty = memo(() => (
-  <View style={styles.emptyContainer}>
-    <BlurView intensity={32} tint="dark" style={StyleSheet.absoluteFill} />
-    <View
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: "100%",
-        backgroundColor: "rgba(255,255,255,0.02)",
-      }}
-    />
-    <View style={styles.emptyContent}>
-      <Text style={styles.emptyIcon}>♪</Text>
-      <Text style={styles.emptyTitle}>No Lyrics Available</Text>
-      <Text style={styles.emptySubtitle}>
-        Enjoy the music while we search for lyrics
-      </Text>
-    </View>
-  </View>
-));
-
-LyricsEmpty.displayName = "LyricsEmpty";
-
-/**
- * Error state for when lyrics fetch fails.
- */
-const LyricsError = memo(({ error }: { error: string }) => (
-  <View style={styles.emptyContainer}>
-    <BlurView intensity={32} tint="dark" style={StyleSheet.absoluteFill} />
-    <View
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: "100%",
-        backgroundColor: "rgba(255,255,255,0.02)",
-      }}
-    />
-    <View style={styles.emptyContent}>
-      <Text style={styles.emptyIcon}>✕</Text>
-      <Text style={styles.emptyTitle}>Lyrics Failed</Text>
-      <Text style={styles.emptySubtitle}>{error}</Text>
-    </View>
-  </View>
-));
-
-LyricsError.displayName = "LyricsError";
-
-/**
- * Loading state skeleton.
- */
-const LyricsLoading = memo(() => (
-  <View style={styles.emptyContainer}>
-    <BlurView intensity={32} tint="dark" style={StyleSheet.absoluteFill} />
-    <View
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: "100%",
-        backgroundColor: "rgba(255,255,255,0.02)",
-      }}
-    />
-    <View style={styles.emptyContent}>
-      <Text style={styles.emptyIcon}>…</Text>
-      <Text style={styles.emptyTitle}>Loading Lyrics</Text>
-    </View>
-  </View>
-));
-
-LyricsLoading.displayName = "LyricsLoading";
-
-/**
- * Main LyricsDisplay Component
- * Renders lyrics with synchronized highlighting and smooth auto-scroll.
- */
-export const LyricsDisplay = memo(
-  ({
-    lyrics,
-    isSynced,
-    currentProgress,
-    activeLineIndex,
-    isFollowingPlayback,
-    onUserScroll,
-    isLoading = false,
-    error = null,
-  }: LyricsDisplayProps) => {
-    const flashListRef = useRef<any>(null);
-    const scrollOffsetY = useSharedValue(0);
-    const lastScrollTime = useRef<number>(0);
-    const isAutoScrolling = useRef<boolean>(false);
-
-    // Line height constant for scroll calculations
-    const LINE_HEIGHT = 72; // Estimated height of each lyric line
-    const SCROLL_OFFSET = height / 3; // Offset from top to center active line
-
-    /**
-     * Handle manual scroll detection.
-     * Temporarily disable auto-follow when user manually scrolls.
-     */
-    const handleScroll = useCallback(
-      (event: any) => {
-        if (!isAutoScrolling.current) {
-          const now = Date.now();
-          // Debounce: only mark as scrolled if sufficient time has passed
-          if (now - lastScrollTime.current > 200) {
-            onUserScroll(true);
-            lastScrollTime.current = now;
-          }
-        }
-        scrollOffsetY.value = event.nativeEvent.contentOffset.y;
-      },
-      [onUserScroll],
-    );
-
-    /**
-     * Auto-scroll to center the active lyric line.
-     * Uses smooth animation for premium feel.
-     */
-    useEffect(() => {
-      if (
-        !isFollowingPlayback ||
-        activeLineIndex < 0 ||
-        !flashListRef.current ||
-        !lyrics
-      ) {
-        return;
-      }
-
-      // Calculate target scroll position
-      const targetY = Math.max(
-        0,
-        activeLineIndex * LINE_HEIGHT - SCROLL_OFFSET,
-      );
-
-      isAutoScrolling.current = true;
-
-      // Use a small delay to ensure view measurements are ready
-      const timeoutId = setTimeout(() => {
-        flashListRef.current?.scrollToIndex({
-          index: activeLineIndex,
-          animated: true,
-          viewPosition: 0.5, // Center the item vertically
-        });
-
-        // Reset auto-scrolling flag after animation completes
-        setTimeout(() => {
-          isAutoScrolling.current = false;
-        }, 400);
-      }, 50);
-
-      return () => clearTimeout(timeoutId);
-    }, [activeLineIndex, isFollowingPlayback, lyrics]);
-
-    /**
-     * Handle scroll gestures to resume auto-follow after inactivity.
-     */
-    const panGesture = useMemo(
-      () =>
-        Gesture.Pan()
-          .onTouchesDown(() => {
-            // User touched the list
-            if (isFollowingPlayback) {
-              runOnJS(onUserScroll)(true);
-            }
-          })
-          .onFinalize(() => {
-            // After pan ends, wait a bit then resume auto-follow
-            const timer = setTimeout(() => {
-              // Resume after inactivity threshold
-              if (Date.now() - lastScrollTime.current > 3000) {
-                runOnJS(onUserScroll)(false);
-              }
-            }, 1500);
-
-            return () => clearTimeout(timer);
-          }),
-      [isFollowingPlayback, onUserScroll],
-    );
-
-    // Render content based on state
-    if (isLoading) {
-      return <LyricsLoading />;
     }
+  );
 
-    if (error) {
-      return <LyricsError error={error} />;
-    }
+  // Dynamic content container style padding (Critical Fix #4)
+  const animatedContentContainerStyle = useAnimatedStyle(() => {
+    return {
+      paddingTop: containerHeight.value * 0.38,
+      paddingBottom: containerHeight.value * 0.62,
+    };
+  });
 
-    if (!lyrics || lyrics.length === 0) {
-      return <LyricsEmpty />;
-    }
+  if (isLoading) return <LyricsStatus text="Searching for lyrics..." />;
+  if (error) return <LyricsStatus text="Couldn't load lyrics" subtext={error} />;
+  if (!lyrics || lyrics.length === 0) return <LyricsStatus text="No lyrics available" icon="♪" />;
 
-    // Prepare data for FlashList with index-based rendering
-    const renderData = lyrics.map((lyric, index) => ({
-      ...lyric,
-      id: `lyric-${index}`,
-      index,
-    }));
-
-    const renderLyricLine = useCallback(
-      ({ item, index }: { item: any; index: number }) => (
-        <LyricLine
-          text={item.text}
-          isActive={isSynced && index === activeLineIndex}
-          isSynced={isSynced}
-          isPast={isSynced && index < activeLineIndex}
-        />
-      ),
-      [isSynced, activeLineIndex],
-    );
-
-    return (
-      <GestureDetector gesture={panGesture}>
-        <View style={styles.container}>
-          {/* Background with glass effect */}
-          <BlurView
-            intensity={24}
-            tint="dark"
-            style={StyleSheet.absoluteFill}
+  return (
+    <View style={styles.container} onLayout={handleContainerLayout}>
+      <Animated.ScrollView
+        ref={scrollRef}
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.scrollContent, animatedContentContainerStyle]}
+        decelerationRate="fast"
+      >
+        {lyrics.map((line, index) => (
+          <LyricLine
+            key={`${index}-${line.time}`}
+            item={line}
+            index={index}
+            activeLineIndex={activeLineIndex}
+            lineOffsets={lineOffsets}
+            isFollowing={isFollowing}
+            onPress={seekToLine}
           />
-          <View
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              height: "100%",
-              backgroundColor: "rgba(255,255,255,0.01)",
-            }}
-          />
-
-          {/* Gradient overlay for premium feel */}
-          <LinearGradient
-            colors={["rgba(7,7,12,0.8)", "rgba(7,7,12,0)"]}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 80,
-            }}
-          />
-
-          {/* Lyrics List */}
-          <FlashList
-            ref={flashListRef}
-            data={renderData}
-            renderItem={renderLyricLine}
-            keyExtractor={(item: any) => item.id}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            showsVerticalScrollIndicator={false}
-            scrollEnabled={true}
-            contentContainerStyle={styles.listContent}
-            ListHeaderComponent={<View style={{ height: SCROLL_OFFSET }} />}
-            ListFooterComponent={<View style={{ height: SCROLL_OFFSET }} />}
-            scrollIndicatorInsets={{ top: 0, left: 5, bottom: 0, right: 5 }}
-          />
-
-          {/* Center highlight line indicator */}
-          {isSynced && (
-            <View style={styles.centerLineIndicator}>
-              <View
-                style={{
-                  height: 2,
-                  backgroundColor: palette.primary,
-                  borderRadius: 1,
-                }}
-              />
-            </View>
-          )}
-        </View>
-      </GestureDetector>
-    );
-  },
-);
+        ))}
+      </Animated.ScrollView>
+    </View>
+  );
+});
 
 LyricsDisplay.displayName = "LyricsDisplay";
 
-// ────────────────────────────────────────────────────────────────────────────
-// Styles
-// ────────────────────────────────────────────────────────────────────────────
+const LyricsStatus = ({ text, subtext, icon }: { text: string; subtext?: string; icon?: string }) => (
+  <View style={styles.statusContainer}>
+    {icon && <Animated.Text style={styles.statusIcon}>{icon}</Animated.Text>}
+    <Animated.Text style={styles.statusText}>{text}</Animated.Text>
+    {subtext && <Animated.Text style={styles.statusSubtext}>{subtext}</Animated.Text>}
+  </View>
+);
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: palette.background,
-    overflow: "hidden",
-    borderRadius: radius.xl,
   },
-
-  listContent: {
+  scrollContent: {
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
   },
-
-  lyricLineContainer: {
-    height: 72,
+  lineWrapper: {
     justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: spacing.md,
-    marginVertical: spacing.sm,
+    paddingVertical: spacing.sm,
   },
-
-  lyricText: {
+  lineText: {
     ...typography.headline,
-    color: palette.inkMuted,
-    textAlign: "center",
-    fontSize: 18,
-    lineHeight: 26,
+    fontSize: 22,
+    lineHeight: 30,
+    textAlign: "left",
   },
-
-  lyricTextActive: {
-    color: palette.ink,
-    fontSize: 20,
-    lineHeight: 28,
-    fontWeight: "600",
-  },
-
-  centerLineIndicator: {
-    position: "absolute",
-    top: "50%",
-    left: spacing.lg,
-    right: spacing.lg,
-    marginTop: -1,
-    height: 4,
-    justifyContent: "center",
-    pointerEvents: "none",
-  },
-
-  emptyContainer: {
+  statusContainer: {
     flex: 1,
-    backgroundColor: palette.background,
     justifyContent: "center",
     alignItems: "center",
-    overflow: "hidden",
-    borderRadius: radius.xl,
+    padding: spacing.xl,
   },
-
-  emptyContent: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: spacing.xl,
+  statusIcon: {
+    fontSize: 48,
+    marginBottom: spacing.md,
+    opacity: 0.5,
   },
-
-  emptyIcon: {
-    fontSize: 56,
-    marginBottom: spacing.lg,
-    opacity: 0.4,
-  },
-
-  emptyTitle: {
-    ...typography.headline,
+  statusText: {
+    ...typography.title,
     fontSize: 18,
-    marginBottom: spacing.sm,
     color: palette.ink,
+    textAlign: "center",
   },
-
-  emptySubtitle: {
+  statusSubtext: {
     ...typography.body,
     color: palette.inkDim,
+    marginTop: spacing.sm,
     textAlign: "center",
   },
 });

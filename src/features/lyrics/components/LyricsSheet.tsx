@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from "react";
+import React, { useEffect } from "react";
 import {
   StyleSheet,
   View,
@@ -10,7 +10,10 @@ import { Ionicons } from "@expo/vector-icons";
 import Animated, {
   useAnimatedStyle,
   withSpring,
+  withTiming,
   useSharedValue,
+  useDerivedValue,
+  SharedValue,
 } from "react-native-reanimated";
 import { BlurView } from "expo-blur";
 import { palette, spacing, radius, typography } from "@/src/design/tokens";
@@ -25,29 +28,24 @@ interface LyricsSheetProps {
   isExpanded?: boolean;
 }
 
-/**
- * LyricsSheet Component
- * A modal sheet that displays synchronized lyrics with premium animations.
- * Integrates with the player for automatic progress tracking.
- */
 export const LyricsSheet = React.memo(
   ({
     isVisible,
     onClose,
     isExpanded = false,
   }: LyricsSheetProps) => {
-    // Get lyrics integration
+    // Get performance-first lyrics integration
     const {
       lyrics,
       isLoading,
       error,
+      isSynced,
       activeLineIndex,
-      currentProgress,
-      isFollowingPlayback,
-      setHasUserScrolled,
-    } = useLyricsIntegration({ enabled: isVisible });
+      isFollowing,
+      seekToLine,
+    } = useLyricsIntegration(isVisible);
 
-    // Animation values
+    // Animation values for sheet entry/exit
     const scaleAnim = useSharedValue(0.95);
     const opacityAnim = useSharedValue(0);
     const bgOpacityAnim = useSharedValue(0);
@@ -55,39 +53,15 @@ export const LyricsSheet = React.memo(
     // Animate in/out
     useEffect(() => {
       if (isVisible) {
-        scaleAnim.value = withSpring(1.0, {
-          damping: 14,
-          stiffness: 120,
-          mass: 0.7,
-        });
-        opacityAnim.value = withSpring(1.0, {
-          damping: 14,
-          stiffness: 120,
-          mass: 0.7,
-        });
-        bgOpacityAnim.value = withSpring(1.0, {
-          damping: 14,
-          stiffness: 120,
-          mass: 0.7,
-        });
+        scaleAnim.value = withSpring(1.0, { damping: 15, stiffness: 100 });
+        opacityAnim.value = withSpring(1.0, { damping: 15, stiffness: 100 });
+        bgOpacityAnim.value = withSpring(1.0, { damping: 15, stiffness: 100 });
       } else {
-        scaleAnim.value = withSpring(0.95, {
-          damping: 14,
-          stiffness: 120,
-          mass: 0.7,
-        });
-        opacityAnim.value = withSpring(0, {
-          damping: 14,
-          stiffness: 120,
-          mass: 0.7,
-        });
-        bgOpacityAnim.value = withSpring(0, {
-          damping: 14,
-          stiffness: 120,
-          mass: 0.7,
-        });
+        scaleAnim.value = withSpring(0.95);
+        opacityAnim.value = withSpring(0);
+        bgOpacityAnim.value = withSpring(0);
       }
-    }, [isVisible]);
+    }, [isVisible, scaleAnim, opacityAnim, bgOpacityAnim]);
 
     const containerStyle = useAnimatedStyle(() => ({
       transform: [{ scale: scaleAnim.value }],
@@ -98,31 +72,26 @@ export const LyricsSheet = React.memo(
       opacity: bgOpacityAnim.value,
     }));
 
-    // Calculate progress for indicator
-    const progressPercent = useMemo(() => {
-      if (!lyrics || !lyrics.lyrics || lyrics.lyrics.length === 0) {
-        return 0;
-      }
-      if (activeLineIndex < 0) return 0;
-      return ((activeLineIndex + 1) / lyrics.lyrics.length) * 100;
-    }, [lyrics, activeLineIndex]);
+    // Derived values for progress indicator (UI Thread)
+    const progressWidth = useDerivedValue(() => {
+      if (!lyrics || lyrics.length === 0 || activeLineIndex.value < 0) return 0;
+      return ((activeLineIndex.value + 1) / lyrics.length) * 100;
+    });
 
-    if (!isVisible) {
-      return null;
-    }
+    const progressFillStyle = useAnimatedStyle(() => ({
+      width: `${progressWidth.value}%`,
+    }));
+
+    if (!isVisible) return null;
 
     return (
       <View style={StyleSheet.absoluteFill} pointerEvents={isVisible ? "auto" : "none"}>
-        {/* Background overlay */}
+        {/* Backdrop */}
         <Animated.View
-          style={[
-            StyleSheet.absoluteFill,
-            bgStyle,
-            styles.backdrop,
-          ]}
+          style={[StyleSheet.absoluteFill, bgStyle, styles.backdrop]}
           pointerEvents={isVisible ? "auto" : "none"}
         >
-          <BlurView intensity={48} tint="dark" style={StyleSheet.absoluteFill} />
+          <BlurView intensity={64} tint="dark" style={StyleSheet.absoluteFill} />
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
@@ -130,85 +99,50 @@ export const LyricsSheet = React.memo(
           />
         </Animated.View>
 
-        {/* Sheet content */}
-        <Animated.View
-          style={[
-            styles.sheetContainer,
-            containerStyle,
-          ]}
-          pointerEvents="box-none"
-        >
+        {/* Sheet */}
+        <Animated.View style={[styles.sheetContainer, containerStyle]} pointerEvents="box-none">
           <View style={styles.sheet}>
             {/* Header */}
             <View style={styles.header}>
               <View style={styles.headerContent}>
                 <Text style={styles.headerTitle}>Lyrics</Text>
-                {lyrics?.synced && (
+                {isSynced && (
                   <View style={styles.syncBadge}>
                     <Text style={styles.syncBadgeText}>Synced</Text>
                   </View>
                 )}
               </View>
-              <TouchableOpacity
-                onPress={onClose}
-                activeOpacity={0.7}
-                style={styles.closeButton}
-              >
+              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                 <View style={styles.closeButtonBg}>
-                  <Ionicons
-                    name="close"
-                    size={20}
-                    color={palette.ink}
-                  />
+                  <Ionicons name="close" size={20} color={palette.ink} />
                 </View>
               </TouchableOpacity>
             </View>
 
             {/* Progress indicator */}
-            {lyrics && lyrics.synced && (
+            {isSynced && (
               <View style={styles.progressContainer}>
                 <View style={styles.progressBar}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: `${progressPercent}%` },
-                    ]}
-                  />
+                  <Animated.View style={[styles.progressFill, progressFillStyle]} />
                 </View>
-                <Text style={styles.progressText}>
-                  {activeLineIndex + 1} / {lyrics.lyrics.length}
-                </Text>
               </View>
             )}
 
-            {/* Lyrics display */}
+            {/* Display */}
             <View style={styles.lyricsContainer}>
               <LyricsDisplay
-                lyrics={lyrics?.lyrics || []}
-                isSynced={lyrics?.synced || false}
-                currentProgress={currentProgress}
+                lyrics={lyrics}
+                isSynced={isSynced}
                 activeLineIndex={activeLineIndex}
-                isFollowingPlayback={isFollowingPlayback}
-                onUserScroll={setHasUserScrolled}
+                isFollowing={isFollowing}
+                seekToLine={seekToLine}
                 isLoading={isLoading}
                 error={error}
               />
             </View>
 
-            {/* Auto-follow indicator */}
-            {!isFollowingPlayback && (
-              <View style={styles.resumeIndicator}>
-                <View style={styles.resumeBg}>
-                  <Text style={styles.resumeText}>Tap to resume auto-scroll</Text>
-                  <TouchableOpacity
-                    onPress={() => setHasUserScrolled(false)}
-                    style={styles.resumeButton}
-                  >
-                    <Text style={styles.resumeButtonText}>Resume</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
+            {/* Resume button (JS thread controlled) */}
+            <ResumeIndicator isFollowing={isFollowing} onResume={() => { isFollowing.value = true; }} />
           </View>
         </Animated.View>
       </View>
@@ -216,156 +150,105 @@ export const LyricsSheet = React.memo(
   }
 );
 
+/**
+ * ResumeIndicator - Reactive but efficient button to resume auto-scroll.
+ */
+const ResumeIndicator = ({ isFollowing, onResume }: { isFollowing: SharedValue<boolean>, onResume: () => void }) => {
+    const animatedStyle = useAnimatedStyle(() => ({
+        opacity: withTiming(isFollowing.value ? 0 : 1, { duration: 300 }),
+        transform: [{ translateY: withTiming(isFollowing.value ? 20 : 0, { duration: 300 }) }],
+        pointerEvents: isFollowing.value ? "none" : "auto" as any,
+    }));
+
+    return (
+        <Animated.View style={[styles.resumeIndicator, animatedStyle]}>
+            <TouchableOpacity onPress={onResume} style={styles.resumeBg} activeOpacity={0.8}>
+                <Text style={styles.resumeText}>Tap to resume auto-scroll</Text>
+                <View style={styles.resumeButton}>
+                    <Ionicons name="arrow-down" size={14} color={palette.ink} />
+                </View>
+            </TouchableOpacity>
+        </Animated.View>
+    );
+};
+
 LyricsSheet.displayName = "LyricsSheet";
 
-// ────────────────────────────────────────────────────────────────────────────
-// Styles
-// ────────────────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  backdrop: {
-    backgroundColor: "rgba(0, 0, 0, 0.4)",
-  },
-
+  backdrop: { backgroundColor: "rgba(0, 0, 0, 0.6)" },
   sheetContainer: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: spacing.md,
   },
-
   sheet: {
     width: "100%",
-    maxHeight: height * 0.85,
-    backgroundColor: palette.glass,
+    maxHeight: height * 0.8,
+    backgroundColor: "rgba(25, 25, 30, 0.95)",
     borderRadius: radius.xl,
     borderWidth: 1,
     borderColor: palette.border,
     overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.3,
-    shadowRadius: 40,
-    elevation: 20,
   },
-
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: palette.border,
+    paddingBottom: spacing.sm,
   },
-
-  headerContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    flex: 1,
-  },
-
-  headerTitle: {
-    ...typography.title,
-    fontSize: 20,
-    color: palette.ink,
-  },
-
+  headerContent: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  headerTitle: { ...typography.title, fontSize: 22, color: palette.ink },
   syncBadge: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
     backgroundColor: palette.primary,
     borderRadius: radius.sm,
-    opacity: 0.7,
   },
-
-  syncBadgeText: {
-    ...typography.caption,
-    fontSize: 10,
-    color: palette.ink,
-    fontWeight: "600",
-  },
-
-  closeButton: {
-    padding: spacing.sm,
-    borderRadius: radius.md,
-  },
-
+  syncBadgeText: { ...typography.caption, fontSize: 10, color: "#000", fontWeight: "800" },
+  closeButton: { padding: spacing.sm },
   closeButtonBg: {
-    width: 32,
-    height: 32,
-    borderRadius: radius.md,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: palette.glassSoft,
     justifyContent: "center",
     alignItems: "center",
   },
-
-  progressContainer: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    gap: spacing.sm,
-  },
-
-  progressBar: {
-    height: 2,
-    backgroundColor: palette.border,
-    borderRadius: 1,
-    overflow: "hidden",
-  },
-
-  progressFill: {
-    height: "100%",
-    backgroundColor: palette.primary,
-  },
-
-  progressText: {
-    ...typography.caption,
-    color: palette.inkDim,
-    textAlign: "center",
-  },
-
-  lyricsContainer: {
-    flex: 1,
-    minHeight: 300,
-    paddingVertical: spacing.md,
-  },
-
+  progressContainer: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
+  progressBar: { height: 3, backgroundColor: palette.border, borderRadius: 1.5, overflow: "hidden" },
+  progressFill: { height: "100%", backgroundColor: palette.primary },
+  lyricsContainer: { flex: 1, minHeight: 400 },
   resumeIndicator: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
+    position: "absolute",
+    bottom: spacing.lg,
+    left: 0,
+    right: 0,
+    alignItems: "center",
   },
-
   resumeBg: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    backgroundColor: palette.glassDense,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: palette.borderStrong,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  resumeText: {
-    ...typography.body,
-    color: palette.inkMuted,
-    flex: 1,
-  },
-
-  resumeButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
     backgroundColor: palette.primary,
-    borderRadius: radius.sm,
-    marginLeft: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    gap: spacing.sm,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
-
-  resumeButtonText: {
-    ...typography.caption,
-    color: palette.ink,
-    fontWeight: "600",
+  resumeText: { ...typography.caption, color: "#000", fontWeight: "700" },
+  resumeButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
   },
 });

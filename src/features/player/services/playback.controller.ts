@@ -140,69 +140,92 @@ export class PlaybackController {
 
     // 3. Media Item Transition (Sync currentIndex)
     TrackPlayer.addEventListener(Event.MediaItemTransition, async (data) => {
-      const { PlaybackService } = require('./playback.service');
-      if (PlaybackService.isReorderingQueue()) return;
+      try {
+        const { PlaybackService } = require('./playback.service');
+        const store = usePlayerStore.getState();
 
-      const store = usePlayerStore.getState();
-      if (!data.item) return;
+        // [Aura_Stabilization] Always reset isTransitioning on ANY native transition
+        // to prevent UI lockup if a move/reorder was in progress during transition.
+        if (store.isTransitioning) {
+            usePlayerStore.setState({ isTransitioning: false });
+        }
 
-      const mediaId = data.item?.mediaId || data.item?.id || (data.item as any)?.mediaId || (data.item as any)?.id;
-      if (!mediaId) {
-        console.warn("[PlayerController] Event.MediaItemTransition: data.item contains no identity ID.");
-        return;
-      }
+        if (PlaybackService.isReorderingQueue()) return;
 
-      const newIndex = store.queue.findIndex((t: PlayerTrack) => t.id === mediaId);
-      const isDifferentTrack = store.currentTrack?.id !== mediaId;
-      const isDifferentIndex = newIndex !== -1 && newIndex !== store.currentIndex;
+        if (!data.item) return;
 
-      if (newIndex !== -1 && (isDifferentIndex || isDifferentTrack)) {
-        const nextTrack = store.queue[newIndex];
-        if (!nextTrack) return;
+        const mediaId = data.item?.mediaId || data.item?.id || (data.item as any)?.mediaId || (data.item as any)?.id;
+        if (!mediaId) {
+          console.warn("[PlayerController] Event.MediaItemTransition: data.item contains no identity ID.");
+          return;
+        }
+
+        const newIndex = store.queue.findIndex((t: PlayerTrack) => t.id === mediaId);
         
-        const preloaded = store.preloadedTrack;
-        const cachedFromManager = transitionManager.getCachedTrack(nextTrack.id);
-        
-        const trackToUse = (preloaded && preloaded.id === nextTrack.id) ? 
-          preloaded : (cachedFromManager || nextTrack);
-        
-        const validTrack = transitionManager.validatePreload(trackToUse) ? trackToUse : nextTrack;
-        
-        // If the track is a dummy/unresolved item, we must properly resolve it via setTrack
-        const { isResolvedUrl } = require('../utils/track-resolver');
-        if (!validTrack.isLocal && !isResolvedUrl(validTrack.url)) {
-            usePlayerStore.getState().setTrack(nextTrack);
+        if (newIndex === -1) {
+            console.warn(`[PlayerController] Transitioned to unknown track: ${mediaId}.`);
             return;
         }
 
-        // [Aura_Stabilization] Authoritatively synchronize native active track to store
-        // We set lyrics to null immediately to prevent wrong lyrics framing or flicker on the UI
-        usePlayerStore.setState({ 
-          currentIndex: newIndex, 
-          currentTrack: validTrack,
-          preloadedTrack: null,
-          isTransitioning: false,
-          status: "playing",
-          isPlaying: true,
-          lyrics: null,
-          isLyricsLoading: false
-        });
-        
-        // Trigger progressive hydration in background
-        try {
-          const { HydrationScheduler } = require("./hydration.service");
-          HydrationScheduler.scheduleHydration(validTrack);
-        } catch (e) {
-          console.warn("[playback.controller] Background hydration failed to schedule", e);
+        const isDifferentTrack = store.currentTrack?.id !== mediaId;
+        const isDifferentIndex = newIndex !== -1 && newIndex !== store.currentIndex;
+
+        if (isDifferentIndex || isDifferentTrack) {
+          const nextTrack = store.queue[newIndex];
+          if (!nextTrack) {
+            usePlayerStore.setState({ isTransitioning: false });
+            return;
+          }
+          
+          const preloaded = store.preloadedTrack;
+          const cachedFromManager = transitionManager.getCachedTrack(nextTrack.id);
+          
+          const trackToUse = (preloaded && preloaded.id === nextTrack.id) ? 
+            preloaded : (cachedFromManager || nextTrack);
+          
+          const validTrack = transitionManager.validatePreload(trackToUse) ? trackToUse : nextTrack;
+          
+          // If the track is a dummy/unresolved item, we must properly resolve it via setTrack
+          const { isResolvedUrl } = require('../utils/track-resolver');
+          if (!validTrack.isLocal && !isResolvedUrl(validTrack.url)) {
+              usePlayerStore.getState().setTrack(nextTrack);
+              return;
+          }
+
+          // [Aura_Stabilization] Authoritatively synchronize native active track to store
+          usePlayerStore.setState({ 
+            currentIndex: newIndex, 
+            currentTrack: validTrack,
+            preloadedTrack: null,
+            isTransitioning: false,
+            status: "playing",
+            isPlaying: true,
+            lyrics: null,
+            isLyricsLoading: false
+          });
+          
+          // Trigger progressive hydration in background
+          try {
+            const { HydrationScheduler } = require("./hydration.service");
+            HydrationScheduler.scheduleHydration(validTrack);
+          } catch (e) {
+            console.warn("[playback.controller] Background hydration failed to schedule", e);
+          }
+          
+          transitionManager.setTransitioning(false);
+          transitionManager.clearCache([validTrack.id]);
+          
+          // Asynchronously print forensic logs
+          PlaybackController.logForensicState(`transition: ${validTrack.title}`);
+          
+          store.preloadNext();
+        } else {
+          // Even if same track, ensure we reset transitioning if it was stuck
+          if (store.isTransitioning) usePlayerStore.setState({ isTransitioning: false });
         }
-        
-        transitionManager.setTransitioning(false);
-        transitionManager.clearCache([validTrack.id]);
-        
-        // Asynchronously print forensic logs
-        PlaybackController.logForensicState(`transition: ${validTrack.title}`);
-        
-        store.preloadNext();
+      } catch (err) {
+        console.error("[PlayerController] Fatal error in MediaItemTransition listener:", err);
+        usePlayerStore.setState({ isTransitioning: false });
       }
     });
 
@@ -279,11 +302,20 @@ export class PlaybackController {
   static async logForensicState(context: string) {
     try {
       const store = usePlayerStore.getState();
-      const TrackPlayer = require("@rntp/player").default;
       const { getCanonicalTrackId } = require("../utils/track-identity");
       
-      const nativeIndex = await TrackPlayer.getActiveMediaItemIndex().catch(() => -1);
-      const activeItem = await TrackPlayer.getActiveMediaItem().catch(() => null);
+      // Safe retrieval of native state
+      let nativeIndex = -1;
+      let activeItem = null;
+      
+      try {
+        const index = await TrackPlayer.getActiveMediaItemIndex();
+        nativeIndex = index ?? -1;
+      } catch (e) {}
+
+      try {
+        activeItem = await TrackPlayer.getActiveMediaItem();
+      } catch (e) {}
       
       const { useMediaCacheStore } = require("../../cache/store/media-cache.store");
       const cacheStore = useMediaCacheStore.getState();

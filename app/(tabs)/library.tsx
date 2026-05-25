@@ -953,96 +953,6 @@ const MyPlaylistsSection = memo(({ onOpen }: { onOpen: (id: string) => void }) =
   );
 });
 
-// ─── Tab bar (animated spring pill, Reanimated worklet) ─────────────────────────────
-
-const TABS = ["Playlists", "Artists", "Albums", "Songs", "Genres"];
-
-const TabBar = memo(({
-  activeTab, onSelect,
-}: { activeTab: string; onSelect: (t: string) => void }) => {
-  const [layouts, setLayouts]   = useState<Record<number, { x: number; width: number }>>({});
-  const slideX   = useRef(new Animated.Value(0)).current;
-  const slideW   = useRef(new Animated.Value(72)).current;
-  const pillSc   = useRef(new Animated.Value(1)).current;
-  const inited   = useRef(false);
-
-  const handleLayout = useCallback((idx: number, e: any) => {
-    const { x, width } = e.nativeEvent.layout;
-    setLayouts(prev => {
-      const next = { ...prev, [idx]: { x, width } };
-      if (idx === 0 && !inited.current) {
-        slideX.setValue(x + 4);
-        slideW.setValue(width - 8);
-        inited.current = true;
-      }
-      return next;
-    });
-  }, []);
-
-  const selectTab = useCallback((tab: string, idx: number) => {
-    const layout = layouts[idx];
-    if (!layout) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onSelect(tab);
-    Animated.parallel([
-      Animated.sequence([
-        Animated.timing(pillSc, { toValue: 0.88, duration: 70, useNativeDriver: false }),
-        Animated.spring(pillSc, { toValue: 1, ...SPR_POP, useNativeDriver: false }),
-      ]),
-      Animated.spring(slideX, { toValue: layout.x + 4, ...SPR_SLIDE, useNativeDriver: false }),
-      Animated.spring(slideW, { toValue: layout.width - 8, ...SPR_SLIDE, useNativeDriver: false }),
-    ]).start();
-  }, [layouts]);
-
-  return (
-    <View style={s.tabBarOuter}>
-      {/* Glass backing for sticky tab bar */}
-      <BlurView intensity={52} tint="dark" style={StyleSheet.absoluteFill} />
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(8,8,13,0.72)" }]} />
-      {/* Top & bottom edges */}
-      <View style={s.tabEdgeTop} />
-      <View style={s.tabEdgeBottom} />
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabScroll}>
-        {/* Sliding pill */}
-        <Animated.View style={[s.tabPill, { width: slideW, transform: [{ translateX: slideX }, { scale: pillSc }] }]}>
-          <LinearGradient colors={[C.primary, C.primaryMid]} start={{x:0,y:0}} end={{x:1,y:1}} style={StyleSheet.absoluteFill} />
-          {/* Specular top */}
-          <View style={{ position:"absolute", top:3, left:10, right:10, height:2, borderRadius:1, backgroundColor:"rgba(255,255,255,0.30)" }} />
-          {/* Left fresnel */}
-          <View style={{ position:"absolute", left:8, top:5, bottom:5, width:18, borderRadius:6, backgroundColor:"rgba(255,255,255,0.15)", transform:[{skewX:"-8deg"}] }} />
-          {/* Border */}
-          <View style={[StyleSheet.absoluteFillObject, { borderRadius:17, borderWidth:0.7, borderTopColor:"rgba(255,255,255,0.24)", borderLeftColor:"rgba(255,255,255,0.06)", borderRightColor:"rgba(255,255,255,0.06)", borderBottomColor:"rgba(255,255,255,0.04)" }]} />
-        </Animated.View>
-
-        {TABS.map((tab, idx) => (
-          <TouchableOpacity
-            key={tab}
-            onLayout={e => handleLayout(idx, e)}
-            onPress={() => selectTab(tab, idx)}
-            style={[s.tabItem, { paddingHorizontal: isTablet ? 26 : 18 }]}
-            activeOpacity={1}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeTab === tab }}
-            accessibilityLabel={tab}
-          >
-            <Text style={[s.tabText, activeTab === tab && s.tabActive]}>
-              {tab.toUpperCase()}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </View>
-  );
-});
-
-// ─── Data ─────────────────────────────────────────────────────────────────────
-
-const TRACKS = [
-  { id: "1", title: "Midnight City",  artist: "M83",         time: "04:03" },
-  { id: "2", title: "Starboy",        artist: "The Weeknd",  time: "03:50" },
-  { id: "3", title: "Nightcall",      artist: "Kavinsky",    time: "04:18" },
-];
 
 // ─── Get recent downloads ─────────────────────────────────────────────────────
 
@@ -1232,9 +1142,6 @@ export default function LibraryScreen() {
             Your music, curated.
           </Animated.Text>
         </View>
-
-        {/* ── Tab bar (sticky) ────────────────────────────────────────────── */}
-        <TabBar activeTab={activeTab} onSelect={setActiveTab} />
 
         {/* ── Page content ────────────────────────────────────────────────── */}
         <View style={s.content}>
