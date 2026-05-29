@@ -340,7 +340,6 @@ export const QueueSheet = ({
     [currentTrack, accentColor, handleTrackPress, handleMenuPress],
   );
 
-  if (!isVisible && Platform.OS === "android") return null;
 
   return (
     <View

@@ -23,6 +23,7 @@ interface ExtendedPlayerStore extends PlayerStore {
   activeContext: PlaybackContext | null;
   setActiveContext: (context: PlaybackContext | null) => void;
   updateTrackMetadata: (trackId: string, partial: Partial<PlayerTrack>) => void;
+  restoreSession: () => Promise<void>;
 }
 
 export const usePlayerStore = create<ExtendedPlayerStore>()(

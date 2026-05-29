@@ -9,11 +9,11 @@ type RouteOrigin = {
   title?: string;
 };
 
+import { usePlayerUIStore } from '@/src/features/player/store/player-ui.store';
+
 export function openNowPlaying(router: AuraRouter, trackId?: string, origin?: string) {
-  router.push({
-    pathname: '/now_playing',
-    params: { trackId: trackId ?? '', origin: origin ?? '' },
-  });
+  // Safe trigger of global overlay state
+  usePlayerUIStore.getState().expand();
 }
 
 export function openArtist(router: AuraRouter, artistId?: string, origin?: RouteOrigin) {
@@ -22,6 +22,8 @@ export function openArtist(router: AuraRouter, artistId?: string, origin?: Route
   const targetId = artistId ?? origin?.title;
   
   if (!targetId) return;
+
+  usePlayerUIStore.getState().collapse();
 
   router.push({
     pathname: '/artist/[id]',
@@ -38,6 +40,7 @@ export function openArtistByName(router: AuraRouter, artistName?: string, origin
 }
 
 export function openPlaylist(router: AuraRouter, playlistId: string, origin?: string) {
+  usePlayerUIStore.getState().collapse();
   router.push({
     pathname: '/playlist/[id]',
     params: { id: playlistId, origin: origin ?? '' },
@@ -45,6 +48,7 @@ export function openPlaylist(router: AuraRouter, playlistId: string, origin?: st
 }
 
 export function openAlbum(router: AuraRouter, albumId: string, origin?: string) {
+  usePlayerUIStore.getState().collapse();
   router.push({
     pathname: '/album/[id]',
     params: { id: albumId, origin: origin ?? '' },

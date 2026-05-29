@@ -36,7 +36,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
-import { openAlbum, openArtistByName } from "@/src/navigation/music-navigation";
+import { openAlbum, openArtistByName, openNowPlaying } from "@/src/navigation/music-navigation";
 import * as Haptics from "expo-haptics";
 
 const { width: SW, height: SH } = Dimensions.get("window");
@@ -935,7 +935,7 @@ export default function DownloadsScreen() {
         dominantColors: t.dominantColors || [C.primary, C.primaryMid],
       }));
       setQueue(hydratedTracks as any, idx !== -1 ? idx : 0);
-      router.push({ pathname: "/now_playing", params: { trackId: track.id } });
+      openNowPlaying(router, track.id);
     },
     [setQueue, router, tracks, setActiveContext],
   );

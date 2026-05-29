@@ -167,16 +167,28 @@ export function usePlaybackState() {
 }
 
 export function useMusicProgress(): MusicProgressContextType {
-  const rntpProgress = require("@rntp/player").useProgress(0.5);
+  const positionMs = usePlayerStore((s) => s.position);
+  const durationMs = usePlayerStore((s) => s.duration);
+  const bufferedMs = usePlayerStore((s) => s.bufferedPosition);
+  const currentTrack = usePlayerStore((s) => s.currentTrack);
 
   return useMemo(
-    () => ({
-      progress: rntpProgress.duration > 0 ? rntpProgress.position / rntpProgress.duration : 0,
-      elapsedSec: rntpProgress.position,
-      durationSec: rntpProgress.duration,
-      bufferedSec: rntpProgress.buffered,
-    }),
-    [rntpProgress.position, rntpProgress.duration, rntpProgress.buffered],
+    () => {
+      const elapsedSec = positionMs / 1000;
+      const durationSec = durationMs > 0
+        ? durationMs / 1000
+        : (currentTrack?.duration ? Number(currentTrack.duration) : 0);
+      const progress = durationSec > 0 ? elapsedSec / durationSec : 0;
+      const bufferedSec = bufferedMs / 1000;
+
+      return {
+        progress,
+        elapsedSec,
+        durationSec,
+        bufferedSec,
+      };
+    },
+    [positionMs, durationMs, bufferedMs, currentTrack?.duration],
   );
 }
 

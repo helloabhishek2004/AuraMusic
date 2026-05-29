@@ -74,15 +74,8 @@ export function useSmartBackNavigation() {
   const handleBack = useCallback(() => {
     const isTabScreen = segments[0] === '(tabs)';
     const isTabRoot = isTabScreen && (segments.length === 1 || segments[1] === 'index' || segments[1] === '(index)');
-    const isLyrics = pathname === '/lyrics';
     const isNowPlaying = pathname === '/now_playing';
     const isSpecialPage = ['/artist/', '/album/', '/playlist/', '/downloads/', '/local_library/', '/create_playlist/'].some(p => pathname.startsWith(p));
-
-    // 1. Close overlays/modals first - Lyrics -> Now Playing
-    if (isLyrics) {
-      router.back();
-      return true;
-    }
 
     // 2. Now Playing -> Go back to previous page (not tab root)
     if (isNowPlaying) {

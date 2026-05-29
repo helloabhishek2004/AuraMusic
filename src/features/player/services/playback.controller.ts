@@ -2,6 +2,7 @@ import TrackPlayer, { Event, PlaybackState } from "@rntp/player";
 import { usePlayerStore } from "../store/player.store";
 import { PlayerTrack } from "../types/player";
 import { transitionManager } from "./transition-manager";
+import { playbackProgress } from "./playback-progress";
 
 let _controllerInitialized = false;
 
@@ -59,6 +60,22 @@ export class PlaybackController {
           store.setStatus("error");
           break;
       }
+    });
+
+    // 1.5. Playback Progress Updated (Atomic position and duration sync)
+    // Writes to SharedValues first (zero React involvement) then to Zustand for non-perf-critical consumers.
+    TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, (data) => {
+      const elapsedMs = (data.position || 0) * 1000;
+      const durationMs = (data.duration || 0) * 1000;
+
+      // Direct SharedValue write — UI thread reads these without React rerenders
+      playbackProgress.positionMs.value = elapsedMs;
+      playbackProgress.durationMs.value = durationMs;
+      playbackProgress.bufferedMs.value = 0; // buffered position not provided in progress event in this version
+
+      // Zustand still updated for non-perf-critical consumers (queue, seek, crossfade, etc.)
+      const store = usePlayerStore.getState();
+      store.updateProgress(elapsedMs, durationMs, store.bufferedPosition);
     });
 
     // 2. Is Playing Changed (Atomic toggle sync)
@@ -154,7 +171,7 @@ export class PlaybackController {
 
         if (!data.item) return;
 
-        const mediaId = data.item?.mediaId || data.item?.id || (data.item as any)?.mediaId || (data.item as any)?.id;
+        const mediaId = (data.item as any)?.mediaId || (data.item as any)?.id;
         if (!mediaId) {
           console.warn("[PlayerController] Event.MediaItemTransition: data.item contains no identity ID.");
           return;
@@ -261,7 +278,7 @@ export class PlaybackController {
       TrackPlayer.seekTo(Math.max(0, pos - event.interval));
     });
 
-    TrackPlayer.addEventListener(Event.RemoteCustomAction, (event) => {
+    TrackPlayer.addEventListener((Event as any).RemoteCustomAction, (event: any) => {
       const store = usePlayerStore.getState();
       if (event.customAction === "like") {
          // handle like
@@ -272,7 +289,7 @@ export class PlaybackController {
       }
     });
 
-    TrackPlayer.addEventListener(Event.RemoteDuck, async (event) => {
+    TrackPlayer.addEventListener((Event as any).RemoteDuck, async (event: any) => {
       console.log("[Player] [Aura_Stabilization] RemoteDuck event:", event);
       const store = usePlayerStore.getState();
       
@@ -328,7 +345,7 @@ export class PlaybackController {
 [PLAYER] currentTrack: "${store.currentTrack?.title}" (${store.currentTrack?.id})
 [PLAYER] canonicalTrackId: "${canonicalId}"
 [QUEUE] JS index: ${store.currentIndex}, queueSize: ${store.queue.length}
-[RNTP] nativeIndex: ${nativeIndex}, activeMediaId: "${activeItem?.mediaId || activeItem?.id}"
+[RNTP] nativeIndex: ${nativeIndex}, activeMediaId: "${(activeItem as any)?.mediaId || (activeItem as any)?.id}"
 [METADATA] artworkSource: "${store.currentTrack?.art ? 'online/local url' : 'fallback picsum'}"
 [LYRICS] state: ${store.lyrics ? `loaded (${store.lyrics.lyrics?.length || 0} lines)` : 'null'}, isLyricsLoading: ${store.isLyricsLoading}
 [LYRICS] cacheStatus: ${cached?.lyrics ? (cached.lyrics.unavailable ? 'cached negative (unavailable)' : 'cached positive') : 'miss'}

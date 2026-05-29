@@ -25,6 +25,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
+import { usePlayerUIStore } from '@/src/features/player/store/player-ui.store';
 import type { PlayerTrack } from '@/src/features/player/types/player';
 import { usePlaylistStore } from '../store/playlist.store';
 import { getShortStats } from '../utils/playlist-metrics';
@@ -101,6 +102,7 @@ const AddToPlaylistSheet = React.memo(
 
     const handleCreateNew = useCallback(() => {
       onClose();
+      usePlayerUIStore.getState().collapse();
       setTimeout(() => router.push('/create_playlist'), 200);
     }, [onClose, router]);
 

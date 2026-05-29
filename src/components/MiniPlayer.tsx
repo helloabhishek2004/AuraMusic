@@ -22,9 +22,10 @@ import {
   View,
   ActivityIndicator,
 } from 'react-native';
+import Reanimated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { BlurView } from 'expo-blur';
@@ -88,7 +89,9 @@ interface MiniPlayerProps {
   offset?: number;
 }
 
-function MiniPlayer({ offset = 0 }: MiniPlayerProps) {
+function MiniPlayer({
+  offset = 0,
+}: MiniPlayerProps) {
   const track = useNowPlayingTrack();
   const { isPlaying, play, pause, next } = useMusicControls();
   const status = usePlayerStore(s => s.status);
@@ -98,21 +101,16 @@ function MiniPlayer({ offset = 0 }: MiniPlayerProps) {
   const insets = useSafeAreaInsets();
   const metrics = useResponsiveMetrics();
 
-  // ── Progress animation ──────────────────────────────────────────────────────
-  const progressAnim = useRef(new Animated.Value(clamp(progress))).current;
+  // ── Progress animation (Reanimated — UI thread) ────────────────────────────
+  const progressSV = useSharedValue(0);
 
   useEffect(() => {
-    Animated.timing(progressAnim, {
-      toValue: clamp(progress),
-      duration: 280,
-      useNativeDriver: false,
-    }).start();
-  }, [progress, progressAnim]);
+    progressSV.value = withTiming(clamp(progress), { duration: 280 });
+  }, [progress]);
 
-  const progressWidth = progressAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
-  });
+  const progressBarStyle = useAnimatedStyle(() => ({
+    width: `${progressSV.value * 100}%`,
+  }));
 
   // ── Entry animation ─────────────────────────────────────────────────────────
   const enterAnim = useRef(new Animated.Value(0)).current;
@@ -147,10 +145,11 @@ function MiniPlayer({ offset = 0 }: MiniPlayerProps) {
   const accent = track?.dominantColors?.[0] ?? DEFAULT_ACCENT;
   const accentDeep = track?.dominantColors?.[1] ?? ACCENT_DEEP_DEFAULT;
 
-  const bottom =
-    offset > 0
-      ? Math.max(insets.bottom + offset + 12, offset + 24)
-      : Math.max(insets.bottom + 16, 32);
+  const segments = useSegments();
+  const isTabScreen = segments[0] === '(tabs)';
+  const bottom = isTabScreen
+    ? Math.max(insets.bottom + 14, 24) + 80 // Floats exactly 8px above the top of FloatingNav
+    : Math.max(insets.bottom + 16, 32);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   const handleOpenNowPlaying = useCallback(() => {
@@ -307,17 +306,19 @@ function MiniPlayer({ offset = 0 }: MiniPlayerProps) {
               importantForAccessibility="no-hide-descendants"
             >
               <View style={styles.progressTrack}>
-                <Animated.View
+                <Reanimated.View
                   style={[
                     styles.progressFill,
-                    { width: progressWidth, backgroundColor: accent },
+                    { backgroundColor: accent },
+                    progressBarStyle,
                   ]}
                 />
                 {/* Glow layer */}
-                <Animated.View
+                <Reanimated.View
                   style={[
                     styles.progressGlow,
-                    { width: progressWidth, backgroundColor: accent },
+                    { backgroundColor: accent },
+                    progressBarStyle,
                   ]}
                 />
               </View>

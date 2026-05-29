@@ -133,7 +133,7 @@ export function parseLyricsData(rawResponse: any): ParsedLyrics {
         const maxWordsDuration = Math.min(lineDuration, rawWords.length * 350); // cap at 350ms per word
         const step = maxWordsDuration / rawWords.length;
         
-        words = rawWords.map((word, wIdx) => ({
+        words = rawWords.map((word: string, wIdx: number) => ({
           text: word,
           startTime: Math.round(lineTime + wIdx * step),
           endTime: Math.round(lineTime + (wIdx + 1) * step),

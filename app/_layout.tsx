@@ -22,22 +22,7 @@ import { useSmartBackNavigation } from '../src/hooks/use-navigation-history';
 enableFreeze(true);
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
-function GlobalPlayer() {
-  const pathname = usePathname();
-  const segments = useSegments();
-  
-  const isNowPlaying = pathname === '/now_playing';
-  const isLyrics = pathname === '/lyrics';
-  const isCreatePlaylist = pathname.includes('create_playlist');
-  
-  if (isNowPlaying || isLyrics || isCreatePlaylist) return null;
-
-  // If we are in a tab, we need to lift the mini player above the tab bar
-  const isTab = segments[0] === '(tabs)';
-  const offset = isTab ? 84 : 0; // 72 (bar) + 12 (padding)
-  
-  return <MiniPlayer offset={offset} />;
-}
+import PlayerOverlay from '../src/components/PlayerOverlay';
 
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -136,7 +121,7 @@ function StartupPermissionGuard({ children }: { children: React.ReactNode }) {
   const handleRequestAll = async () => {
     try {
       if (Platform.OS === 'android') {
-        const grants: string[] = [];
+        const grants: any[] = [];
         if (Platform.Version >= 33) {
           grants.push(
             PermissionsAndroid.PERMISSIONS.READ_MEDIA_AUDIO,
@@ -290,13 +275,6 @@ export default function RootLayout() {
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen
-                name="now_playing"
-                options={{
-                  animation: 'slide_from_bottom',
-                  presentation: 'fullScreenModal',
-                }}
-              />
-              <Stack.Screen
                 name="artist/[id]"
                 options={{
                   animation: 'slide_from_right',
@@ -317,18 +295,11 @@ export default function RootLayout() {
                   animationDuration: 200,
                 }}
               />
-              <Stack.Screen
-                name="lyrics"
-                options={{
-                  presentation: 'modal',
-                  animation: 'slide_from_bottom',
-                }}
-              />
               <Stack.Screen name="create_playlist" options={{ animation: 'slide_from_bottom' }} />
               <Stack.Screen name="downloads" options={{ animation: 'slide_from_right' }} />
               <Stack.Screen name="local_library" options={{ animation: 'slide_from_right' }} />
             </Stack>
-            <GlobalPlayer />
+            <PlayerOverlay />
           </GestureHandlerRootView>
         </MusicProvider>
       </NavigationThemeProvider>
