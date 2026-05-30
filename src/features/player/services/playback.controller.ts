@@ -1,6 +1,6 @@
 import TrackPlayer, { Event, PlaybackState } from "@rntp/player";
 import { usePlayerStore } from "../store/player.store";
-import { PlayerTrack } from "../types/player";
+import { PlayerTrack, RepeatMode } from "../types/player";
 import { transitionManager } from "./transition-manager";
 import { playbackProgress } from "./playback-progress";
 
@@ -14,6 +14,7 @@ let _controllerInitialized = false;
 export class PlaybackController {
   private static isInitialized = false;
   private static lastState: PlaybackState | null = null;
+  private static healingInProgress = new Set<string>();
 
   static initialize() {
     if (_controllerInitialized && this.isInitialized) return;
@@ -49,7 +50,7 @@ export class PlaybackController {
           if (store.isTransitioning) return;
           
           store.updateProgress(0, store.duration, 0);
-          store.next();
+          store.resolveAutoAdvance();
           break;
         case PlaybackState.Idle:
           if (store.status !== "idle") {
@@ -71,7 +72,8 @@ export class PlaybackController {
       // Direct SharedValue write — UI thread reads these without React rerenders
       playbackProgress.positionMs.value = elapsedMs;
       playbackProgress.durationMs.value = durationMs;
-      playbackProgress.bufferedMs.value = 0; // buffered position not provided in progress event in this version
+      playbackProgress.progress.value = durationMs > 0 ? Math.min(1, Math.max(0, elapsedMs / durationMs)) : 0;
+      playbackProgress.bufferedMs.value = 0; 
 
       // Zustand still updated for non-perf-critical consumers (queue, seek, crossfade, etc.)
       const store = usePlayerStore.getState();
@@ -96,6 +98,14 @@ export class PlaybackController {
 
       // Self-healing: If this is an online streaming track, attempt to re-resolve the stream URL and resume
       if (currentTrack && !currentTrack.isLocal && currentTrack.id) {
+        if (PlaybackController.healingInProgress.has(currentTrack.id)) {
+          if (typeof __DEV__ !== "undefined" && __DEV__) {
+            console.info(`[PlayerController] Healing already in progress for ${currentTrack.id}, ignoring duplicate.`);
+          }
+          return;
+        }
+        PlaybackController.healingInProgress.add(currentTrack.id);
+
         console.info(`[PlayerController] Stream error detected for ${currentTrack.title} (${currentTrack.id}). Attempting self-healing re-resolution...`);
         
         try {
@@ -116,7 +126,7 @@ export class PlaybackController {
 
           // 4. Resolve a fresh signed stream URL from the backend (bypassing caches)
           const { resolveAudioOnly } = require("../utils/track-resolver");
-          const resolvedTrack = await resolveAudioOnly({ ...currentTrack, url: "" });
+          const resolvedTrack = await resolveAudioOnly({ ...currentTrack, url: "" }, null, true);
           
           if (resolvedTrack && resolvedTrack.url && resolvedTrack.url.startsWith("http")) {
             console.info(`[PlayerController] Successfully resolved fresh stream URL: ${resolvedTrack.url.substring(0, 60)}...`);
@@ -137,11 +147,18 @@ export class PlaybackController {
               await PlaybackService.seek(currentPosition);
             }
             
+            // [Aura_Ownership] Reset status to playing after successful self-healing.
+            // Without this, the store stays in "error" state even though playback
+            // was recovered — causing the UI to show an error banner indefinitely.
+            usePlayerStore.getState().setStatus("playing");
+            
             console.info("[PlayerController] Self-healing completed. Resumed playback successfully!");
             return; // Recovered successfully!
           }
         } catch (healError: any) {
           console.error("[PlayerController] Self-healing re-resolution failed:", healError.message || healError);
+        } finally {
+          PlaybackController.healingInProgress.delete(currentTrack.id);
         }
       }
 
@@ -155,90 +172,151 @@ export class PlaybackController {
       });
     });
 
-    // 3. Media Item Transition (Sync currentIndex)
+    // 3. Media Item Transition (Confirmation Layer Only)
+    // [Aura_Ownership] MIT is a confirmation mechanism, NOT a state authority.
+    // It confirms the native queue index and track identity after a transport jump.
+    // It NEVER writes: status, isPlaying, isBuffering — those are owned by
+    // PlaybackStateChanged and IsPlayingChanged events.
+    // When a JS operation (_transitionGuard.inProgress) is active, MIT defers
+    // to the operation's completion handler (Pattern A) or confirms the expected
+    // transition (Pattern B). Only when no JS operation is in flight does MIT
+    // act as the fallback authority for index/track sync (Pattern C).
     TrackPlayer.addEventListener(Event.MediaItemTransition, async (data) => {
       try {
         const { PlaybackService } = require('./playback.service');
         const store = usePlayerStore.getState();
+        const guard = store._transitionGuard;
 
-        // [Aura_Stabilization] Always reset isTransitioning on ANY native transition
-        // to prevent UI lockup if a move/reorder was in progress during transition.
-        if (store.isTransitioning) {
+        // Defensive: reset isTransitioning on native transition to prevent lockup.
+        // But only when no JS operation owns the transition — never cancel a
+        // transition that setTrack/resolveAutoAdvance/next/previous initiated.
+        if (store.isTransitioning && !guard.inProgress) {
             usePlayerStore.setState({ isTransitioning: false });
         }
 
         if (PlaybackService.isReorderingQueue()) return;
-
         if (!data.item) return;
 
         const mediaId = (data.item as any)?.mediaId || (data.item as any)?.id;
-        if (!mediaId) {
-          console.warn("[PlayerController] Event.MediaItemTransition: data.item contains no identity ID.");
+        if (!mediaId) return;
+
+        const newIndex = store.queue.findIndex((t: PlayerTrack) => t.id === mediaId);
+        if (newIndex === -1) return;
+
+        // ── Transition Guard ──────────────────────────────────────────
+        // If a JS operation owns the current transition, check whether this MIT
+        // matches the expected destination. If not, defer to avoid state corruption.
+        if (guard.inProgress) {
+          if (guard.destinationId === mediaId) {
+            if (guard.owner === "setTrack" || guard.owner === "jump") {
+              // Pattern A: setTrack/jump have completion handlers that write
+              // final state. MIT defers entirely to prevent races.
+              return;
+            }
+            // Pattern B: skip/previous/autoAdvance have no completion handler.
+            // MIT confirms and clears the guard. Reset progress state atomically
+            // so UI never shows stale position/duration from the previous track.
+            const validTrack = store.queue[newIndex];
+            usePlayerStore.setState({
+              currentIndex: newIndex,
+              currentTrack: validTrack,
+              position: 0,
+              duration: validTrack.duration || 0,
+              bufferedPosition: 0,
+              preloadedTrack: null,
+              lyrics: null,
+              isLyricsLoading: false,
+              _transitionGuard: { ...guard, inProgress: false, owner: null, destinationId: null }
+            });
+            transitionManager.clearCache([validTrack.id]);
+            PlaybackController.logForensicState(`transition: ${validTrack.title}`);
+            store.preloadNext();
+            return;
+          }
+          // Unexpected destination — log and defer to the owning operation
+          console.warn(`[PlayerController] MIT destination ${mediaId} != expected ${guard.destinationId}. Deferring.`);
           return;
         }
 
-        const newIndex = store.queue.findIndex((t: PlayerTrack) => t.id === mediaId);
-        
-        if (newIndex === -1) {
-            console.warn(`[PlayerController] Transitioned to unknown track: ${mediaId}.`);
-            return;
-        }
-
+        // ── Pattern C: No JS operation in flight ──────────────────────
+        // MIT is the fallback authority for index/track sync.
+        // Status/isPlaying/isBuffering come from PlaybackStateChanged events.
         const isDifferentTrack = store.currentTrack?.id !== mediaId;
         const isDifferentIndex = newIndex !== -1 && newIndex !== store.currentIndex;
 
         if (isDifferentIndex || isDifferentTrack) {
           const nextTrack = store.queue[newIndex];
-          if (!nextTrack) {
-            usePlayerStore.setState({ isTransitioning: false });
-            return;
-          }
-          
+          if (!nextTrack) return;
+
           const preloaded = store.preloadedTrack;
           const cachedFromManager = transitionManager.getCachedTrack(nextTrack.id);
-          
-          const trackToUse = (preloaded && preloaded.id === nextTrack.id) ? 
+
+          const trackToUse = (preloaded && preloaded.id === nextTrack.id) ?
             preloaded : (cachedFromManager || nextTrack);
-          
+
           const validTrack = transitionManager.validatePreload(trackToUse) ? trackToUse : nextTrack;
-          
-          // If the track is a dummy/unresolved item, we must properly resolve it via setTrack
-          const { isResolvedUrl } = require('../utils/track-resolver');
+
+          // Eagerly resolve unresolved URLs in-place instead of replacing the full queue
+          const { isResolvedUrl, resolveAudioOnly } = require('../utils/track-resolver');
           if (!validTrack.isLocal && !isResolvedUrl(validTrack.url)) {
+              try {
+                const resolved = await resolveAudioOnly(nextTrack, null, true);
+                if (resolved && resolved.url && isResolvedUrl(resolved.url)) {
+                  await PlaybackService.updateMediaItem(newIndex, resolved);
+                  const newQueue = [...store.queue];
+                  newQueue[newIndex] = resolved;
+                  usePlayerStore.setState({
+                    currentIndex: newIndex,
+                    currentTrack: resolved,
+                    queue: newQueue,
+                    position: 0,
+                    duration: resolved.duration || 0,
+                    bufferedPosition: 0,
+                    preloadedTrack: null,
+                    lyrics: null,
+                    isLyricsLoading: false
+                  });
+                  transitionManager.setTransitioning(false);
+                  transitionManager.clearCache([resolved.id]);
+                  store.preloadNext();
+                  return;
+                }
+              } catch (e) {
+                console.warn("[PlayerController] Eager resolution failed, falling back to setTrack", e);
+              }
               usePlayerStore.getState().setTrack(nextTrack);
               return;
           }
 
-          // [Aura_Stabilization] Authoritatively synchronize native active track to store
-          usePlayerStore.setState({ 
-            currentIndex: newIndex, 
+          // [Aura_Ownership] MIT confirms index and track ONLY.
+          // Status/isPlaying/isBuffering are NOT written here — they arrive via
+          // PlaybackStateChanged / IsPlayingChanged from the native player.
+          // Progress state (position/duration/bufferedPosition) IS reset here
+          // to prevent the UI from showing stale seek bar data from the old track.
+          usePlayerStore.setState({
+            currentIndex: newIndex,
             currentTrack: validTrack,
+            position: 0,
+            duration: validTrack.duration || 0,
+            bufferedPosition: 0,
             preloadedTrack: null,
-            isTransitioning: false,
-            status: "playing",
-            isPlaying: true,
             lyrics: null,
             isLyricsLoading: false
           });
-          
-          // Trigger progressive hydration in background
+
           try {
             const { HydrationScheduler } = require("./hydration.service");
             HydrationScheduler.scheduleHydration(validTrack);
           } catch (e) {
             console.warn("[playback.controller] Background hydration failed to schedule", e);
           }
-          
+
           transitionManager.setTransitioning(false);
           transitionManager.clearCache([validTrack.id]);
-          
-          // Asynchronously print forensic logs
+
           PlaybackController.logForensicState(`transition: ${validTrack.title}`);
-          
+
           store.preloadNext();
-        } else {
-          // Even if same track, ensure we reset transitioning if it was stuck
-          if (store.isTransitioning) usePlayerStore.setState({ isTransitioning: false });
         }
       } catch (err) {
         console.error("[PlayerController] Fatal error in MediaItemTransition listener:", err);
@@ -284,7 +362,10 @@ export class PlaybackController {
          // handle like
          console.log("Like triggered from notification");
       } else if (event.customAction === "loop") {
-         const nextMode = store.repeatMode === "off" ? "track" : "off";
+         let nextMode: RepeatMode = "off";
+         if (store.repeatMode === "off") nextMode = "queue";
+         else if (store.repeatMode === "queue") nextMode = "track";
+         else if (store.repeatMode === "track") nextMode = "off";
          store.setRepeatMode(nextMode);
       }
     });

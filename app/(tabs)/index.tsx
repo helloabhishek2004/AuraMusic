@@ -18,6 +18,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { usePlaybackInsets } from '@/src/hooks/use-playback-insets';
 import * as Haptics from 'expo-haptics';
 import { useMusic } from '@/src/context/MusicContext';
 import { usePlayerStore } from '@/src/features/player/store/player.store';
@@ -607,6 +608,7 @@ const SectionHeader = ({ title, onSeeAll }: any) => (
 // ── MAIN HOME SCREEN ───────────────────────────────────────────────────────
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const { bottomPadding } = usePlaybackInsets();
   const { goNowPlaying, goArtist, goPlaylist, goAlbum } = useMusicNavigation('home');
   const [likedSongs, setLikedSongs] = useState<Set<string>>(new Set());
   const [downloadedSongs, setDownloadedSongs] = useState<Set<string>>(new Set());
@@ -726,7 +728,8 @@ export default function HomeScreen() {
 
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={[s.scrollContent, { paddingTop: insets.top + 10, paddingBottom: 180 }]}
+        contentContainerStyle={[s.scrollContent, { paddingTop: insets.top + 10, paddingBottom: bottomPadding }]}
+        scrollIndicatorInsets={{ bottom: bottomPadding }}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
       >

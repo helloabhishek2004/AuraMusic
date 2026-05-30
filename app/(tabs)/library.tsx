@@ -60,6 +60,7 @@ import Reanimated, {
   withSequence,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePlaybackInsets } from "@/src/hooks/use-playback-insets";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { useDownloadStore } from "@/src/features/download/store/download.store";
 import type { DownloadedTrack } from "@/src/features/download/types/download";
@@ -214,7 +215,7 @@ const Mat = memo(({ children, delay = 0, style }: {
 
 // ─── Spring press hook ────────────────────────────────────────────────────────
 
-function usePress(scale = 0.93, haptic = true) {
+function usePress(scale = 0.93, haptic = false) {
   const sc = useRef(new Animated.Value(1)).current;
   const onIn = useCallback(() => {
     if (haptic) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -374,6 +375,23 @@ const HeroCard = memo(({ onPress }: { onPress: () => void }) => {
   const heartPulse = useRef(new Animated.Value(1)).current;
   const likedCount = useLikesStore((s) => Object.keys(s.likedTrackIds).length);
 
+  const newestLikedArtwork = useLikesStore((s) => {
+    if (s.latestLikedTrackId) {
+      const art = s.trackMetadata[s.latestLikedTrackId]?.art;
+      if (art && art.trim() !== "") return art;
+    }
+    const likedIds = Object.keys(s.likedTrackIds).sort(
+      (a, b) => (s.likedAt[b] || 0) - (s.likedAt[a] || 0)
+    );
+    for (const id of likedIds) {
+      const art = s.trackMetadata[id]?.art;
+      if (art && art.trim() !== "") return art;
+    }
+    return null;
+  });
+
+  const artworkSource = newestLikedArtwork || "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=800&q=80";
+
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
@@ -396,7 +414,7 @@ const HeroCard = memo(({ onPress }: { onPress: () => void }) => {
           <Glass style={{ height: HERO_H }} radius={26} blur={62}>
             {/* Art fill */}
             <Image
-              source={{ uri: "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=800&q=80" }}
+              source={{ uri: artworkSource }}
               style={[StyleSheet.absoluteFill, { borderRadius: 26 }]}
               contentFit="cover"
               transition={350}
@@ -1096,6 +1114,7 @@ const DownloadedTrackRow = memo(({
 
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
+  const { bottomPadding } = usePlaybackInsets();
   const router = useRouter();
   const { goPlaylist, goNowPlaying } = useMusicNavigation("library");
   const [activeTab, setActiveTab] = useState("Playlists");
@@ -1126,9 +1145,9 @@ export default function LibraryScreen() {
       <AmbientBG />
 
       <ScrollView
-        stickyHeaderIndices={[1]}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 160 }}
+        contentContainerStyle={{ paddingBottom: bottomPadding + 40 }}
+        scrollIndicatorInsets={{ bottom: bottomPadding + 40 }}
         scrollEventThrottle={16}
         overScrollMode="never"
       >

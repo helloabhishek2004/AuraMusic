@@ -1,103 +1,75 @@
 import { useEffect, useCallback } from "react";
-import { useSharedValue, useDerivedValue } from "react-native-reanimated";
+import { useDerivedValue, SharedValue } from "react-native-reanimated";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { useLyricsStore } from "../store/lyrics.store";
 import TrackPlayer from "@rntp/player";
+import { playbackProgress } from "@/src/features/player/services/playback-progress";
 
 export const useLyricsIntegration = (isVisible: boolean) => {
   const currentTrack = usePlayerStore((state) => state.currentTrack);
   const duration = usePlayerStore((state) => state.duration);
-  const lyrics = useLyricsStore((state) => state.lyrics);
+  const lyricsData = useLyricsStore((state) => state.lyrics);
   const fetchLyrics = useLyricsStore((state) => state.fetchLyrics);
   
-  // Progress tracking via Reanimated SharedValues (UI thread)
-  const progress = useSharedValue(0);
-  const activeLineIndex = useSharedValue(-1);
+  const activeLineIndex = usePlayerStore(s => s.activeLineIndex) || useSharedValue(-1);
   const isFollowing = useSharedValue(true);
 
-  /**
-   * Pure JS Polling Loop:
-   * Replaces `useProgress` to completely bypass React state updates.
-   * Runs at 180ms intervals directly mutating the SharedValue.
-   */
-  useEffect(() => {
-    if (!isVisible) return;
-    
-    const interval = setInterval(async () => {
-      try {
-        const { position } = await TrackPlayer.getProgress();
-        progress.value = position * 1000; // Store as ms
-      } catch (e) {
-        // Player not ready
-      }
-    }, 180); // >= 180ms per strict requirement
-
-    return () => clearInterval(interval);
-  }, [isVisible, progress]);
-
-  /**
-   * Automatically calculate active line index on UI thread.
-   */
+  // Optimized Active Line Detection on UI Thread
   useDerivedValue(() => {
-    if (!lyrics || !lyrics.lyrics || lyrics.lyrics.length === 0) {
+    if (!lyricsData?.lyrics?.length) {
       if (activeLineIndex.value !== -1) activeLineIndex.value = -1;
       return;
     }
 
-    const lines = lyrics.lyrics;
-    let index = -1;
-    const currentMs = progress.value;
+    const t = playbackProgress.positionMs.value;
+    const lines = lyricsData.lyrics;
+    const last = activeLineIndex.value;
 
-    for (let i = 0; i < lines.length; i++) {
-      if (currentMs >= lines[i].time) {
-        index = i;
-      } else {
-        break;
-      }
+    // Fast Path: Still on same line?
+    if (last >= 0 && last < lines.length) {
+      const cur = lines[last].time;
+      const nxt = lines[last].endTime || (last + 1 < lines.length ? lines[last + 1].time : Infinity);
+      if (t >= cur && t < nxt) return;
     }
 
-    if (activeLineIndex.value !== index) {
-      activeLineIndex.value = index;
+    // Forward Scan Path: Normal progression
+    if (last >= 0 && last + 1 < lines.length && lines[last + 1].time <= t) {
+      let i = last + 1;
+      while (i + 1 < lines.length && lines[i + 1].time <= t) i++;
+      activeLineIndex.value = i;
+      return;
     }
+
+    // Binary Search Fallback: Seeking / Rewinding
+    let lo = 0, hi = lines.length - 1;
+    let res = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (lines[mid].time <= t) { res = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    activeLineIndex.value = res;
   });
 
-  /**
-   * Fetch lyrics when track changes.
-   */
   useEffect(() => {
     if (!currentTrack || !isVisible) return;
-
-    fetchLyrics(
-      currentTrack.id,
-      currentTrack.title,
-      currentTrack.artist,
-      Math.round(duration)
-    );
+    fetchLyrics(currentTrack.id, currentTrack.title, currentTrack.artist, Math.round(duration));
   }, [currentTrack?.id, isVisible, duration, fetchLyrics]);
 
-  /**
-   * Performance-first seeking:
-   * Instantly updates UI state and native player position.
-   */
   const seekToLine = useCallback(async (timeMs: number) => {
-    // 1. Update UI thread immediately
-    progress.value = timeMs;
+    playbackProgress.positionMs.value = timeMs;
     isFollowing.value = true;
-
-    // 2. Update native player immediately (no debounce)
     try {
       await TrackPlayer.seekTo(timeMs / 1000);
-    } catch (e) {
-      console.warn("[Lyrics] Seek failed:", e);
-    }
-  }, [progress, isFollowing]);
+    } catch (e) {}
+  }, [isFollowing]);
 
   return {
-    lyrics: lyrics?.lyrics || [],
-    isSynced: lyrics?.synced || false,
+    lyrics: lyricsData?.lyrics || [],
+    isSynced: lyricsData?.synced || false,
     isLoading: useLyricsStore((state) => state.isLoading),
     error: useLyricsStore((state) => state.error),
-    progress,
+    progress: playbackProgress.positionMs,
     activeLineIndex,
     isFollowing,
     seekToLine

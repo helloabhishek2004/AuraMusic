@@ -23,6 +23,8 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePlaybackInsets } from "@/src/hooks/use-playback-insets";
 
 // Core imports
 import { useMusicActions, usePlaybackState } from "@/src/context/MusicContext";
@@ -60,6 +62,7 @@ const AnimatedFlashList = Animated.createAnimatedComponent(
 
 function AlbumScreen() {
   const params = useLocalSearchParams();
+  const { bottomPadding } = usePlaybackInsets();
   const router = useRouter();
   const { width, height } = useWindowDimensions();
   const responsive = useResponsiveMetrics();
@@ -435,7 +438,8 @@ function AlbumScreen() {
           }
 
           ListFooterComponent={<CreditsSection album={album} />}
-          contentContainerStyle={styles.contentContainer}
+          contentContainerStyle={[styles.contentContainer, { paddingBottom: bottomPadding }]}
+          scrollIndicatorInsets={{ bottom: bottomPadding }}
           showsVerticalScrollIndicator={false}
         />
       </Animated.View>

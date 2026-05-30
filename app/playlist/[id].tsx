@@ -33,6 +33,7 @@ import DraggableFlatList, {
   ScaleDecorator,
 } from "react-native-draggable-flatlist";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePlaybackInsets } from "@/src/hooks/use-playback-insets";
 
 import { usePressScale } from "@/src/components/ui/press-scale";
 import { useMusicControls } from "@/src/context/MusicContext";
@@ -1871,6 +1872,7 @@ const LocalPlaylistView = React.memo(
   ({ playlistId }: { playlistId: string }) => {
     const router = useRouter();
     const insets = useSafeAreaInsets();
+    const { bottomPadding } = usePlaybackInsets();
     const {
       setQueue,
       toggleShuffle,
@@ -2533,9 +2535,10 @@ const LocalPlaylistView = React.memo(
           scrollEventThrottle={16}
           contentContainerStyle={{
             paddingTop: insets.top + 16,
-            paddingBottom: 220,
+            paddingBottom: bottomPadding,
             paddingHorizontal: 20,
           }}
+          scrollIndicatorInsets={{ bottom: bottomPadding }}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>

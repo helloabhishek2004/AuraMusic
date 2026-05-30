@@ -1,4 +1,4 @@
-import TrackPlayer, { PlayerCommand } from "@rntp/player";
+import TrackPlayer, { PlayerCommand, RepeatMode as NativeRepeatMode } from "@rntp/player";
 import { Platform, Linking } from "react-native";
 import { PlayerTrack } from "../types/player";
 import {
@@ -382,11 +382,10 @@ export class PlaybackService {
   }
 
   static setShuffleMode(enabled: boolean): void {
-    if (Platform.OS === "web") return;
-    try {
-      TrackPlayer.setShuffleEnabled(enabled);
-    } catch (e) {
-      console.error("[Player] setShuffleMode failed:", e);
+    // [Aura_Stabilization] Native shuffle is completely disabled.
+    // Zustand is the sole authority for queue ordering and shuffling.
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      console.info("[Player] setShuffleMode no-op (JS-authoritative queue engine active).");
     }
   }
 
@@ -464,7 +463,20 @@ export class PlaybackService {
 
   static setRepeatMode(mode: string): void {
     if (Platform.OS === "web") return;
-    // v5 setRepeatMode takes 'off', 'track', or 'queue'
-    TrackPlayer.setRepeatMode(mode as any);
+    try {
+      const nativeMode = mode === "track" ? NativeRepeatMode.One : NativeRepeatMode.Off;
+      TrackPlayer.setRepeatMode(nativeMode);
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        if (mode === "off") {
+          console.info(`[Player] Repeat mode: OFF (native=off)`);
+        } else if (mode === "queue") {
+          console.info(`[Player] Repeat mode: QUEUE (native=off, JS auto-advance)`);
+        } else if (mode === "track") {
+          console.info(`[Player] Repeat mode: TRACK (native=one)`);
+        }
+      }
+    } catch (e) {
+      console.error("[Player] setRepeatMode failed:", e);
+    }
   }
 }

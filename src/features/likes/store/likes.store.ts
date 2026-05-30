@@ -10,6 +10,7 @@ interface LikesState {
   // to support offline/cold-start viewing without needing to resolve everything immediately.
   // However, the source of truth for the ID set is likedTrackIds.
   trackMetadata: Record<string, Partial<PlayerTrack>>;
+  latestLikedTrackId: string | null;
 }
 
 interface LikesActions {
@@ -27,6 +28,7 @@ export const useLikesStore = create<LikesState & LikesActions>()(
       likedTrackIds: {},
       likedAt: {},
       trackMetadata: {},
+      latestLikedTrackId: null,
 
       toggleLike: (track: PlayerTrack) => {
         const { likedTrackIds } = get();
@@ -53,6 +55,7 @@ export const useLikesStore = create<LikesState & LikesActions>()(
               source: track.source,
             },
           },
+          latestLikedTrackId: track.id,
         }));
 
         // Trigger Auto-Download if enabled
@@ -71,10 +74,23 @@ export const useLikesStore = create<LikesState & LikesActions>()(
           delete newIds[trackId];
           delete newTimes[trackId];
           delete newMeta[trackId];
+
+          let newLatestId = state.latestLikedTrackId;
+          if (state.latestLikedTrackId === trackId) {
+            const remainingIds = Object.keys(newIds);
+            if (remainingIds.length > 0) {
+              remainingIds.sort((a, b) => (newTimes[b] || 0) - (newTimes[a] || 0));
+              newLatestId = remainingIds[0];
+            } else {
+              newLatestId = null;
+            }
+          }
+
           return {
             likedTrackIds: newIds,
             likedAt: newTimes,
             trackMetadata: newMeta,
+            latestLikedTrackId: newLatestId,
           };
         });
       },
@@ -90,7 +106,7 @@ export const useLikesStore = create<LikesState & LikesActions>()(
       },
 
       clearLikes: () => {
-        set({ likedTrackIds: {}, likedAt: {}, trackMetadata: {} });
+        set({ likedTrackIds: {}, likedAt: {}, trackMetadata: {}, latestLikedTrackId: null });
       },
     }),
     {

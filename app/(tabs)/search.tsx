@@ -61,6 +61,7 @@ import Reanimated, {
   withSpring,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { usePlaybackInsets } from "@/src/hooks/use-playback-insets";
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -1332,6 +1333,7 @@ const SEARCH_CATEGORIES = ["All", "Songs", "Artists", "Albums"];
 
 export default function SearchScreen() {
   const insets = useSafeAreaInsets();
+  const { bottomPadding } = usePlaybackInsets();
   const { goNowPlaying, goArtist, goArtistByName, goAlbum } =
     useMusicNavigation("search");
   const { setQueue, preloadTrack, playNext, addToQueue } = useMusic();
@@ -1528,7 +1530,7 @@ export default function SearchScreen() {
   const showAlbums = activeCategory === "All" || activeCategory === "Albums";
 
   // Bottom safe zone — where thumb reaches. Keep interactive elements above insets.bottom + 80
-  const scrollBottom = insets.bottom + 120;
+  const scrollBottom = bottomPadding;
 
   return (
     <View style={s.root}>
@@ -1548,6 +1550,7 @@ export default function SearchScreen() {
             paddingBottom: scrollBottom,
           },
         ]}
+        scrollIndicatorInsets={{ bottom: scrollBottom }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"

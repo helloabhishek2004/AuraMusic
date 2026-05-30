@@ -21,7 +21,7 @@
     "@react-navigation/elements": "^2.9.14",
     "@react-navigation/native": "^7.0.0",
     "@rntp/player": "^5.0.0",
-    "@shopify/flash-list": "2.0.2",
+    "@shopify/flash-list": "^2.0.2",
     "ajv": "^8.18.0",
     "ajv-keywords": "^5.1.0",
     "axios": "^1.16.0",

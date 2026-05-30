@@ -13,6 +13,7 @@ import { makeMutable, SharedValue } from 'react-native-reanimated';
 let _positionMs: SharedValue<number> | null = null;
 let _durationMs: SharedValue<number> | null = null;
 let _bufferedMs: SharedValue<number> | null = null;
+let _progress: SharedValue<number> | null = null;
 
 export const playbackProgress = {
   /** Current playback position in milliseconds */
@@ -29,5 +30,10 @@ export const playbackProgress = {
   get bufferedMs(): SharedValue<number> {
     if (!_bufferedMs) _bufferedMs = makeMutable(0);
     return _bufferedMs;
+  },
+  /** Playback progress as a percentage (0 to 1) */
+  get progress(): SharedValue<number> {
+    if (!_progress) _progress = makeMutable(0);
+    return _progress;
   },
 };

@@ -12,6 +12,7 @@ import {
 } from "../types/player";
 import type { PlaybackContext } from '@/src/features/playlist/types/playlist';
 import { useMediaCacheStore } from "../../cache/store/media-cache.store";
+import { QueueEngine } from "../utils/queue-engine";
 
 interface ExtendedPlayerStore extends PlayerStore {
   isPreloading: boolean;
@@ -24,6 +25,7 @@ interface ExtendedPlayerStore extends PlayerStore {
   setActiveContext: (context: PlaybackContext | null) => void;
   updateTrackMetadata: (trackId: string, partial: Partial<PlayerTrack>) => void;
   restoreSession: () => Promise<void>;
+  resolveAutoAdvance: () => Promise<void>;
 }
 
 export const usePlayerStore = create<ExtendedPlayerStore>()(
@@ -59,6 +61,12 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       isReordering: false,
       isRestoringSession: false,
       _lastVolumeSync: 0,
+      _transitionGuard: {
+        inProgress: false,
+        owner: null,
+        destinationId: null,
+        operationId: 0,
+      },
 
       // Playback context (for playlist-aware queue tracking)
       activeContext: null,
@@ -171,13 +179,15 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
         const resolutionId = ++get().lastResolutionId;
         const currentTrack = get().currentTrack;
+        const guard = get()._transitionGuard;
 
-        if (currentTrack?.id === track.id && get().status === "playing") {
+        if (currentTrack?.id === track.id && get().status === "playing" && !get().isTransitioning) {
           transitionManager.setTransitioning(false);
           return;
         }
 
         set({
+          _transitionGuard: { ...guard, inProgress: true, owner: "setTrack", destinationId: track.id, operationId: guard.operationId + 1 },
           isTransitioning: true,
           previousTrack: currentTrack,
           currentTrack: track,
@@ -194,7 +204,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           const { HydrationScheduler } = await import("../services/hydration.service");
           const { MetadataCache } = await import("../../cache/services/metadata-cache.service");
 
-          const resolvedTrack = await resolveAudioOnly(track);
+          const resolvedTrack = await resolveAudioOnly(track, null, true);
 
           if (get().lastResolutionId !== resolutionId) {
             transitionManager.setTransitioning(false);
@@ -216,13 +226,15 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
           await PlaybackService.loadTrack(resolvedTrack, get().queue, get().currentIndex);
 
+          const resolvedGuard = get()._transitionGuard;
           set({
             currentTrack: resolvedTrack,
             status: "playing",
             isPlaying: true,
             isBuffering: false,
             isTransitioning: false,
-            preloadedTrack: null
+            preloadedTrack: null,
+            _transitionGuard: { ...resolvedGuard, inProgress: false, owner: null, destinationId: null }
           });
 
           transitionManager.setTransitioning(false);
@@ -233,12 +245,14 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         } catch (error) {
           if (get().lastResolutionId === resolutionId) {
             transitionManager.setTransitioning(false);
+            const errGuard = get()._transitionGuard;
             set({
               status: "error",
               error: (error as Error).message || "Playback failed",
               isPlaying: false,
               isBuffering: false,
-              isTransitioning: false
+              isTransitioning: false,
+              _transitionGuard: { ...errGuard, inProgress: false, owner: null, destinationId: null }
             });
           }
         }
@@ -316,20 +330,48 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       },
 
       preloadNext: async () => {
-        const { queue, currentIndex, preloadedTrack, isPreloading, currentTrack } = get();
+        const { queue, currentIndex, preloadedTrack, isPreloading, currentTrack, repeatMode } = get();
         if (queue.length === 0 || isPreloading || !currentTrack) return;
 
-        const nextIndex = (currentIndex + 1) % queue.length;
-        const nextTrack = queue[nextIndex];
+        // Level 2 Preload: background metadata enrichment for the next 10 tracks
+        try {
+          const { HydrationScheduler } = await import("../services/hydration.service");
+          for (let i = 1; i <= 10; i++) {
+            const idx = (currentIndex + i) % queue.length;
+            const track = queue[idx];
+            if (track && track.id !== currentTrack.id) {
+              HydrationScheduler.scheduleHydration(track);
+            }
+          }
+        } catch (e) {
+          console.warn("[PlayerStore] Level 2 preload failed:", e);
+        }
 
+        const nextIndex = QueueEngine.resolvePreloadIndex(currentIndex, queue.length, repeatMode);
+        if (nextIndex === -1) return;
+        
+        const nextTrack = queue[nextIndex];
         if (!nextTrack) return;
         
         // Predictive metadata enrichment for next track
         const { TrackOrchestrator } = await import("../services/track-orchestrator");
         TrackOrchestrator.prefetchMetadata(nextTrack);
 
-        if (preloadedTrack && preloadedTrack.id === nextTrack.id) return;
-        if (transitionManager.getCachedTrack(nextTrack.id)) return;
+        // [Aura_Preload_Fix] Always push resolved URL to native player.
+        // Check preloadedTrack (store-level cache), then transitionManager cache.
+        if (preloadedTrack && preloadedTrack.id === nextTrack.id) {
+          PlaybackService.updateMediaItem(nextIndex, preloadedTrack);
+          return;
+        }
+
+        const cachedFromManager = transitionManager.getCachedTrack(nextTrack.id);
+        if (cachedFromManager) {
+          PlaybackService.updateMediaItem(nextIndex, cachedFromManager);
+          const newQueue = [...get().queue];
+          newQueue[nextIndex] = cachedFromManager;
+          set({ queue: newQueue });
+          return;
+        }
 
         set({ isPreloading: true });
 
@@ -349,9 +391,32 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
             set({ queue: newQueue, isPreloading: false });
           }
 
-          const secondIndex = (nextIndex + 1) % queue.length;
-          if (secondIndex !== nextIndex && queue[secondIndex]) {
-            transitionManager.preloadSecondaryTrack(queue[secondIndex], currentTrack.id);
+          // [Aura_Preload_Fix] Preload multiple tracks ahead for skip resilience
+          const secondIndex = QueueEngine.resolvePreloadIndex(nextIndex, queue.length, repeatMode);
+          if (secondIndex !== -1 && secondIndex !== nextIndex && queue[secondIndex]) {
+            const secondTrack = queue[secondIndex];
+            transitionManager.preloadSecondaryTrack(secondTrack, currentTrack.id);
+            // Push second track's cached URL to native if already resolved
+            const cachedSecond = transitionManager.getCachedTrack(secondTrack.id);
+            if (cachedSecond) {
+              PlaybackService.updateMediaItem(secondIndex, cachedSecond);
+              newQueue[secondIndex] = cachedSecond;
+            }
+          }
+          const thirdIndex = secondIndex !== -1
+            ? QueueEngine.resolvePreloadIndex(secondIndex, queue.length, repeatMode)
+            : -1;
+          if (thirdIndex !== -1 && thirdIndex !== secondIndex && thirdIndex !== nextIndex && queue[thirdIndex]) {
+            const thirdTrack = queue[thirdIndex];
+            transitionManager.preloadSecondaryTrack(thirdTrack, currentTrack.id);
+            const cachedThird = transitionManager.getCachedTrack(thirdTrack.id);
+            if (cachedThird) {
+              PlaybackService.updateMediaItem(thirdIndex, cachedThird);
+              newQueue[thirdIndex] = cachedThird;
+            }
+          }
+          if (secondIndex !== -1 || thirdIndex !== -1) {
+            set({ queue: newQueue });
           }
         } else {
           set({ isPreloading: false });
@@ -366,20 +431,36 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
             return cached ? { ...t, ...cached.track } : t;
         });
 
-        const activeQueue = [...hydratedTracks];
-        const newStartIndex = startIndex;
+        const original = [...hydratedTracks];
+        const isShuffle = get().isShuffle;
+
+        let activeQueue = [...original];
+        let targetIndex = startIndex;
+
+        if (isShuffle && original.length > 0) {
+          const startingTrack = original[startIndex];
+          if (startingTrack) {
+            const remainingTracks = original.filter((_, idx) => idx !== startIndex);
+            const shuffledRemaining = [...remainingTracks].sort(() => Math.random() - 0.5);
+            activeQueue = [startingTrack, ...shuffledRemaining];
+            targetIndex = 0;
+          }
+        }
+
+        // [Aura_Queue_Fix] Invalidate and clean up unused preloaded track cache entries when queue changes
+        transitionManager.clearCache();
 
         set({
           queue: activeQueue,
-          originalQueue: [...hydratedTracks],
-          currentIndex: newStartIndex,
+          originalQueue: original,
+          currentIndex: targetIndex,
         });
 
-        await get().setTrack(activeQueue[newStartIndex]);
+        await get().setTrack(activeQueue[targetIndex]);
       },
 
       playNext: async (track: PlayerTrack) => {
-        const { queue, originalQueue, currentIndex } = get();
+        const { queue, originalQueue, currentIndex, isShuffle } = get();
         
         const cacheStore = useMediaCacheStore.getState();
         const cached = cacheStore.getCachedTrack(track.id);
@@ -392,9 +473,22 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           const newQueue = [...queue];
           newQueue.splice(currentIndex + 1, 0, hydratedTrack);
 
-          const newOriginal = [...originalQueue];
-          if (!newOriginal.find(t => t.id === hydratedTrack.id)) {
-            newOriginal.push(hydratedTrack);
+          // [Aura_Queue_Fix] When shuffle is OFF, insert in originalQueue at the
+          // matching position (after the current track). When shuffle is ON, append.
+          let newOriginal: PlayerTrack[];
+          if (!isShuffle) {
+            newOriginal = [...originalQueue];
+            const currentOrigIdx = newOriginal.findIndex(t => t.id === queue[currentIndex]?.id);
+            if (currentOrigIdx !== -1 && !newOriginal.find(t => t.id === hydratedTrack.id)) {
+              newOriginal.splice(currentOrigIdx + 1, 0, hydratedTrack);
+            } else if (!newOriginal.find(t => t.id === hydratedTrack.id)) {
+              newOriginal.push(hydratedTrack);
+            }
+          } else {
+            newOriginal = [...originalQueue];
+            if (!newOriginal.find(t => t.id === hydratedTrack.id)) {
+              newOriginal.push(hydratedTrack);
+            }
           }
 
           set({ queue: newQueue, originalQueue: newOriginal });
@@ -427,10 +521,12 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       },
 
       removeFromQueue: async (index: number) => {
-        const { queue, currentIndex } = get();
+        const { queue, originalQueue, currentIndex } = get();
         if (index < 0 || index >= queue.length) return;
 
         if (index === currentIndex) return;
+
+        const removedTrack = queue[index];
 
         try {
           await PlaybackService.removeTrack(index);
@@ -439,17 +535,25 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           const newQueue = [...queue];
           newQueue.splice(index, 1);
 
+          // [Aura_Queue_Fix] Always remove from originalQueue too to prevent
+          // stale tracks from reappearing when shuffle is turned off.
+          const newOriginal = [...originalQueue];
+          const origIdx = newOriginal.findIndex(t => t.id === removedTrack.id);
+          if (origIdx !== -1) {
+            newOriginal.splice(origIdx, 1);
+          }
+
           let newIndex = currentIndex;
           if (index < currentIndex) newIndex--;
 
-          set({ queue: newQueue, currentIndex: newIndex });
+          set({ queue: newQueue, originalQueue: newOriginal, currentIndex: newIndex });
         } catch (e) {
           console.error("[PlayerStore] Native removeFromQueue failed", e);
         }
       },
 
       reorderQueue: async (from: number, to: number) => {
-        const { queue, originalQueue, currentIndex, isReordering } = get();
+        const { queue, originalQueue, currentIndex, isReordering, isShuffle } = get();
 
         if (isReordering || from === to) return;
         set({ isReordering: true });
@@ -465,6 +569,19 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           const [movedItem] = newQueue.splice(from, 1);
           newQueue.splice(to, 0, movedItem);
 
+          // [Aura_Queue_Fix] When shuffle is OFF, keep originalQueue in sync with user reorder.
+          // When shuffle is ON, the shuffle order is temporary; originalQueue stays as-is.
+          let newOriginal = originalQueue;
+          if (!isShuffle) {
+            newOriginal = [...originalQueue];
+            const origFrom = newOriginal.findIndex(t => t.id === movedItem.id);
+            if (origFrom !== -1) {
+              const [origItem] = newOriginal.splice(origFrom, 1);
+              const origTo = Math.min(to, newOriginal.length);
+              newOriginal.splice(origTo, 0, origItem);
+            }
+          }
+
           let newIndex = currentIndex;
           if (currentIndex === from) {
             newIndex = to;
@@ -476,6 +593,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
           set({
             queue: newQueue,
+            originalQueue: newOriginal,
             currentIndex: newIndex,
           });
 
@@ -485,19 +603,22 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
               const active = await TrackPlayer.getActiveMediaItem();
               if (active) {
                   const verifiedIndex = newQueue.findIndex(t => t.id === (active as any).id || t.id === (active as any).mediaId);
-                  if (verifiedIndex !== -1 && verifiedIndex !== newIndex) {
+                  if (verifiedIndex !== -1 && verifiedIndex !== get().currentIndex) {
                       set({ currentIndex: verifiedIndex });
                   }
               }
 
-              // REPAIR: Resolve and push the NEW next track URL to native player immediately
-              const repairIndex = (get().currentIndex + 1) % newQueue.length;
-              const repairTrack = newQueue[repairIndex];
-              if (repairTrack) {
-                  const { resolveTrack } = await import("../utils/track-resolver");
-                  const resolved = await resolveTrack(repairTrack);
-                  if (resolved.url) {
-                      PlaybackService.updateMediaItem(repairIndex, resolved);
+              // REPAIR: Resolve and push the next track URL (don't wrap at end)
+              const currentIdx = get().currentIndex;
+              if (currentIdx < newQueue.length - 1) {
+                  const repairIndex = currentIdx + 1;
+                  const repairTrack = newQueue[repairIndex];
+                  if (repairTrack) {
+                      const { resolveTrack } = await import("../utils/track-resolver");
+                      const resolved = await resolveTrack(repairTrack);
+                      if (resolved.url) {
+                          PlaybackService.updateMediaItem(repairIndex, resolved);
+                      }
                   }
               }
           } catch (e) {}
@@ -507,15 +628,17 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         } finally {
           PlaybackService.setReordering(false);
           set({ isReordering: false });
+          // [Aura_Queue_Fix] Queue topology changed — all preload assumptions are invalid.
+          // Invalidate every cached preload so the rebuild starts from fresh resolutions.
+          transitionManager.clearCache();
           get().preloadNext();
         }
       },
 
       jumpToQueueIndex: async (index: number) => {
-        const { queue } = get();
+        const { queue, _transitionGuard } = get();
         if (index < 0 || index >= queue.length) return;
 
-        // [Aura_Transition_Hardening] Optimistically update store metadata instantly
         set({
           currentIndex: index,
           currentTrack: queue[index],
@@ -524,6 +647,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           isTransitioning: true,
           status: "buffering",
           isBuffering: true,
+          _transitionGuard: { ..._transitionGuard, inProgress: true, owner: "jump", destinationId: queue[index].id, operationId: _transitionGuard.operationId + 1 }
         });
         await get().setTrack(queue[index]);
       },
@@ -565,70 +689,289 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       },
 
       next: async () => {
-        const { queue, isTransitioning, currentIndex } = get();
+        const { queue, repeatMode } = get();
+        if (queue.length === 0) return;
 
-        if (queue.length === 0 || isTransitioning) return;
-        if (transitionManager.getTransitionState()) return;
+        // Increment resolution ID to cancel any in-flight skips
+        const resolutionId = ++get().lastResolutionId;
 
-        const nextIndex = (currentIndex + 1) % queue.length;
-        const nextTrack = queue[nextIndex];
-        if (nextTrack) {
-          // [Aura_Transition_Hardening] Optimistically update store metadata instantly
-          set({
-            currentIndex: nextIndex,
-            currentTrack: nextTrack,
-            lyrics: null,
-            isLyricsLoading: false,
-            isTransitioning: true,
-            status: "buffering",
-            isBuffering: true,
-          });
+        // Calculate next index based on the store's current (possibly optimistic) index
+        const currentIndex = get().currentIndex;
+        const nextIndex = QueueEngine.getNextIndex(currentIndex, queue.length, repeatMode);
+        if (nextIndex === -1) {
+          await get().stop();
+          return;
         }
 
+        const nextTrack = queue[nextIndex];
+        const guard = get()._transitionGuard;
+
+        // Optimistically update the store state immediately to reflect the skip in UI
+        set({
+          currentIndex: nextIndex,
+          currentTrack: nextTrack,
+          status: "buffering",
+          isBuffering: true,
+          isTransitioning: true,
+          position: 0,
+          lyrics: null,
+          error: null,
+          _transitionGuard: { 
+            ...guard, 
+            inProgress: true, 
+            owner: "skip", 
+            destinationId: nextTrack.id, 
+            operationId: guard.operationId + 1 
+          }
+        });
+
+        let resolved = nextTrack;
         try {
+          // Resolve target URL with retry before skipping.
+          if (!nextTrack.isLocal) {
+            const { isResolvedUrl, resolveAudioOnly } = await import("../utils/track-resolver");
+            if (!isResolvedUrl(nextTrack.url)) {
+              const delays = [500, 1000, 2000];
+              for (let attempt = 0; attempt <= delays.length; attempt++) {
+                // Abort if superseded
+                if (get().lastResolutionId !== resolutionId) return;
+
+                try {
+                  const r = await resolveAudioOnly(attempt === 0 ? nextTrack : resolved, null, true);
+                  if (r && r.url && isResolvedUrl(r.url)) {
+                    resolved = r;
+                    break;
+                  }
+                } catch (e) {
+                  if (attempt < delays.length) {
+                    console.warn(`[PlayerStore] next resolve attempt ${attempt + 1}/${delays.length + 1} failed, retrying in ${delays[attempt]}ms`);
+                    await new Promise(r => setTimeout(r, delays[attempt]));
+                  }
+                }
+              }
+
+              // Abort if superseded
+              if (get().lastResolutionId !== resolutionId) return;
+
+              if (!isResolvedUrl(resolved.url)) {
+                const failGuard = get()._transitionGuard;
+                set({
+                  isTransitioning: false,
+                  error: "Unable to load track. Tap to retry.",
+                  _transitionGuard: { ...failGuard, inProgress: false, owner: null, destinationId: null }
+                });
+                return;
+              }
+
+              // Update the queue in the store with the resolved track
+              const updatedQueue = [...get().queue];
+              const resolvedIdx = updatedQueue.findIndex(t => t.id === resolved.id);
+              if (resolvedIdx !== -1) {
+                updatedQueue[resolvedIdx] = resolved;
+                set({ queue: updatedQueue });
+              }
+            }
+          }
+
+          // Abort if superseded
+          if (get().lastResolutionId !== resolutionId) return;
+
+          // Mirror the resolved track natively before skipping
+          await PlaybackService.updateMediaItem(nextIndex, resolved);
+
+          // Abort if superseded
+          if (get().lastResolutionId !== resolutionId) return;
+
           await PlaybackService.skipToNext();
+
+          // Reset transition guard upon successful skipping
+          const finalGuard = get()._transitionGuard;
+          set({
+            isTransitioning: false,
+            _transitionGuard: { ...finalGuard, inProgress: false, owner: null, destinationId: null }
+          });
+
+          // Trigger preloading for the next songs
+          get().preloadNext();
         } catch (e) {
-          console.warn("[PlayerStore] Native skipToNext failed:", e);
+          console.warn("[PlayerStore] skipToNext failed:", e);
+          if (get().lastResolutionId === resolutionId) {
+            const failGuard = get()._transitionGuard;
+            set({ isTransitioning: false, _transitionGuard: { ...failGuard, inProgress: false, owner: null, destinationId: null } });
+          }
         }
       },
 
       previous: async () => {
-        const { queue, isTransitioning, position, currentIndex } = get();
-        if (queue.length === 0 || isTransitioning) return;
+        const { queue, repeatMode } = get();
+        if (queue.length === 0) return;
 
-        let posMs = position;
+        let posMs = get().position;
         try {
           const TrackPlayer = require("@rntp/player").default;
           const p = await TrackPlayer.getProgress();
           if (p && p.position) posMs = p.position * 1000;
         } catch(e) {}
 
-        // If we are more than 5 seconds into the track, seeking to 0 is standard behavior
-        if (posMs > 5000) {
+        if (posMs > 3000) {
           await get().seek(0);
           await get().play();
           return;
         }
 
-        const prevIndex = (currentIndex - 1 + queue.length) % queue.length;
-        const prevTrack = queue[prevIndex];
-        if (prevTrack) {
-          // [Aura_Transition_Hardening] Optimistically update store metadata instantly
-          set({
-            currentIndex: prevIndex,
-            currentTrack: prevTrack,
-            lyrics: null,
-            isLyricsLoading: false,
-            isTransitioning: true,
-            status: "buffering",
-            isBuffering: true,
-          });
+        // Increment resolution ID to cancel any in-flight skips
+        const resolutionId = ++get().lastResolutionId;
+
+        // Calculate previous index based on the store's current (possibly optimistic) index
+        const currentIndex = get().currentIndex;
+        const prevIndex = QueueEngine.getPreviousIndex(currentIndex, queue.length, repeatMode);
+        if (prevIndex === -1) {
+          await get().seek(0);
+          await get().play();
+          return;
         }
 
+        const prevTrack = queue[prevIndex];
+        const guard = get()._transitionGuard;
+
+        // Optimistically update the store state immediately to reflect the skip in UI
+        set({
+          currentIndex: prevIndex,
+          currentTrack: prevTrack,
+          status: "buffering",
+          isBuffering: true,
+          isTransitioning: true,
+          position: 0,
+          lyrics: null,
+          error: null,
+          _transitionGuard: { 
+            ...guard, 
+            inProgress: true, 
+            owner: "previous", 
+            destinationId: prevTrack.id, 
+            operationId: guard.operationId + 1 
+          }
+        });
+
+        let resolved = prevTrack;
         try {
+          // Resolve target URL with retry before skipping.
+          if (!prevTrack.isLocal) {
+            const { isResolvedUrl, resolveAudioOnly } = await import("../utils/track-resolver");
+            if (!isResolvedUrl(prevTrack.url)) {
+              const delays = [500, 1000, 2000];
+              for (let attempt = 0; attempt <= delays.length; attempt++) {
+                // Abort if superseded
+                if (get().lastResolutionId !== resolutionId) return;
+
+                try {
+                  const r = await resolveAudioOnly(attempt === 0 ? prevTrack : resolved, null, true);
+                  if (r && r.url && isResolvedUrl(r.url)) {
+                    resolved = r;
+                    break;
+                  }
+                } catch (e) {
+                  if (attempt < delays.length) {
+                    console.warn(`[PlayerStore] previous resolve attempt ${attempt + 1}/${delays.length + 1} failed, retrying in ${delays[attempt]}ms`);
+                    await new Promise(r => setTimeout(r, delays[attempt]));
+                  }
+                }
+              }
+
+              // Abort if superseded
+              if (get().lastResolutionId !== resolutionId) return;
+
+              if (!isResolvedUrl(resolved.url)) {
+                const failGuard = get()._transitionGuard;
+                set({
+                  isTransitioning: false,
+                  error: "Unable to load track. Tap to retry.",
+                  _transitionGuard: { ...failGuard, inProgress: false, owner: null, destinationId: null }
+                });
+                return;
+              }
+
+              // Update the queue in the store with the resolved track
+              const updatedQueue = [...get().queue];
+              const resolvedIdx = updatedQueue.findIndex(t => t.id === resolved.id);
+              if (resolvedIdx !== -1) {
+                updatedQueue[resolvedIdx] = resolved;
+                set({ queue: updatedQueue });
+              }
+            }
+          }
+
+          // Abort if superseded
+          if (get().lastResolutionId !== resolutionId) return;
+
+          // Mirror the resolved track natively before skipping
+          await PlaybackService.updateMediaItem(prevIndex, resolved);
+
+          // Abort if superseded
+          if (get().lastResolutionId !== resolutionId) return;
+
           await PlaybackService.skipToPrevious();
+
+          // Reset transition guard upon successful skipping
+          const finalGuard = get()._transitionGuard;
+          set({
+            isTransitioning: false,
+            _transitionGuard: { ...finalGuard, inProgress: false, owner: null, destinationId: null }
+          });
+
+          // Trigger preloading for the next songs
+          get().preloadNext();
         } catch (e) {
-          console.warn("[PlayerStore] Native skipToPrevious failed:", e);
+          console.warn("[PlayerStore] skipToPrevious failed:", e);
+          if (get().lastResolutionId === resolutionId) {
+            const failGuard = get()._transitionGuard;
+            set({ isTransitioning: false, _transitionGuard: { ...failGuard, inProgress: false, owner: null, destinationId: null } });
+          }
+        }
+      },
+
+      resolveAutoAdvance: async () => {
+        const { queue, currentIndex, repeatMode, isTransitioning, currentTrack, _transitionGuard } = get();
+        console.info(`[AutoAdvance]
+ repeat=${repeatMode}
+ currentIndex=${currentIndex}
+ currentTrack=${currentTrack?.title}`);
+        if (queue.length === 0 || isTransitioning) return;
+
+        const nextIndex = QueueEngine.resolveAutoAdvance(currentIndex, queue.length, repeatMode);
+        console.info(`[AutoAdvance] nextIndex=${nextIndex} mode=${repeatMode === 'track' ? 'RELOAD' : repeatMode === 'queue' ? 'WRAP' : 'ADVANCE'}`);
+        if (nextIndex === -1) {
+          await get().stop();
+          return;
+        }
+
+        if (repeatMode === 'track' && currentTrack) {
+          set({
+            isTransitioning: true,
+            position: 0,
+            _transitionGuard: { ..._transitionGuard, inProgress: true, owner: "autoAdvance", destinationId: currentTrack.id, operationId: _transitionGuard.operationId + 1 }
+          });
+          try {
+            await get().setTrack(currentTrack);
+          } catch (e) {
+            console.warn("[PlayerStore] resolveAutoAdvance track-repeat reload failed:", e);
+            const failGuard = get()._transitionGuard;
+            set({ isTransitioning: false, _transitionGuard: { ...failGuard, inProgress: false, owner: null, destinationId: null } });
+          }
+          return;
+        }
+
+        const nextTrack = queue[nextIndex];
+        set({
+          isTransitioning: true,
+          _transitionGuard: { ..._transitionGuard, inProgress: true, owner: "autoAdvance", destinationId: nextTrack.id, operationId: _transitionGuard.operationId + 1 }
+        });
+        try {
+          await PlaybackService.skipToNext();
+        } catch (e) {
+          console.warn("[PlayerStore] resolveAutoAdvance skipToNext failed:", e);
+          const failGuard = get()._transitionGuard;
+          set({ isTransitioning: false, _transitionGuard: { ...failGuard, inProgress: false, owner: null, destinationId: null } });
         }
       },
 
@@ -671,12 +1014,66 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         set({ repeatMode: newMode });
       },
 
-      toggleShuffle: () => {
-        const { isShuffle } = get();
+      toggleShuffle: async () => {
+        const { isShuffle, queue, originalQueue, currentTrack } = get();
         const newShuffle = !isShuffle;
 
-        PlaybackService.setShuffleMode(newShuffle);
-        set({ isShuffle: newShuffle });
+        if (!currentTrack || queue.length === 0) {
+          set({ isShuffle: newShuffle });
+          return;
+        }
+
+        // [Aura_Shuffle_Fix] Freshly resolve current track URL before rebuilding
+        // native queue. The current track's native media item gets replaced during
+        // updateQueue — if its URL is stale, the native player will emit a source
+        // error before JS can intervene.
+        const { isResolvedUrl, resolveAudioOnly } = await import("../utils/track-resolver");
+        let freshCurrent = currentTrack;
+        if (!currentTrack.isLocal) {
+          try {
+            const resolved = await resolveAudioOnly({ ...currentTrack, url: "" }, null, true);
+            if (resolved && resolved.url) {
+              freshCurrent = resolved;
+            }
+          } catch (e) {
+            console.warn("[PlayerStore] Shuffle pre-resolve failed, using existing URL", e);
+          }
+        }
+
+        if (newShuffle) {
+          // Shuffle ON
+          const shuffledQueue = QueueEngine.buildShuffledQueue(queue, freshCurrent);
+          // Replace current track in queue with freshly resolved version
+          const resolvedQueue = shuffledQueue.map(t => t.id === freshCurrent.id ? freshCurrent : t);
+
+          set({
+            isShuffle: newShuffle,
+            queue: resolvedQueue,
+            currentIndex: 0,
+            currentTrack: freshCurrent,
+          });
+
+          // Mirror the shuffled queue natively (current track is stable anchor at index 0)
+          await PlaybackService.updateQueue(resolvedQueue, 0);
+        } else {
+          // Shuffle OFF
+          const { queue: restoredQueue, restoredIndex } = QueueEngine.restoreOriginalQueue(
+            originalQueue,
+            freshCurrent
+          );
+          // Replace current track in queue with freshly resolved version
+          const resolvedQueue = restoredQueue.map(t => t.id === freshCurrent.id ? freshCurrent : t);
+
+          set({
+            isShuffle: newShuffle,
+            queue: resolvedQueue,
+            currentIndex: restoredIndex,
+            currentTrack: freshCurrent,
+          });
+
+          // Mirror restored sequential queue natively keeping current track active
+          await PlaybackService.updateQueue(resolvedQueue, restoredIndex);
+        }
       },
 
       updateProgress: (position: number, duration: number, buffered: number) => {
@@ -716,11 +1113,12 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         }
 
         if (s.isPlaying && !s.isTransitioning && !s.isPreloading && transitionManager.shouldPreload(position, duration)) {
-          const nextIndex = (s.currentIndex + 1) % s.queue.length;
-          const nextTrack = s.queue[nextIndex];
-
-          if (nextTrack && nextTrack.id !== s.currentTrack?.id) {
-            transitionManager.preloadNextTrack(nextTrack, s.currentTrack?.id || '');
+          const nextIndex = QueueEngine.resolvePreloadIndex(s.currentIndex, s.queue.length, s.repeatMode);
+          if (nextIndex !== -1) {
+            const nextTrack = s.queue[nextIndex];
+            if (nextTrack && nextTrack.id !== s.currentTrack?.id) {
+              transitionManager.preloadNextTrack(nextTrack, s.currentTrack?.id || '');
+            }
           }
         }
       },

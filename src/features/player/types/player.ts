@@ -19,6 +19,15 @@ export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'buffer
 
 export type RepeatMode = 'off' | 'track' | 'queue';
 
+export type TransitionGuardOwner = 'setTrack' | 'skip' | 'previous' | 'autoAdvance' | 'jump';
+
+export interface TransitionGuard {
+  inProgress: boolean;
+  owner: TransitionGuardOwner | null;
+  destinationId: string | null;
+  operationId: number;
+}
+
 export interface PlaybackState {
   currentTrack: PlayerTrack | null;
   previousTrack: PlayerTrack | null;
@@ -40,6 +49,7 @@ export interface PlaybackState {
   isTransitioning: boolean;
   isPreloading: boolean;
   isReordering: boolean;
+  _transitionGuard: TransitionGuard;
   lyrics: any;
   isLyricsLoading: boolean;
 }

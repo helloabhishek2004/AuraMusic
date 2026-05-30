@@ -122,6 +122,55 @@ export class DownloadManager {
     try {
       // 1. Resolve stream URL if not present (with in-memory cache)
       let streamUrl = task.track.url;
+
+      // [Aura_Ownership] If the track URL is already a local file, import it
+      // to the downloads directory instead of entering the HTTP download pipeline.
+      // This handles cached streaming tracks, device-local files, and re-downloads.
+      if (streamUrl) {
+        const { getUriScheme } = await import("../../player/utils/track-resolver");
+        const scheme = getUriScheme(streamUrl);
+        if (scheme === 'file' || scheme === 'content') {
+          logger.info(`[Download] Importing local file for ${task.track.title} (${trackId})`);
+
+          const sourcePath = streamUrl.replace(/^file:\/\//, '');
+          const audioPath = StorageService.getAudioPath(trackId);
+
+          try {
+            await FileSystem.copyAsync({ from: sourcePath, to: audioPath });
+          } catch {
+            await FileSystem.moveAsync({ from: sourcePath, to: audioPath });
+          }
+
+          const localUri = audioPath.startsWith('file://') ? audioPath : `file://${audioPath}`;
+
+          let localArtPath = '';
+          if (task.track.art) {
+            const artPath = StorageService.getArtworkPath(trackId);
+            try {
+              const result = await FileSystem.downloadAsync(task.track.art, artPath);
+              localArtPath = result.uri;
+            } catch (e) {
+              logger.warn("[Download] Artwork download failed for", trackId);
+            }
+          }
+
+          const downloadedTrack: DownloadedTrack = {
+            ...task.track,
+            url: localUri,
+            localAudioPath: localUri,
+            localArtPath: localArtPath,
+            downloadedAt: Date.now(),
+            fileSize: await StorageService.getFileSize(audioPath),
+            isLocal: true,
+          };
+
+          useDownloadStore.getState().setDownloaded(downloadedTrack);
+          DownloadNotificationService.showCompleted(1);
+          logger.info(`[Download] Imported local file: ${task.track.title} (${trackId})`);
+          return;
+        }
+      }
+
       if (!streamUrl || streamUrl.includes("googlevideo.com")) {
         if (resolvedStreamCache[trackId]) {
           streamUrl = resolvedStreamCache[trackId];

@@ -1,28 +1,32 @@
-import React, { memo, useCallback, useRef, useEffect } from "react";
+import React, { memo, useCallback, useRef, useEffect, useState } from "react";
 import {
   StyleSheet,
   View,
-  Pressable,
   LayoutChangeEvent,
-  useWindowDimensions
+  useWindowDimensions,
+  Platform,
+  ActivityIndicator
 } from "react-native";
 import Animated, {
   useAnimatedStyle,
   useAnimatedScrollHandler,
   useAnimatedReaction,
-  scrollTo,
   useAnimatedRef,
   withTiming,
   SharedValue,
-  interpolate,
-  Extrapolation,
   runOnJS,
-  useSharedValue
+  useSharedValue,
+  interpolate,
+  Extrapolation
 } from "react-native-reanimated";
+import { FlashList } from "@shopify/flash-list";
 import { palette, spacing, typography } from "@/src/design/tokens";
+
+const AnimatedFlashList = Animated.createAnimatedComponent(FlashList);
 
 interface LyricLineData {
   time: number;
+  endTime: number;
   text: string;
 }
 
@@ -30,57 +34,50 @@ interface LyricLineProps {
   item: LyricLineData;
   index: number;
   activeLineIndex: SharedValue<number>;
-  lineOffsets: SharedValue<number[]>;
-  isFollowing: SharedValue<boolean>;
   onPress: (time: number) => void;
 }
 
-const LyricLine = memo(({ item, index, activeLineIndex, lineOffsets, isFollowing, onPress }: LyricLineProps) => {
+const LyricLine = memo(({ item, index, activeLineIndex, onPress }: LyricLineProps) => {
   const animatedStyle = useAnimatedStyle(() => {
-    const distance = Math.abs(activeLineIndex.value - index);
-    const isActive = activeLineIndex.value === index;
-    
+    "worklet";
+    const ai = activeLineIndex.value;
+    const isActive = ai === index;
+    const dist = Math.abs(index - ai);
+    const isUpcoming = index > ai;
+
+    // Distance-Based Easing Gate: Distant lines use static low-cost styles
+    if (dist > 2) {
+      return {
+        opacity: isUpcoming ? 0.3 : 0.2,
+        transform: [{ scale: 0.96 }],
+      };
+    }
+
     return {
-      opacity: withTiming(interpolate(
-        distance,
-        [0, 1, 3],
-        [1, 0.5, 0.3],
-        Extrapolation.CLAMP
-      ), { duration: 200 }),
-      transform: [
-        { scale: withTiming(isActive ? 1.05 : 1.0, { duration: 200 }) }
-      ],
+      opacity: withTiming(isActive ? 1.0 : 0.55, { duration: 200 }),
+      transform: [{ scale: withTiming(isActive ? 1.05 : 1.0, { duration: 200 }) }],
     };
   });
 
   const textStyle = useAnimatedStyle(() => {
+    "worklet";
     const isActive = activeLineIndex.value === index;
     return {
       color: isActive ? palette.primary : palette.ink,
-      fontWeight: isActive ? "700" : "500" as any,
+      fontWeight: isActive ? "700" : "500",
     };
   });
 
-  const handleLayout = useCallback((e: LayoutChangeEvent) => {
-    if (lineOffsets.value[index] === undefined) {
-      lineOffsets.value[index] = e.nativeEvent.layout.y;
-      // Force trigger reaction by reassigning reference
-      lineOffsets.value = [...lineOffsets.value];
-
-      if (lineOffsets.value.length > 0 && !isFollowing.value) {
-        isFollowing.value = true;
-      }
-    }
-  }, [index, lineOffsets, isFollowing]);
-
   return (
-    <Pressable onPress={() => onPress(item.time)} onLayout={handleLayout}>
-      <Animated.View style={[styles.lineWrapper, animatedStyle]}>
-        <Animated.Text style={[styles.lineText, textStyle]}>
-          {item.text || "♪"}
-        </Animated.Text>
-      </Animated.View>
-    </Pressable>
+    <Animated.View style={[styles.lineWrapper, animatedStyle]}>
+      <Animated.Text 
+        onPress={() => onPress(item.time)}
+        style={[styles.lineText, textStyle]}
+        suppressHighlighting
+      >
+        {item.text || "♪"}
+      </Animated.Text>
+    </Animated.View>
   );
 });
 
@@ -105,191 +102,96 @@ export const LyricsDisplay = memo(({
   isLoading,
   error
 }: LyricsDisplayProps) => {
-  const scrollRef = useAnimatedRef<Animated.ScrollView>();
-  const resumeTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const flashListRef = useAnimatedRef<any>();
+  const { height: windowHeight } = useWindowDimensions();
+  const listHeight = useSharedValue(windowHeight * 0.6);
 
-  // Cached layout values
-  const containerHeight = useSharedValue(0);
-  const lineOffsets = useSharedValue<number[]>([]);
   const lastScrolledIndex = useSharedValue(-1);
 
-  // Clear offsets and scroll state when lyrics change or orientation changes
-  useEffect(() => {
-    lineOffsets.value = [];
-    lastScrolledIndex.value = -1;
-  }, [lyrics, windowWidth, windowHeight, lineOffsets, lastScrolledIndex]);
-
-  const handleContainerLayout = useCallback((e: LayoutChangeEvent) => {
-    containerHeight.value = e.nativeEvent.layout.height;
-  }, [containerHeight]);
-
-  const startResumeTimer = useCallback(() => {
-    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
-    resumeTimerRef.current = setTimeout(() => {
-      isFollowing.value = true;
-    }, 2000);
-  }, [isFollowing]);
-
-  const clearResumeTimer = useCallback(() => {
-    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
-  }, []);
-
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
-    };
+  const onLayout = useCallback((e: LayoutChangeEvent) => {
+    listHeight.value = e.nativeEvent.layout.height;
   }, []);
 
   const scrollHandler = useAnimatedScrollHandler({
-    onBeginDrag: () => {
-      isFollowing.value = false;
-      runOnJS(clearResumeTimer)();
-    },
-    onEndDrag: () => {
-      runOnJS(startResumeTimer)();
-    },
-    onMomentumEnd: () => {
-      runOnJS(startResumeTimer)();
-    }
+    onBeginDrag: () => { "worklet"; isFollowing.value = false; },
   });
 
-  // Reaction for active line changes with Force Retry (Critical Fix #1)
+  // Deterministic Scroll Controller
   useAnimatedReaction(
     () => ({
       index: activeLineIndex.value,
       following: isFollowing.value,
-      offsetsReady: lineOffsets.value.length,
+      ready: lyrics.length > 0
     }),
-    (curr, prev) => {
-      const next = curr.index;
-      const prevIndex = prev ? prev.index : -1;
-      const following = curr.following;
-      const offsetsReady = curr.offsetsReady;
-      const prevOffsetsReady = prev ? prev.offsetsReady : 0;
-      const wasFollowing = prev ? prev.following : false;
-
-      if (next < 0) return;
-      const offset = lineOffsets.value[next];
-      const validOffset = Number.isFinite(offset);
-
-      const shouldScroll =
-        following &&
-        offsetsReady > 0 &&
-        validOffset &&
-        (
-          next !== prevIndex ||
-          offsetsReady !== prevOffsetsReady ||
-          (following && !wasFollowing)
-        );
-
-      if (shouldScroll) {
-        // Scroll Spam Protection (Critical Fix #5)
-        if (lastScrolledIndex.value === next) return;
-
-        const targetY = offset - containerHeight.value * 0.38;
-
-        // Temporary forensic verification logging
-        console.log({
-          activeIndex: next,
-          following: following,
-          offset: offset,
-          containerHeight: containerHeight.value,
-        });
-
-        scrollTo(scrollRef, 0, Math.max(0, targetY), true);
-        lastScrolledIndex.value = next;
+    (cur, prev) => {
+      "worklet";
+      if (!cur.following || !cur.ready || cur.index < 0) return;
+      
+      // Only scroll when active line actually changes
+      if (cur.index !== lastScrolledIndex.value) {
+        lastScrolledIndex.value = cur.index;
+        
+        // FlashList scrollToItem is performant
+        runOnJS((idx: number) => {
+            flashListRef.current?.scrollToIndex({
+                index: idx,
+                animated: true,
+                viewPosition: 0.38, // Center-ish alignment
+            });
+        })(cur.index);
       }
     }
   );
 
-  // Dynamic content container style padding (Critical Fix #4)
-  const animatedContentContainerStyle = useAnimatedStyle(() => {
-    return {
-      paddingTop: containerHeight.value * 0.38,
-      paddingBottom: containerHeight.value * 0.62,
-    };
-  });
+  const renderItem = useCallback(({ item, index }: any) => (
+    <LyricLine 
+      item={item} 
+      index={index} 
+      activeLineIndex={activeLineIndex} 
+      onPress={seekToLine} 
+    />
+  ), [seekToLine]);
 
   if (isLoading) return <LyricsStatus text="Searching for lyrics..." />;
   if (error) return <LyricsStatus text="Couldn't load lyrics" subtext={error} />;
   if (!lyrics || lyrics.length === 0) return <LyricsStatus text="No lyrics available" icon="♪" />;
 
   return (
-    <View style={styles.container} onLayout={handleContainerLayout}>
-      <Animated.ScrollView
-        ref={scrollRef}
+    <View style={styles.container} onLayout={onLayout}>
+      <AnimatedFlashList
+        ref={flashListRef}
+        data={lyrics}
+        renderItem={renderItem}
+        keyExtractor={(item: any, index: number) => `${index}-${item.time}`}
+        estimatedItemSize={60}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scrollContent, animatedContentContainerStyle]}
-        decelerationRate="fast"
-      >
-        {lyrics.map((line, index) => (
-          <LyricLine
-            key={`${index}-${line.time}`}
-            item={line}
-            index={index}
-            activeLineIndex={activeLineIndex}
-            lineOffsets={lineOffsets}
-            isFollowing={isFollowing}
-            onPress={seekToLine}
-          />
-        ))}
-      </Animated.ScrollView>
+        contentContainerStyle={{
+            paddingTop: windowHeight * 0.35,
+            paddingBottom: windowHeight * 0.5,
+            paddingHorizontal: spacing.lg,
+        }}
+        removeClippedSubviews={Platform.OS === 'android'}
+      />
     </View>
   );
 });
 
-LyricsDisplay.displayName = "LyricsDisplay";
-
 const LyricsStatus = ({ text, subtext, icon }: { text: string; subtext?: string; icon?: string }) => (
   <View style={styles.statusContainer}>
-    {icon && <Animated.Text style={styles.statusIcon}>{icon}</Animated.Text>}
-    <Animated.Text style={styles.statusText}>{text}</Animated.Text>
-    {subtext && <Animated.Text style={styles.statusSubtext}>{subtext}</Animated.Text>}
+    {icon && <Text style={styles.statusIcon}>{icon}</Text>}
+    <Text style={styles.statusText}>{text}</Text>
+    {subtext && <Text style={styles.statusSubtext}>{subtext}</Text>}
   </View>
 );
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: spacing.lg,
-  },
-  lineWrapper: {
-    justifyContent: "center",
-    paddingVertical: spacing.sm,
-  },
-  lineText: {
-    ...typography.headline,
-    fontSize: 22,
-    lineHeight: 30,
-    textAlign: "left",
-  },
-  statusContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: spacing.xl,
-  },
-  statusIcon: {
-    fontSize: 48,
-    marginBottom: spacing.md,
-    opacity: 0.5,
-  },
-  statusText: {
-    ...typography.title,
-    fontSize: 18,
-    color: palette.ink,
-    textAlign: "center",
-  },
-  statusSubtext: {
-    ...typography.body,
-    color: palette.inkDim,
-    marginTop: spacing.sm,
-    textAlign: "center",
-  },
+  container: { flex: 1 },
+  lineWrapper: { justifyContent: "center", paddingVertical: spacing.sm, minHeight: 60 },
+  lineText: { ...typography.headline, fontSize: 24, lineHeight: 34, textAlign: "left" },
+  statusContainer: { flex: 1, justifyContent: "center", alignItems: "center", padding: spacing.xl },
+  statusIcon: { fontSize: 48, marginBottom: spacing.md, opacity: 0.5, color: palette.ink },
+  statusText: { ...typography.title, fontSize: 18, color: palette.ink, textAlign: "center" },
+  statusSubtext: { ...typography.body, color: palette.inkDim, marginTop: spacing.sm, textAlign: "center" },
 });

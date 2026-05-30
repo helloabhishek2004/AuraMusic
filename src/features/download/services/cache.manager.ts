@@ -36,6 +36,26 @@ export class CacheManager {
     }
   }
 
+  static async importToDownloads(trackId: string): Promise<string | null> {
+    const cachePath = this.getCachePath(trackId);
+    if (!(await this.isCached(trackId))) return null;
+
+    const audioPath = StorageService.getAudioPath(trackId);
+
+    try {
+      await FileSystem.moveAsync({ from: cachePath, to: audioPath });
+      return audioPath.startsWith('file://') ? audioPath : `file://${audioPath}`;
+    } catch {
+      try {
+        await FileSystem.copyAsync({ from: cachePath, to: audioPath });
+        return audioPath.startsWith('file://') ? audioPath : `file://${audioPath}`;
+      } catch (e) {
+        logger.warn("[CacheManager] Failed to import cached track to downloads:", trackId, e);
+        return null;
+      }
+    }
+  }
+
   static async runCleanup() {
     try {
       const files = await FileSystem.readDirectoryAsync(CACHE_DIR);

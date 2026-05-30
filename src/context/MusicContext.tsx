@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useMemo } from "react";
+import { SharedValue } from "react-native-reanimated";
 import { usePlayerStore } from "../features/player/store/player.store";
-import { PlayerTrack } from "../features/player/types/player";
+import { PlayerTrack, RepeatMode } from "../features/player/types/player";
+import { playbackProgress } from "../features/player/services/playback-progress";
 
 export type Track = PlayerTrack;
 
@@ -9,16 +11,16 @@ type PlaybackStateContextType = {
   isPlaying: boolean;
   isBuffering: boolean;
   isLoading: boolean;
-  repeatMode: 0 | 1; // 0: off, 1: track
+  repeatMode: RepeatMode; 
   isShuffle: boolean;
   isPlayerReady: boolean;
 };
 
 type MusicProgressContextType = {
-  progress: number;
-  elapsedSec: number;
-  durationSec: number;
-  bufferedSec: number;
+  progress: SharedValue<number>;
+  positionMs: SharedValue<number>;
+  durationMs: SharedValue<number>;
+  bufferedMs: SharedValue<number>;
 };
 
 type MusicActionsContextType = {
@@ -41,20 +43,11 @@ export type MusicContextType = PlaybackStateContextType &
   MusicProgressContextType &
   MusicActionsContextType;
 
-const PlaybackStateContext = createContext<
-  PlaybackStateContextType | undefined
->(undefined);
-const MusicProgressContext = createContext<
-  MusicProgressContextType | undefined
->(undefined);
-const MusicActionsContext = createContext<MusicActionsContextType | undefined>(
-  undefined,
-);
+const PlaybackStateContext = createContext<PlaybackStateContextType | undefined>(undefined);
+const MusicProgressContext = createContext<MusicProgressContextType | undefined>(undefined);
+const MusicActionsContext = createContext<MusicActionsContextType | undefined>(undefined);
 
-export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
-  // Use granular selectors to avoid re-rendering the provider when progress updates
+export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
   const isBuffering = usePlayerStore((s) => s.isBuffering);
@@ -62,7 +55,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
   const repeatMode = usePlayerStore((s) => s.repeatMode);
   const isShuffle = usePlayerStore((s) => s.isShuffle);
 
-  // Actions - individual stable selectors to avoid object-literal rerender loop
   const setTrackStore = usePlayerStore((s) => s.setTrack);
   const setQueueStore = usePlayerStore((s) => s.setQueue);
   const playStore = usePlayerStore((s) => s.play);
@@ -77,46 +69,41 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
   const setVolumeStore = usePlayerStore((s) => s.setVolume);
   const preloadTrackStore = usePlayerStore((s) => s.preloadTrack);
 
-  const repeatModeMap: Record<string, 0 | 1> = {
-    off: 0,
-    track: 1,
-  };
-
-  const reverseRepeatModeMap: Record<number, "off" | "track"> = {
-    0: "off",
-    1: "track",
-  };
-
   const playbackValue = useMemo<PlaybackStateContextType>(
     () => ({
-      currentTrack: currentTrack
-        ? {
-            ...currentTrack,
-            dominantColors: currentTrack.dominantColors || [
-              "#bf5af2",
-              "#7b2fbe",
-            ],
-          }
-        : null,
+      currentTrack: currentTrack ? { ...currentTrack, dominantColors: currentTrack.dominantColors || ["#bf5af2", "#7b2fbe"] } : null,
       isPlaying,
       isBuffering,
       isLoading: status === "loading",
-      repeatMode: repeatModeMap[repeatMode] as 0 | 1,
+      repeatMode,
       isShuffle,
       isPlayerReady: true,
     }),
     [currentTrack, isPlaying, isBuffering, status, repeatMode, isShuffle],
   );
 
+  const progressValue = useMemo<MusicProgressContextType>(
+    () => ({
+      progress: playbackProgress.progress,
+      positionMs: playbackProgress.positionMs,
+      durationMs: playbackProgress.durationMs,
+      bufferedMs: playbackProgress.bufferedMs,
+    }),
+    [],
+  );
+
   const toggleRepeat = useCallback(async () => {
-    const nextMode = repeatMode === "off" ? "track" : "off";
+    let nextMode: RepeatMode = "off";
+    if (repeatMode === "off") nextMode = "queue";
+    else if (repeatMode === "queue") nextMode = "track";
+    else if (repeatMode === "track") nextMode = "off";
+
     setRepeatModeStore(nextMode);
   }, [repeatMode, setRepeatModeStore]);
 
   const actionsValue = useMemo<MusicActionsContextType>(
     () => ({
-      play: async (track?: Track) =>
-        track ? setTrackStore(track) : playStore(),
+      play: async (track?: Track) => track ? setTrackStore(track) : playStore(),
       pause: pauseStore,
       next: nextStore,
       prev: previousStore,
@@ -129,73 +116,39 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({
       playNext: playNextStore,
       addToQueue: addToQueueStore,
       toggleRepeat,
-      toggleShuffle: async () => {
-        toggleShuffleStore();
-      },
+      toggleShuffle: async () => { toggleShuffleStore(); },
       setVolume: setVolumeStore,
       preloadTrack: preloadTrackStore,
     }),
-    [
-      setTrackStore,
-      playStore,
-      pauseStore,
-      nextStore,
-      previousStore,
-      seekStore,
-      setQueueStore,
-      toggleRepeat,
-      toggleShuffleStore,
-      setVolumeStore,
-      preloadTrackStore,
-    ],
+    [setTrackStore, playStore, pauseStore, nextStore, previousStore, seekStore, setQueueStore, toggleRepeat, toggleShuffleStore, setVolumeStore, preloadTrackStore],
   );
 
   return (
     <PlaybackStateContext.Provider value={playbackValue}>
-      <MusicActionsContext.Provider value={actionsValue}>
-        {children}
-      </MusicActionsContext.Provider>
+      <MusicProgressContext.Provider value={progressValue}>
+        <MusicActionsContext.Provider value={actionsValue}>
+          {children}
+        </MusicActionsContext.Provider>
+      </MusicProgressContext.Provider>
     </PlaybackStateContext.Provider>
   );
 };
 
 export function usePlaybackState() {
   const context = useContext(PlaybackStateContext);
-  if (!context)
-    throw new Error("usePlaybackState must be used within MusicProvider");
+  if (!context) throw new Error("usePlaybackState must be used within MusicProvider");
   return context;
 }
 
 export function useMusicProgress(): MusicProgressContextType {
-  const positionMs = usePlayerStore((s) => s.position);
-  const durationMs = usePlayerStore((s) => s.duration);
-  const bufferedMs = usePlayerStore((s) => s.bufferedPosition);
-  const currentTrack = usePlayerStore((s) => s.currentTrack);
-
-  return useMemo(
-    () => {
-      const elapsedSec = positionMs / 1000;
-      const durationSec = durationMs > 0
-        ? durationMs / 1000
-        : (currentTrack?.duration ? Number(currentTrack.duration) : 0);
-      const progress = durationSec > 0 ? elapsedSec / durationSec : 0;
-      const bufferedSec = bufferedMs / 1000;
-
-      return {
-        progress,
-        elapsedSec,
-        durationSec,
-        bufferedSec,
-      };
-    },
-    [positionMs, durationMs, bufferedMs, currentTrack?.duration],
-  );
+  const context = useContext(MusicProgressContext);
+  if (!context) throw new Error("useMusicProgress must be used within MusicProvider");
+  return context;
 }
 
 export function useMusicActions() {
   const context = useContext(MusicActionsContext);
-  if (!context)
-    throw new Error("useMusicActions must be used within MusicProvider");
+  if (!context) throw new Error("useMusicActions must be used within MusicProvider");
   return context;
 }
 
@@ -216,15 +169,7 @@ export function useMusicControls() {
       isShuffle: playback.isShuffle,
       isPlayerReady: playback.isPlayerReady,
     }),
-    [
-      actions,
-      playback.isPlayerReady,
-      playback.isPlaying,
-      playback.isBuffering,
-      playback.isLoading,
-      playback.isShuffle,
-      playback.repeatMode,
-    ],
+    [actions, playback.isPlayerReady, playback.isPlaying, playback.isBuffering, playback.isLoading, playback.isShuffle, playback.repeatMode],
   );
 }
 

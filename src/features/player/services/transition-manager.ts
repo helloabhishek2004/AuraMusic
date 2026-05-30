@@ -29,7 +29,8 @@ class TransitionManager {
     const progress = positionMs / durationMs;
     const remainingSeconds = (durationMs - positionMs) / 1000;
     
-    return progress >= 0.45 || remainingSeconds <= 40;
+    // Level 3 Preloading: Start preloading stream URLs when progress >= 70% OR <= 45 seconds remain.
+    return progress >= 0.70 || remainingSeconds <= 45;
   }
 
   async preloadNextTrack(nextTrack: PlayerTrack, currentTrackId: string): Promise<PlayerTrack | null> {
@@ -113,7 +114,7 @@ class TransitionManager {
 
   getCachedTrack(trackId: string): PlayerTrack | null {
     const cached = this.preloadedTracks.get(trackId);
-    if (cached && Date.now() - cached.timestamp < 90000) {
+    if (cached && Date.now() - cached.timestamp < 30000) {
       return cached.track;
     }
     return null;
@@ -136,7 +137,10 @@ class TransitionManager {
   }
 
   validatePreload(track: PlayerTrack): boolean {
-    return !!(track && track.id && track.url && track.url.length > 0);
+    if (!(track && track.id && track.url && track.url.length > 0)) return false;
+    const cached = this.preloadedTracks.get(track.id);
+    if (cached && Date.now() - cached.timestamp > 30000) return false;
+    return true;
   }
 }
 

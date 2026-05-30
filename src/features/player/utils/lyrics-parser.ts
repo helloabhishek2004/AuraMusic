@@ -6,6 +6,7 @@ export interface LyricWord {
 
 export interface LyricLine {
   time: number; // ms
+  endTime: number; // ms
   text: string;
   words: LyricWord[];
   isWordLevel: boolean;
@@ -47,10 +48,9 @@ function parseELRCLine(lineText: string, lineStartTime: number): LyricWord[] {
     const wordText = lineText.substring(startIdx, endIdx).trim();
     
     if (wordText) {
-      // Split in case multiple words are grouped under one tag
       const subWords = wordText.split(/\s+/).filter(Boolean);
       const startTime = matches[i].time;
-      const endTime = (i + 1 < matches.length) ? matches[i + 1].time : startTime + 800; // default 800ms for last word
+      const endTime = (i + 1 < matches.length) ? matches[i + 1].time : startTime + 800;
       
       if (subWords.length > 1) {
         const step = (endTime - startTime) / subWords.length;
@@ -62,11 +62,7 @@ function parseELRCLine(lineText: string, lineStartTime: number): LyricWord[] {
           });
         });
       } else if (subWords.length === 1) {
-        words.push({
-          text: subWords[0],
-          startTime,
-          endTime,
-        });
+        words.push({ text: subWords[0], startTime, endTime });
       }
     }
   }
@@ -74,17 +70,10 @@ function parseELRCLine(lineText: string, lineStartTime: number): LyricWord[] {
   return words;
 }
 
-/**
- * Clean ELRC tags out of raw text for clean display
- */
 export function cleanELRCTags(text: string): string {
   return text.replace(/<(\d+):(\d+(?:\.\d+)?)>/g, '').replace(/\s+/g, ' ').trim();
 }
 
-/**
- * Unified parser for lyrics data returned from the backend.
- * Normalizes timestamps and resolves word-by-word precomputations.
- */
 export function parseLyricsData(rawResponse: any): ParsedLyrics {
   if (!rawResponse || !rawResponse.lyrics || !Array.isArray(rawResponse.lyrics)) {
     return { synced: false, isWordLevel: false, lyrics: [] };
@@ -94,9 +83,9 @@ export function parseLyricsData(rawResponse: any): ParsedLyrics {
   const isSynced = rawResponse.synced === true;
   
   if (!isSynced) {
-    // Plain lyrics fallback: Map each line to time 0 with no word timings
     const parsedLines: LyricLine[] = rawLines.map((line: any) => ({
       time: 0,
+      endTime: 0,
       text: (line.text || '').trim(),
       words: [],
       isWordLevel: false
@@ -112,25 +101,21 @@ export function parseLyricsData(rawResponse: any): ParsedLyrics {
     const lineTime = typeof line.time === 'number' ? line.time : 0;
     const lineText = (line.text || '');
     
-    // 1. Try parsing Enhanced ELRC tags first
     let words = parseELRCLine(lineText, lineTime);
     let isLineWordLevel = words.length > 0;
-    
-    // Clean text by stripping tags
     const cleanText = isLineWordLevel ? cleanELRCTags(lineText) : lineText.trim();
     
-    if (isLineWordLevel) {
-      isWordLevel = true;
-    } else {
-      // 2. Standard LRC fallback: distribute word timings dynamically based on next line's start
-      const nextLineTime = (i + 1 < rawLines.length) 
-        ? (typeof rawLines[i + 1].time === 'number' ? rawLines[i + 1].time : lineTime + 4000)
-        : lineTime + 4000;
-        
+    if (isLineWordLevel) isWordLevel = true;
+
+    const nextLineTime = (i + 1 < rawLines.length) 
+      ? (typeof rawLines[i + 1].time === 'number' ? rawLines[i + 1].time : lineTime + 4000)
+      : lineTime + 4000;
+
+    if (!isLineWordLevel) {
       const rawWords = cleanText.split(/\s+/).filter(Boolean);
       if (rawWords.length > 0) {
         const lineDuration = Math.max(100, nextLineTime - lineTime);
-        const maxWordsDuration = Math.min(lineDuration, rawWords.length * 350); // cap at 350ms per word
+        const maxWordsDuration = Math.min(lineDuration, rawWords.length * 350);
         const step = maxWordsDuration / rawWords.length;
         
         words = rawWords.map((word: string, wIdx: number) => ({
@@ -143,15 +128,12 @@ export function parseLyricsData(rawResponse: any): ParsedLyrics {
 
     parsedLines.push({
       time: lineTime,
+      endTime: nextLineTime,
       text: cleanText,
       words,
       isWordLevel: isLineWordLevel
     });
   }
 
-  return {
-    synced: true,
-    isWordLevel,
-    lyrics: parsedLines
-  };
+  return { synced: true, isWordLevel, lyrics: parsedLines };
 }

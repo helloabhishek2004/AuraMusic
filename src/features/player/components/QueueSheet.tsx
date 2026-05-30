@@ -226,7 +226,7 @@ export const QueueSheet = ({
 
   // Sheet gesture-dismiss
   const handleY = useSharedValue(0);
-  const sheetAnim = useSharedValue(isVisible ? 0 : SHEET_H);
+  const sheetAnim = useSharedValue(SHEET_H);
 
   useEffect(() => {
     sheetAnim.value = withSpring(isVisible ? 0 : SHEET_H, SPR_SHEET);
@@ -704,7 +704,7 @@ const s = StyleSheet.create({
   listContainer: { flex: 1 },
   listContent: {
     paddingHorizontal: 16,
-    paddingBottom: 40,
+    paddingBottom: 140,
     gap: 10,
   },
   listHeader: {

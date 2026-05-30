@@ -1,5 +1,4 @@
 import { CategoryTabs } from "@/src/components/CategoryTabs";
-import MiniPlayer from "@/src/components/MiniPlayer";
 import { useMusic } from "@/src/context/MusicContext";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { DownloadManager } from "@/src/features/download/services/download.manager";
@@ -1178,8 +1177,6 @@ export default function DownloadsScreen() {
         contentContainerStyle={{ paddingBottom: 200 + safeBottom }}
         showsVerticalScrollIndicator={false}
       />
-
-      <MiniPlayer />
 
       <Modal
         visible={actionSheetVisible}

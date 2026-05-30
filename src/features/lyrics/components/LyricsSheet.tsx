@@ -73,14 +73,16 @@ export const LyricsSheet = React.memo(
     }));
 
     // Derived values for progress indicator (UI Thread)
-    const progressWidth = useDerivedValue(() => {
+    const progressScale = useDerivedValue(() => {
       if (!lyrics || lyrics.length === 0 || activeLineIndex.value < 0) return 0;
-      return ((activeLineIndex.value + 1) / lyrics.length) * 100;
+      return (activeLineIndex.value + 1) / lyrics.length;
     });
 
     const progressFillStyle = useAnimatedStyle(() => ({
-      width: `${progressWidth.value}%`,
-    }));
+      transform: [{ scaleX: progressScale.value }],
+      width: "100%",
+      transformOrigin: "left",
+    } as any));
 
     if (!isVisible) return null;
 

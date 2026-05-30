@@ -1,7 +1,6 @@
 import React, { useCallback } from 'react';
 import { Tabs } from 'expo-router';
 import FloatingNav from '../../src/components/FloatingNav';
-import MiniPlayer from '../../src/components/MiniPlayer';
 import { AtmosphericBackground } from '../../src/components/ui/atmospheric-background';
 import { palette } from '../../src/design/tokens';
 
