@@ -3,8 +3,10 @@ import { Tabs } from 'expo-router';
 import FloatingNav from '../../src/components/FloatingNav';
 import { AtmosphericBackground } from '../../src/components/ui/atmospheric-background';
 import { palette } from '../../src/design/tokens';
+import { useNavigationBack } from '../../src/navigation/back';
 
 export default function TabLayout() {
+  useNavigationBack();
   const renderTabBar = useCallback((props: any) => <FloatingNav {...props} />, []);
 
   return (

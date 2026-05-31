@@ -500,6 +500,34 @@ const BentoCard = React.memo(({
   );
 });
 
+// ── CONTINUE LISTENING CARD (REDESIGNED LIKE PAGE.HTML) ───────────────────
+const ContinueListeningCard = React.memo(({ track, onPress }: any) => {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={s.clCardContainer}
+    >
+      <PremiumGlass r={20} blur={40} gloss style={s.clCardGlass}>
+        <View style={s.clCardImageContainer}>
+          <Image source={{ uri: track.image }} style={s.clCardImage} contentFit="cover" transition={200} />
+          
+          {/* Progress bar overlay at the bottom */}
+          <View style={s.clProgressBarContainer}>
+            <View style={[s.clProgressBarActive, { width: `${track.progress * 100}%` }]} />
+          </View>
+        </View>
+      </PremiumGlass>
+      <Text style={s.clCardTitle} numberOfLines={1}>
+        {track.title}
+      </Text>
+      <Text style={s.clCardArtist} numberOfLines={1}>
+        {track.artist}
+      </Text>
+    </TouchableOpacity>
+  );
+});
+
 // ── CIRCULAR ARTIST CARD ───────────────────────────────────────────────────
 const CircleArtistCard = ({ name, image, onPress }: any) => {
   return (
@@ -612,7 +640,6 @@ export default function HomeScreen() {
   const { goNowPlaying, goArtist, goPlaylist, goAlbum } = useMusicNavigation('home');
   const [likedSongs, setLikedSongs] = useState<Set<string>>(new Set());
   const [downloadedSongs, setDownloadedSongs] = useState<Set<string>>(new Set());
-  const [expandedContinueListening, setExpandedContinueListening] = useState(false);
 
   const greetingData = useMemo(() => {
     const hour = new Date().getHours();
@@ -697,6 +724,35 @@ export default function HomeScreen() {
   const { setQueue } = useMusic();
   const setActiveContext = usePlayerStore(s => s.setActiveContext);
 
+  const continueListeningTracks = useMemo(() => [
+    { id: 'cl-midnight-city', title: 'Midnight City', artist: 'M83', progress: 0.66, image: 'https://picsum.photos/400/400?random=20' },
+    { id: 'cl-starboy', title: 'Starboy', artist: 'The Weeknd', progress: 0.25, image: 'https://picsum.photos/400/400?random=21' },
+    { id: 'cl-levitating', title: 'Levitating', artist: 'Dua Lipa', progress: 0.80, image: 'https://picsum.photos/400/400?random=22' },
+    { id: 'cl-blinding-lights', title: 'Blinding Lights', artist: 'The Weeknd', progress: 0.45, image: 'https://picsum.photos/400/400?random=23' },
+    { id: 'cl-stay', title: 'Stay', artist: 'The Kid LAROI & Justin Bieber', progress: 0.90, image: 'https://picsum.photos/400/400?random=24' },
+    { id: 'cl-save-tears', title: 'Save Your Tears', artist: 'The Weeknd', progress: 0.15, image: 'https://picsum.photos/400/400?random=25' },
+    { id: 'cl-bad-habits', title: 'Bad Habits', artist: 'Ed Sheeran', progress: 0.50, image: 'https://picsum.photos/400/400?random=26' },
+  ], []);
+
+  const handlePlayCLTrack = useCallback((track: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    setActiveContext({ type: 'home', id: 'home' });
+
+    const queueTracks = continueListeningTracks.map(t => ({
+      id: t.id,
+      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3',
+      title: t.title,
+      artist: t.artist,
+      art: t.image,
+      duration: 240,
+      dominantColors: ['#bf5af2', '#1a0033'],
+    }));
+
+    const idx = queueTracks.findIndex(q => q.id === track.id);
+    setQueue(queueTracks as any, idx !== -1 ? idx : 0);
+    goNowPlaying(track.id);
+  }, [goNowPlaying, setQueue, setActiveContext, continueListeningTracks]);
+
   const handlePlayPress = useCallback((track: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     
@@ -716,8 +772,6 @@ export default function HomeScreen() {
     setQueue(queueTracks as any, idx !== -1 ? idx : 0);
     goNowPlaying(track.id);
   }, [goNowPlaying, setQueue, tracks, setActiveContext]);
-
-  const displayedTracks = expandedContinueListening ? tracks : tracks.slice(0, 2);
 
   return (
     <View style={s.root}>
@@ -750,10 +804,6 @@ export default function HomeScreen() {
         <MaterialEntrance delay={200}>
           <SectionHeader
             title="Continue Listening"
-            onSeeAll={() => {
-              setExpandedContinueListening(!expandedContinueListening);
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            }}
           />
           <ScrollView
             horizontal
@@ -761,39 +811,15 @@ export default function HomeScreen() {
             showsHorizontalScrollIndicator={false}
             style={s.hzScroll}
             contentContainerStyle={s.hzScrollContent}
-            scrollEnabled={!expandedContinueListening}
           >
-            {displayedTracks.map((track) => (
-              <TrackCard
+            {continueListeningTracks.map((track) => (
+              <ContinueListeningCard
                 key={track.id}
                 track={track}
-                variant="compact"
-                onPress={() => handlePlayPress(track)}
-                onArtistPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  goArtist(track.artistId || 'elara');
-                }}
+                onPress={() => handlePlayCLTrack(track)}
               />
             ))}
           </ScrollView>
-
-          {/* Show as vertical list when expanded */}
-          {expandedContinueListening && (
-            <View style={s.expandedListContainer}>
-              {tracks.slice(2).map((track) => (
-                <TrackCard
-                  key={track.id}
-                  track={track}
-                  variant="row"
-                  onPress={() => handlePlayPress(track)}
-                  onArtistPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    goArtist(track.artistId || 'elara');
-                  }}
-                />
-              ))}
-            </View>
-          )}
         </MaterialEntrance>
 
         {/* Made For You */}
@@ -1189,5 +1215,59 @@ const s = StyleSheet.create({
   },
   artistScrollContent: {
     paddingHorizontal: PAD,
+  },
+
+  // Continue Listening Cards (page.html Redesign)
+  clCardContainer: {
+    width: 160,
+    marginRight: 16,
+    marginBottom: 8,
+  },
+  clCardGlass: {
+    width: 160,
+    height: 160,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  clCardImageContainer: {
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  clCardImage: {
+    width: '100%',
+    height: '100%',
+  },
+  clProgressBarContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  clProgressBarActive: {
+    height: '100%',
+    backgroundColor: C.primary,
+    // iOS shadow for glow
+    shadowColor: C.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+  },
+  clCardTitle: {
+    color: C.text,
+    fontWeight: '600',
+    fontSize: 14,
+    letterSpacing: -0.2,
+    marginBottom: 2,
+  },
+  clCardArtist: {
+    color: C.textSecondary,
+    fontSize: 12,
+    fontWeight: '500',
+    opacity: 0.65,
   },
 });

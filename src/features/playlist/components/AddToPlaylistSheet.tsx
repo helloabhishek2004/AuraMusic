@@ -101,9 +101,15 @@ const AddToPlaylistSheet = React.memo(
     }, [lastUsedPlaylist, handleAdd]);
 
     const handleCreateNew = useCallback(() => {
-      onClose();
-      usePlayerUIStore.getState().collapse();
-      setTimeout(() => router.push('/create_playlist'), 200);
+      // Navigate to the create playlist screen immediately
+      router.push('/create_playlist');
+
+      // Safely close the sheet and collapse the player overlay in the background
+      // after the transition to the new screen covers the viewport (500ms)
+      setTimeout(() => {
+        onClose();
+        usePlayerUIStore.getState().collapse();
+      }, 500);
     }, [onClose, router]);
 
     if (!visible) return null;

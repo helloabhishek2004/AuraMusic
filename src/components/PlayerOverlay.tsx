@@ -8,7 +8,6 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
-  BackHandler,
   Dimensions,
   Platform,
   Pressable,
@@ -50,11 +49,13 @@ import { useRouter, useSegments } from "expo-router";
 import { playbackProgress } from "@/src/features/player/services/playback-progress";
 
 import { usePlayerUIStore } from "@/src/features/player/store/player-ui.store";
+import { useBackHandler, BackPriority } from "@/src/navigation/back";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { useMusicActions } from "@/src/context/MusicContext";
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
 import { useDownloadStore } from "@/src/features/download/store/download.store";
 import { DownloadButton } from "@/src/components/ui/download-button";
+import { Marquee } from "./ui/marquee";
 import MiniPlayer from "./MiniPlayer";
 import { InsightPanel } from "@/src/features/player/components/InsightPanel";
 import { QueueSheet } from "@/src/features/player/components/QueueSheet";
@@ -877,7 +878,7 @@ export default function PlayerOverlay() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
   const prevTrackJS = () => {
-    prev();
+    prev(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
@@ -999,25 +1000,32 @@ export default function PlayerOverlay() {
     }
   }, [lyricsList.length]);
 
-  useEffect(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (activeSurface !== 'controls') { 
-        if (activeSurface === 'lyrics') closeLyrics();
-        else if (activeSurface === 'queue') closeQueue();
-        else if (activeSurface === 'menu') closeMenu();
-        else closeDevices();
-        return true; 
-      }
-      if (isExpanded) { 
-        expandProgress.value = withSpring(0, SPR_MAIN, (finished) => {
-          if (finished) runOnJS(collapse)();
-        });
-        return true; 
-      }
-      return false;
-    });
-    return () => sub.remove();
-  }, [isExpanded, activeSurface, closeLyrics, closeQueue, closeMenu, closeDevices, collapse]);
+  useBackHandler({
+    id: 'player-sub-surface',
+    enabled: activeSurface !== 'controls' && isExpanded,
+    priority: BackPriority.PLAYER_SUB_SURFACE,
+    onBack: () => {
+      console.log(`[PlayerOverlay] PLAYER_SUB_SURFACE handler triggered (activeSurface: "${activeSurface}")`);
+      if (activeSurface === 'lyrics') closeLyrics();
+      else if (activeSurface === 'queue') closeQueue();
+      else if (activeSurface === 'menu') closeMenu();
+      else closeDevices();
+      return true;
+    },
+  });
+
+  useBackHandler({
+    id: 'player-expanded',
+    enabled: isExpanded && activeSurface === 'controls',
+    priority: BackPriority.EXPANDED_PLAYER,
+    onBack: () => {
+      console.log('[PlayerOverlay] EXPANDED_PLAYER handler triggered (collapsing expanded player)');
+      expandProgress.value = withSpring(0, SPR_MAIN, (finished) => {
+        if (finished) runOnJS(collapse)();
+      });
+      return true;
+    },
+  });
 
   useEffect(() => {
     if (isExpanded) {
@@ -1141,9 +1149,13 @@ export default function PlayerOverlay() {
         <View style={[st.controlsArea, { top: ART_H - 150 }]}>{Platform.OS === "ios" && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />}</View>
         <Animated.View style={[st.controlsContent, { top: ART_H + 25, bottom: Math.max(insets.bottom + 8, 20) + 70 }, controlsStyle]} pointerEvents={activeSurface === 'controls' ? "box-none" : "none"}>
           <View style={st.infoRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={st.trackTitle} numberOfLines={1}>{currentTrack?.title || "—"}</Text>
-              {renderFormattedArtists()}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Marquee>
+                <Text style={st.trackTitle} numberOfLines={1}>{currentTrack?.title || "—"}</Text>
+              </Marquee>
+              <Marquee style={{ marginTop: 2 }}>
+                {renderFormattedArtists()}
+              </Marquee>
             </View>
             <View style={st.infoActions}>
               <TouchableOpacity onPress={handleLikePress} disabled={isLocked}><Ionicons name={isLiked ? "heart" : "heart-outline"} size={24} color={isLiked ? "#FF3B30" : "#FFF"} /></TouchableOpacity>

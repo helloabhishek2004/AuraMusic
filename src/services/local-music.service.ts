@@ -206,14 +206,18 @@ export class LocalMusicService {
         const s = durSec % 60;
         const timeStr = `${m}:${s.toString().padStart(2, "0")}`;
 
+        const playbackUri = Platform.OS === "android"
+          ? `content://media/external/audio/media/${asset.id}`
+          : asset.uri;
+
         return {
           id: asset.uri,
           title: title || filename,
           artist: "Local Artist",
           art: "",
           isLocal: true,
-          localUri: asset.uri,
-          url: asset.uri,
+          localUri: playbackUri,
+          url: playbackUri,
           mimeType: `audio/${extension === "m4a" ? "mp4" : (extension === "mp3" ? "mpeg" : extension)}`,
           time: timeStr,
           folderName: folderName,

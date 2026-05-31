@@ -802,7 +802,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         }
       },
 
-      previous: async () => {
+      previous: async (forcePrevious?: boolean) => {
         const { queue, repeatMode } = get();
         if (queue.length === 0) return;
 
@@ -813,7 +813,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           if (p && p.position) posMs = p.position * 1000;
         } catch(e) {}
 
-        if (posMs > 3000) {
+        if (posMs > 3000 && !forcePrevious) {
           await get().seek(0);
           await get().play();
           return;

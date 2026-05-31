@@ -133,7 +133,7 @@ export const LyricsSheet = React.memo(
             {/* Display */}
             <View style={styles.lyricsContainer}>
               <LyricsDisplay
-                lyrics={lyrics}
+                lyrics={lyrics as any}
                 isSynced={isSynced}
                 activeLineIndex={activeLineIndex}
                 isFollowing={isFollowing}

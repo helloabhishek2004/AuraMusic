@@ -1,5 +1,3 @@
-
-
 import React, {
     useCallback,
     useEffect,
@@ -58,9 +56,18 @@ const { width: SW, height: SH } = Dimensions.get("window");
 const isTablet = SW >= 768;
 const isLargePhone = SW >= 414;
 
-const PAD = isTablet ? 28 : isLargePhone ? 22 : 18;
-const TRACK_ART = isTablet ? 66 : 54;
-const CARD_GAP = isTablet ? 18 : 14;
+// Unified spacing scale: 4 8 12 16 20 24 32
+const SP4 = 4;
+const SP8 = 8;
+const SP12 = 12;
+const SP16 = 16;
+const SP20 = 20;
+const SP24 = 24;
+const SP32 = 32;
+
+const PAD = isTablet ? SP32 : isLargePhone ? SP24 : SP20;
+const TRACK_ART = isTablet ? 64 : 52;
+const CARD_GAP = isTablet ? SP20 : SP16;
 
 // Folder grid: 2 cols on phone, 3 on tablet
 const FOLDER_COLS = isTablet ? 3 : 2;
@@ -71,6 +78,9 @@ const FOLDER_CARD_W = (SW - PAD * 2 - CARD_GAP * (FOLDER_COLS - 1)) / FOLDER_COL
 const GLASS_TINT = "rgba(191,90,242,0.13)";
 const GLASS_TINT_HI = "rgba(255,255,255,0.03)";
 const SPEC_TOP = "rgba(255,255,255,0.18)";
+// Subtle border used consistently throughout
+const BORDER_SUBTLE = "rgba(255,255,255,0.08)";
+const BORDER_ACTIVE = "rgba(168,72,255,0.32)";
 
 const TABS = ["Songs", "Folders"] as const;
 type Tab = typeof TABS[number];
@@ -78,6 +88,8 @@ type Tab = typeof TABS[number];
 // ─── Spring & timing configs ──────────────────────────────────────────────────
 
 const SPRING_TAB = { damping: 22, stiffness: 280, mass: 0.8 };
+// Staggered list entrance
+const STAGGER_MS = 40;
 
 // ─── WaveformBars: animated "now playing" indicator ──────────────────────────
 
@@ -159,7 +171,7 @@ const OnboardingModal = React.memo(({
             <View style={s.onboardingOverlay}>
                 <Animated.View style={[s.onboardingBackdrop, { opacity: opacityAnim }]} />
                 <Animated.View style={[s.onboardingContent, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
-                    <LiquidGlass borderRadius={32} intensity={26} style={s.onboardingGlass}>
+                    <LiquidGlass borderRadius={32} intensity={26} style={s.onboardingGlass} contentStyle={{ alignItems: "center", width: "100%" }}>
                         <LinearGradient
                             colors={[GLASS_TINT, GLASS_TINT_HI]}
                             style={[StyleSheet.absoluteFill, { borderRadius: 32 }]}
@@ -187,6 +199,7 @@ const OnboardingModal = React.memo(({
                         <View style={s.onboardingActions}>
                             <PressScale
                                 style={s.onboardingPrimaryBtn}
+                                wrapperStyle={{ width: "100%" }}
                                 onPress={onGrantAccess}
                                 haptic={Haptics.ImpactFeedbackStyle.Medium}
                             >
@@ -203,6 +216,7 @@ const OnboardingModal = React.memo(({
 
                             <PressScale
                                 style={s.onboardingSecondaryBtn}
+                                wrapperStyle={{ width: "100%" }}
                                 onPress={onDismiss}
                                 haptic={Haptics.ImpactFeedbackStyle.Light}
                             >
@@ -249,7 +263,7 @@ const PermissionDeniedModal = React.memo(({
             <View style={s.onboardingOverlay}>
                 <Animated.View style={[s.onboardingBackdrop, { opacity: opacityAnim }]} />
                 <Animated.View style={[s.onboardingContent, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
-                    <LiquidGlass borderRadius={28} intensity={26} style={s.onboardingGlass}>
+                    <LiquidGlass borderRadius={28} intensity={26} style={s.onboardingGlass} contentStyle={{ alignItems: "center", width: "100%" }}>
                         <LinearGradient
                             colors={[GLASS_TINT, GLASS_TINT_HI]}
                             style={[StyleSheet.absoluteFill, { borderRadius: 28 }]}
@@ -273,6 +287,7 @@ const PermissionDeniedModal = React.memo(({
                         <View style={s.onboardingActions}>
                             <PressScale
                                 style={s.onboardingPrimaryBtn}
+                                wrapperStyle={{ width: "100%" }}
                                 onPress={onRetry}
                                 haptic={Haptics.ImpactFeedbackStyle.Medium}
                             >
@@ -287,6 +302,7 @@ const PermissionDeniedModal = React.memo(({
 
                             <PressScale
                                 style={s.onboardingSecondaryBtn}
+                                wrapperStyle={{ width: "100%" }}
                                 onPress={onDismiss}
                                 haptic={Haptics.ImpactFeedbackStyle.Light}
                             >
@@ -320,125 +336,151 @@ const LocalTrackRow = React.memo(
         const isLiked = useLikesStore((s) => !!s.likedTrackIds[track.id]);
         const toggleLike = useLikesStore((s) => s.toggleLike);
 
+        // Staggered entrance — capped at index 20 for scroll performance
+        const rowOpacity = useRef(new Animated.Value(index < 20 ? 0 : 1)).current;
+        const rowTranslate = useRef(new Animated.Value(index < 20 ? 10 : 0)).current;
+        useEffect(() => {
+            if (index >= 20) return;
+            const delay = index * STAGGER_MS;
+            Animated.parallel([
+                Animated.timing(rowOpacity, {
+                    toValue: 1,
+                    duration: 260,
+                    delay,
+                    easing: Easing.out(Easing.quad),
+                    useNativeDriver: true,
+                }),
+                Animated.timing(rowTranslate, {
+                    toValue: 0,
+                    duration: 260,
+                    delay,
+                    easing: Easing.out(Easing.quad),
+                    useNativeDriver: true,
+                }),
+            ]).start();
+        }, []);
+
         return (
-            <PressScale
-                onPress={() => onPlay(track)}
-                haptic={Haptics.ImpactFeedbackStyle.Light}
-                accessibilityRole="button"
-                accessibilityLabel={`Play ${track.title}${isActive ? ", currently playing" : ""}`}
-            >
-                <LiquidGlass
-                    borderRadius={20}
-                    intensity={isActive ? 26 : 16}
-                    style={[s.trackGlass, isActive && s.trackGlassActive]}
+            <Animated.View style={{ opacity: rowOpacity, transform: [{ translateY: rowTranslate }] }}>
+                <PressScale
+                    onPress={() => onPlay(track)}
+                    haptic={Haptics.ImpactFeedbackStyle.Light}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Play ${track.title}${isActive ? ", currently playing" : ""}`}
                 >
-                    {/* Active track: purple tint overlay */}
-                    {isActive && (
-                        <LinearGradient
-                            colors={["rgba(168,72,255,0.14)", "rgba(120,40,220,0.06)"]}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={StyleSheet.absoluteFill}
-                            pointerEvents="none"
-                        />
-                    )}
+                    <LiquidGlass
+                        borderRadius={20}
+                        intensity={isActive ? 26 : 16}
+                        style={[s.trackGlass, isActive && s.trackGlassActive]}
+                    >
+                        {/* Active track: purple tint overlay */}
+                        {isActive && (
+                            <LinearGradient
+                                colors={["rgba(168,72,255,0.14)", "rgba(120,40,220,0.06)"]}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={StyleSheet.absoluteFill}
+                                pointerEvents="none"
+                            />
+                        )}
 
-                    {/* Top specular edge */}
-                    <View style={s.trackSpecular} pointerEvents="none" />
+                        {/* Top specular edge */}
+                        <View style={s.trackSpecular} pointerEvents="none" />
 
-                    <View style={s.trackInner}>
-                        {/* Artwork / fallback */}
-                        <View style={s.trackArtWrap}>
-                            {track.art ? (
-                                <Image
-                                    source={{ uri: track.art }}
-                                    style={s.trackArt}
-                                    contentFit="cover"
-                                    transition={250}
-                                />
-                            ) : (
-                                <LinearGradient
-                                    colors={
-                                        isActive
-                                            ? ["rgba(168,72,255,0.28)", "rgba(90,20,180,0.18)"]
-                                            : ["rgba(255,255,255,0.06)", "rgba(255,255,255,0.02)"]
-                                    }
-                                    style={s.trackFallback}
-                                >
-                                    <Ionicons
-                                        name="musical-note"
-                                        size={22}
-                                        color={isActive ? palette.primary : "rgba(255,255,255,0.28)"}
+                        <View style={s.trackInner}>
+                            {/* Artwork / fallback */}
+                            <View style={s.trackArtWrap}>
+                                {track.art ? (
+                                    <Image
+                                        source={{ uri: track.art }}
+                                        style={s.trackArt}
+                                        contentFit="cover"
+                                        transition={250}
                                     />
-                                </LinearGradient>
-                            )}
+                                ) : (
+                                    <LinearGradient
+                                        colors={
+                                            isActive
+                                                ? ["rgba(168,72,255,0.28)", "rgba(90,20,180,0.18)"]
+                                                : ["rgba(255,255,255,0.06)", "rgba(255,255,255,0.02)"]
+                                        }
+                                        style={s.trackFallback}
+                                    >
+                                        <Ionicons
+                                            name="musical-note"
+                                            size={22}
+                                            color={isActive ? palette.primary : "rgba(255,255,255,0.28)"}
+                                        />
+                                    </LinearGradient>
+                                )}
 
-                            {/* Active badge: waveform animation */}
-                            {isActive && (
-                                <View style={s.activeBadge}>
-                                    <WaveformBars />
-                                </View>
-                            )}
-                        </View>
-
-                        {/* Text info */}
-                        <View style={s.trackInfo}>
-                            <Text
-                                style={[s.trackTitle, isActive && s.trackTitleActive]}
-                                numberOfLines={1}
-                            >
-                                {track.title}
-                            </Text>
-                            <View style={s.trackMeta}>
-                                <Text style={s.trackArtist} numberOfLines={1}>
-                                    {track.artist || "Local Audio"}
-                                </Text>
-                                {formatExt(track.mimeType) && (
-                                    <View style={s.mimeBadge}>
-                                        <Text style={s.mimeText}>{formatExt(track.mimeType)}</Text>
+                                {/* Active badge: waveform animation */}
+                                {isActive && (
+                                    <View style={s.activeBadge}>
+                                        <WaveformBars />
                                     </View>
                                 )}
                             </View>
-                        </View>
 
-                        {/* Duration + chevron */}
-                        <View style={s.trackRight}>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                        toggleLike({
-                                            id: track.id,
-                                            title: track.title,
-                                            artist: track.artist || "Local Audio",
-                                            art: track.album || "",
-                                            url: track.url || "",
-                                            duration: 0,
-                                            isLocal: true,
-                                            source: "local"
-                                        });
-                                    }}
-                                    hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-                                    accessibilityLabel={isLiked ? "Unlike" : "Like"}
-                                    accessibilityRole="button"
+                            {/* Text info */}
+                            <View style={s.trackInfo}>
+                                <Text
+                                    style={[s.trackTitle, isActive && s.trackTitleActive]}
+                                    numberOfLines={1}
                                 >
-                                    <Ionicons
-                                        name={isLiked ? "heart" : "heart-outline"}
-                                        size={18}
-                                        color={isLiked ? palette.primary : "rgba(255,255,255,0.18)"}
-                                    />
-                                </TouchableOpacity>
-                                <Text style={s.trackDur}>{track.time || "--:--"}</Text>
+                                    {track.title}
+                                </Text>
+                                <View style={s.trackMeta}>
+                                    <Text style={s.trackArtist} numberOfLines={1}>
+                                        {track.artist || "Local Audio"}
+                                    </Text>
+                                    {formatExt(track.mimeType) && (
+                                        <View style={s.mimeBadge}>
+                                            <Text style={s.mimeText}>{formatExt(track.mimeType)}</Text>
+                                        </View>
+                                    )}
+                                </View>
                             </View>
-                            <Ionicons
-                                name="chevron-forward"
-                                size={14}
-                                color="rgba(255,255,255,0.18)"
-                            />
+
+                            {/* Duration + chevron */}
+                            <View style={s.trackRight}>
+                                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                            toggleLike({
+                                                id: track.id,
+                                                title: track.title,
+                                                artist: track.artist || "Local Audio",
+                                                art: track.album || "",
+                                                url: track.url || "",
+                                                duration: 0,
+                                                isLocal: true,
+                                                source: "local"
+                                            });
+                                        }}
+                                        hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                                        accessibilityLabel={isLiked ? "Unlike" : "Like"}
+                                        accessibilityRole="button"
+                                    >
+                                        <Ionicons
+                                            name={isLiked ? "heart" : "heart-outline"}
+                                            size={18}
+                                            color={isLiked ? palette.primary : "rgba(255,255,255,0.18)"}
+                                        />
+                                    </TouchableOpacity>
+                                    <Text style={s.trackDur}>{track.time || "--:--"}</Text>
+                                </View>
+                                <Ionicons
+                                    name="chevron-forward"
+                                    size={14}
+                                    color="rgba(255,255,255,0.18)"
+                                />
+                            </View>
                         </View>
-                    </View>
-                </LiquidGlass>
-            </PressScale>
+                    </LiquidGlass>
+                </PressScale>
+            </Animated.View>
         );
     }
 );
@@ -450,64 +492,89 @@ const FolderCard = React.memo(
         name,
         count,
         onPress,
+        index = 0,
     }: {
         name: string;
         count: number;
         onPress: () => void;
+        index?: number;
     }) => {
+        const cardOpacity = useRef(new Animated.Value(0)).current;
+        const cardScale = useRef(new Animated.Value(0.94)).current;
+        useEffect(() => {
+            Animated.parallel([
+                Animated.timing(cardOpacity, {
+                    toValue: 1,
+                    duration: 300,
+                    delay: index * STAGGER_MS,
+                    easing: Easing.out(Easing.quad),
+                    useNativeDriver: true,
+                }),
+                Animated.timing(cardScale, {
+                    toValue: 1,
+                    duration: 300,
+                    delay: index * STAGGER_MS,
+                    easing: Easing.out(Easing.quad),
+                    useNativeDriver: true,
+                }),
+            ]).start();
+        }, []);
+
         return (
-            <PressScale
-                style={{ width: FOLDER_CARD_W }}
-                onPress={onPress}
-                haptic={Haptics.ImpactFeedbackStyle.Medium}
-                accessibilityRole="button"
-                accessibilityLabel={`${name}, ${count} tracks`}
-            >
-                <LiquidGlass
-                    borderRadius={24}
-                    intensity={22}
-                    style={s.folderGlass}
+            <Animated.View style={{ width: FOLDER_CARD_W, opacity: cardOpacity, transform: [{ scale: cardScale }] }}>
+                <PressScale
+                    style={{ flex: 1 }}
+                    onPress={onPress}
+                    haptic={Haptics.ImpactFeedbackStyle.Medium}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${name}, ${count} tracks`}
                 >
-                    {/* Glass tint */}
-                    <LinearGradient
-                        colors={[GLASS_TINT, GLASS_TINT_HI]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={[StyleSheet.absoluteFill, { borderRadius: 24 }]}
-                        pointerEvents="none"
-                    />
-
-                    {/* Top specular */}
-                    <View style={s.folderSpecular} pointerEvents="none" />
-
-                    {/* Count badge — top right */}
-                    <View style={s.folderTop}>
-                        <View style={s.folderBadge}>
-                            <Text style={s.folderBadgeText}>{count}</Text>
-                        </View>
-                    </View>
-
-                    {/* Icon */}
-                    <View style={s.folderIconWrap}>
+                    <LiquidGlass
+                        borderRadius={24}
+                        intensity={22}
+                        style={s.folderGlass}
+                    >
+                        {/* Glass tint */}
                         <LinearGradient
-                            colors={["rgba(191,90,242,0.22)", "rgba(120,40,200,0.10)"]}
-                            style={s.folderIconBg}
-                        >
-                            <Ionicons name="folder-open" size={28} color={palette.primary} />
-                        </LinearGradient>
-                    </View>
+                            colors={[GLASS_TINT, GLASS_TINT_HI]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={[StyleSheet.absoluteFill, { borderRadius: 24 }]}
+                            pointerEvents="none"
+                        />
 
-                    {/* Name */}
-                    <View style={s.folderBottom}>
-                        <Text style={s.folderName} numberOfLines={2}>
-                            {name}
-                        </Text>
-                        <Text style={s.folderSub}>
-                            {count} {count === 1 ? "track" : "tracks"}
-                        </Text>
-                    </View>
-                </LiquidGlass>
-            </PressScale>
+                        {/* Top specular */}
+                        <View style={s.folderSpecular} pointerEvents="none" />
+
+                        {/* Count badge — top right */}
+                        <View style={s.folderTop}>
+                            <View style={s.folderBadge}>
+                                <Text style={s.folderBadgeText}>{count}</Text>
+                            </View>
+                        </View>
+
+                        {/* Icon */}
+                        <View style={s.folderIconWrap}>
+                            <LinearGradient
+                                colors={["rgba(191,90,242,0.22)", "rgba(120,40,200,0.10)"]}
+                                style={s.folderIconBg}
+                            >
+                                <Ionicons name="folder-open" size={28} color={palette.primary} />
+                            </LinearGradient>
+                        </View>
+
+                        {/* Name */}
+                        <View style={s.folderBottom}>
+                            <Text style={s.folderName} numberOfLines={2}>
+                                {name}
+                            </Text>
+                            <Text style={s.folderSub}>
+                                {count} {count === 1 ? "track" : "tracks"}
+                            </Text>
+                        </View>
+                    </LiquidGlass>
+                </PressScale>
+            </Animated.View>
         );
     }
 );
@@ -896,7 +963,7 @@ export default function LocalLibraryScreen() {
         const checkFirstAccess = async () => {
             const hasAccess = await LocalMusicService.hasAccessedBefore();
             const hasPerm = await LocalMusicService.hasPermission();
-            
+
             // If first time AND no permission granted yet, show onboarding
             if (!hasAccess && !hasPerm) {
                 setShowOnboarding(true);
@@ -904,18 +971,18 @@ export default function LocalLibraryScreen() {
                 loadLocalMedia();
             }
         };
-        
+
         checkFirstAccess();
     }, []);
 
     const handleGrantAccess = async () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         setShowOnboarding(false);
-        
+
         try {
             // First request media permissions
             const hasPerm = await LocalMusicService.requestPermissions();
-            
+
             if (hasPerm) {
                 await LocalMusicService.markFirstAccess();
                 loadLocalMedia();
@@ -931,7 +998,7 @@ export default function LocalLibraryScreen() {
     const handleRetryPermission = async () => {
         setShowPermissionDenied(false);
         const hasPerm = await LocalMusicService.requestPermissions();
-        
+
         if (hasPerm) {
             handleGrantAccess();
         } else {
@@ -966,7 +1033,7 @@ export default function LocalLibraryScreen() {
                 mimeType: t.mimeType,
             }));
             const startIndex = playerTracks.findIndex((t) => t.id === track.id);
-            
+
             setActiveContext({ type: "local", id: "local" });
             setQueue(playerTracks, startIndex !== -1 ? startIndex : 0);
             // Removed navigation to /now_playing
@@ -1030,11 +1097,12 @@ export default function LocalLibraryScreen() {
                 <View style={s.folderContainer}>
                     {/* Folder grid */}
                     <View style={s.folderGrid}>
-                        {sortedFolders.map(([name, folderTracks]) => (
+                        {sortedFolders.map(([name, folderTracks], i) => (
                             <FolderCard
                                 key={name}
                                 name={name}
                                 count={folderTracks.length}
+                                index={i}
                                 onPress={() => handlePlayTrack(folderTracks[0], folderTracks)}
                             />
                         ))}
@@ -1113,7 +1181,7 @@ export default function LocalLibraryScreen() {
                 scrollEventThrottle={16}
             >
                 {/* ── Header ─────────────────────────────────────────────── */}
-                <View style={[s.header, { paddingTop: insets.top + 14 }]}>
+                <View style={[s.header, { paddingTop: insets.top + SP16 }]}>
                     {/* Back button */}
                     <PressScale
                         onPress={() => router.back()}
@@ -1229,8 +1297,8 @@ const s = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         paddingHorizontal: PAD,
-        marginBottom: 22,
-        gap: 14,
+        marginBottom: SP24,
+        gap: SP16,
     },
     iconBtn: {
         width: 44,
@@ -1238,68 +1306,71 @@ const s = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
         borderWidth: 0.5,
-        borderColor: "rgba(255,255,255,0.10)",
+        borderColor: BORDER_SUBTLE,
     },
     iconBtnSpec: {
         position: "absolute",
         top: 0,
-        left: 6,
-        right: 6,
+        left: SP8,
+        right: SP8,
         height: 1,
-        backgroundColor: "rgba(255,255,255,0.18)",
+        backgroundColor: "rgba(255,255,255,0.16)",
         borderRadius: 0.5,
     },
     headerMid: {
         flex: 1,
     },
     headerEyebrow: {
-        fontSize: 11,
+        fontSize: 10,
         color: palette.primary,
         fontWeight: "700",
-        letterSpacing: 0.8,
+        letterSpacing: 1.2,
         textTransform: "uppercase",
-        marginBottom: 2,
+        marginBottom: SP4,
+        opacity: 0.85,
     },
     headerTitle: {
-        fontSize: isTablet ? 36 : 30,
+        fontSize: isTablet ? 34 : 28,
         fontWeight: "900",
         color: palette.ink,
-        letterSpacing: -1.2,
-        lineHeight: isTablet ? 42 : 36,
+        letterSpacing: -1.0,
+        lineHeight: isTablet ? 40 : 34,
     },
     headerBadge: {
         flexDirection: "row",
         alignItems: "center",
-        marginTop: 5,
-        gap: 6,
+        marginTop: SP4,
+        gap: SP8,
     },
     headerDot: {
         width: 5,
         height: 5,
         borderRadius: 2.5,
         backgroundColor: palette.primary,
+        opacity: 0.9,
     },
     headerSub: {
-        fontSize: 13,
+        fontSize: 12,
         color: palette.inkMuted,
         fontWeight: "600",
+        letterSpacing: 0.1,
     },
 
     // ── Hero card
     heroSection: {
         paddingHorizontal: PAD,
-        marginBottom: 20,
+        marginBottom: SP20,
     },
     heroGlass: {
         overflow: "hidden",
         borderWidth: 0.5,
-        borderColor: "rgba(255,255,255,0.08)",
+        borderColor: BORDER_SUBTLE,
     },
     heroSpecular: {
         position: "absolute",
         top: 0,
-        left: 24,
-        right: 24,
+        left: SP24,
+        right: SP24,
         height: 1,
         backgroundColor: SPEC_TOP,
         borderRadius: 0.5,
@@ -1308,29 +1379,31 @@ const s = StyleSheet.create({
         flexDirection: "row",
         alignItems: "flex-start",
         justifyContent: "space-between",
-        padding: 22,
-        paddingBottom: 18,
-        gap: 16,
+        padding: SP24,
+        paddingBottom: SP20,
+        gap: SP16,
     },
     heroLeft: {
         flex: 1,
     },
     heroTitle: {
         color: palette.ink,
-        fontSize: isTablet ? 22 : 19,
+        fontSize: isTablet ? 21 : 18,
         fontWeight: "800",
-        letterSpacing: -0.5,
-        marginBottom: 6,
+        letterSpacing: -0.4,
+        marginBottom: SP8,
+        lineHeight: isTablet ? 26 : 24,
     },
     heroSub: {
         color: palette.inkMuted,
         fontSize: 13,
-        lineHeight: 19,
+        lineHeight: 20,
         fontWeight: "500",
+        opacity: 0.9,
     },
     heroIconWrap: {
-        width: 52,
-        height: 52,
+        width: 50,
+        height: 50,
         borderRadius: 16,
         justifyContent: "center",
         alignItems: "center",
@@ -1339,9 +1412,9 @@ const s = StyleSheet.create({
     heroStats: {
         flexDirection: "row",
         alignItems: "center",
-        paddingHorizontal: 22,
-        paddingTop: 14,
-        paddingBottom: 20,
+        paddingHorizontal: SP24,
+        paddingTop: SP16,
+        paddingBottom: SP20,
         borderTopWidth: 0.5,
         borderTopColor: "rgba(255,255,255,0.07)",
         gap: 0,
@@ -1349,42 +1422,43 @@ const s = StyleSheet.create({
     heroStatItem: {
         flex: 1,
         alignItems: "center",
+        gap: SP4,
     },
     heroStatDivider: {
         width: 0.5,
-        height: 32,
+        height: 28,
         backgroundColor: "rgba(255,255,255,0.10)",
     },
     heroStatNum: {
         color: palette.primary,
-        fontSize: isTablet ? 26 : 22,
+        fontSize: isTablet ? 24 : 20,
         fontWeight: "900",
-        letterSpacing: -0.8,
-        marginBottom: 2,
+        letterSpacing: -0.6,
     },
     heroStatLabel: {
         color: palette.inkMuted,
-        fontSize: 11,
+        fontSize: 10,
         fontWeight: "600",
-        letterSpacing: 0.2,
+        letterSpacing: 0.4,
+        textTransform: "uppercase",
     },
 
     // ── Tab bar
     tabsContainer: {
         paddingHorizontal: PAD,
-        marginBottom: 20,
+        marginBottom: SP20,
     },
     tabsGlass: {
-        height: 52,
+        height: 50,
         overflow: "hidden",
         borderWidth: 0.5,
-        borderColor: "rgba(255,255,255,0.08)",
+        borderColor: BORDER_SUBTLE,
     },
     tabSpecular: {
         position: "absolute",
         top: 0,
-        left: 16,
-        right: 16,
+        left: SP16,
+        right: SP16,
         height: 1,
         backgroundColor: SPEC_TOP,
         borderRadius: 0.5,
@@ -1393,21 +1467,21 @@ const s = StyleSheet.create({
     tabsInner: {
         flex: 1,
         flexDirection: "row",
-        margin: 4,
+        margin: SP4,
         position: "relative",
     },
     tabPill: {
         position: "absolute",
         top: 0,
         bottom: 0,
-        borderRadius: 16,
+        borderRadius: 15,
         overflow: "hidden",
     },
     pillSpecular: {
         position: "absolute",
         top: 0,
-        left: 12,
-        right: 12,
+        left: SP12,
+        right: SP12,
         height: 1,
         backgroundColor: "rgba(255,255,255,0.32)",
         borderRadius: 0.5,
@@ -1421,35 +1495,36 @@ const s = StyleSheet.create({
     },
     tabTxt: {
         fontSize: 14,
-        fontWeight: "700",
+        fontWeight: "600",
         color: palette.inkMuted,
         letterSpacing: 0.1,
     },
     tabTxtActive: {
         color: "#fff",
         fontWeight: "800",
+        letterSpacing: 0,
     },
 
     // ── Songs list
     songsList: {
         paddingHorizontal: PAD,
-        gap: 10,
+        gap: SP8,
     },
 
     // Track row
     trackGlass: {
         overflow: "hidden",
         borderWidth: 0.5,
-        borderColor: "rgba(255,255,255,0.07)",
+        borderColor: BORDER_SUBTLE,
     },
     trackGlassActive: {
-        borderColor: "rgba(168,72,255,0.30)",
+        borderColor: BORDER_ACTIVE,
     },
     trackSpecular: {
         position: "absolute",
         top: 0,
-        left: 16,
-        right: 16,
+        left: SP16,
+        right: SP16,
         height: 0.5,
         backgroundColor: SPEC_TOP,
         zIndex: 1,
@@ -1457,9 +1532,9 @@ const s = StyleSheet.create({
     trackInner: {
         flexDirection: "row",
         alignItems: "center",
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        gap: 14,
+        paddingHorizontal: SP16,
+        paddingVertical: SP12,
+        gap: SP12,
     },
     trackArtWrap: {
         position: "relative",
@@ -1468,12 +1543,12 @@ const s = StyleSheet.create({
     trackArt: {
         width: TRACK_ART,
         height: TRACK_ART,
-        borderRadius: 14,
+        borderRadius: 12,
     },
     trackFallback: {
         width: TRACK_ART,
         height: TRACK_ART,
-        borderRadius: 14,
+        borderRadius: 12,
         justifyContent: "center",
         alignItems: "center",
     },
@@ -1481,9 +1556,9 @@ const s = StyleSheet.create({
         position: "absolute",
         right: -5,
         bottom: -5,
-        width: 24,
-        height: 24,
-        borderRadius: 12,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
         backgroundColor: "rgba(19,19,24,0.95)",
         borderWidth: 1,
         borderColor: "rgba(168,72,255,0.40)",
@@ -1496,11 +1571,11 @@ const s = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         gap: 2,
-        height: 14,
+        height: 12,
     },
     waveBar: {
         width: 2.5,
-        height: 12,
+        height: 11,
         borderRadius: 1.5,
         backgroundColor: palette.primary,
         transformOrigin: "bottom",
@@ -1508,13 +1583,15 @@ const s = StyleSheet.create({
 
     trackInfo: {
         flex: 1,
-        gap: 4,
+        gap: SP4,
+        minWidth: 0,
     },
     trackTitle: {
-        fontSize: isTablet ? 17 : 15,
+        fontSize: isTablet ? 16 : 14,
         color: palette.ink,
         fontWeight: "700",
         letterSpacing: -0.1,
+        lineHeight: isTablet ? 22 : 20,
     },
     trackTitleActive: {
         color: palette.primary,
@@ -1522,21 +1599,24 @@ const s = StyleSheet.create({
     trackMeta: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 8,
+        gap: SP8,
+        flexWrap: "nowrap",
     },
     trackArtist: {
-        fontSize: 13,
+        fontSize: 12,
         color: palette.inkMuted,
         fontWeight: "500",
         flexShrink: 1,
+        lineHeight: 16,
     },
     mimeBadge: {
-        backgroundColor: "rgba(191,90,242,0.14)",
-        borderRadius: 6,
-        paddingHorizontal: 6,
+        backgroundColor: "rgba(191,90,242,0.12)",
+        borderRadius: 5,
+        paddingHorizontal: 5,
         paddingVertical: 2,
         borderWidth: 0.5,
-        borderColor: "rgba(191,90,242,0.22)",
+        borderColor: "rgba(191,90,242,0.20)",
+        flexShrink: 0,
     },
     mimeText: {
         color: palette.primary,
@@ -1546,27 +1626,28 @@ const s = StyleSheet.create({
     },
     trackRight: {
         alignItems: "flex-end",
-        gap: 6,
+        gap: SP4,
         flexShrink: 0,
     },
     trackDur: {
         fontSize: 12,
-        color: "rgba(255,255,255,0.30)",
+        color: "rgba(255,255,255,0.28)",
         fontWeight: "600",
         fontVariant: ["tabular-nums"],
+        lineHeight: 16,
     },
 
     // Add more row
     addMoreRow: {
-        marginTop: 6,
-        paddingVertical: 8,
+        marginTop: SP8,
+        paddingVertical: SP12,
     },
     addMoreInner: {
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
-        gap: 8,
-        opacity: 0.65,
+        gap: SP8,
+        opacity: 0.6,
     },
     addMoreText: {
         color: palette.primary,
@@ -1576,7 +1657,7 @@ const s = StyleSheet.create({
 
     // ── Folders tab
     folderContainer: {
-        paddingBottom: 32,
+        paddingBottom: SP32,
     },
     folderGrid: {
         flexDirection: "row",
@@ -1586,17 +1667,17 @@ const s = StyleSheet.create({
     },
     folderGlass: {
         aspectRatio: 1,
-        padding: 16,
+        padding: SP16,
         justifyContent: "space-between",
         overflow: "hidden",
         borderWidth: 0.5,
-        borderColor: "rgba(255,255,255,0.08)",
+        borderColor: BORDER_SUBTLE,
     },
     folderSpecular: {
         position: "absolute",
         top: 0,
-        left: 14,
-        right: 14,
+        left: SP12,
+        right: SP12,
         height: 1,
         backgroundColor: SPEC_TOP,
         zIndex: 1,
@@ -1606,12 +1687,12 @@ const s = StyleSheet.create({
         justifyContent: "flex-end",
     },
     folderBadge: {
-        backgroundColor: "rgba(191,90,242,0.18)",
-        paddingHorizontal: 9,
-        paddingVertical: 4,
-        borderRadius: 10,
+        backgroundColor: "rgba(191,90,242,0.16)",
+        paddingHorizontal: SP8,
+        paddingVertical: 3,
+        borderRadius: 8,
         borderWidth: 0.5,
-        borderColor: "rgba(191,90,242,0.28)",
+        borderColor: "rgba(191,90,242,0.26)",
     },
     folderBadgeText: {
         color: palette.primary,
@@ -1622,50 +1703,50 @@ const s = StyleSheet.create({
         alignSelf: "flex-start",
     },
     folderIconBg: {
-        width: 52,
-        height: 52,
-        borderRadius: 16,
+        width: 48,
+        height: 48,
+        borderRadius: 14,
         justifyContent: "center",
         alignItems: "center",
     },
     folderBottom: {
-        gap: 3,
+        gap: SP4,
     },
     folderName: {
         color: palette.ink,
-        fontSize: isTablet ? 15 : 14,
+        fontSize: isTablet ? 14 : 13,
         fontWeight: "800",
         letterSpacing: -0.2,
-        lineHeight: 18,
+        lineHeight: 17,
     },
     folderSub: {
         color: palette.inkMuted,
-        fontSize: 12,
+        fontSize: 11,
         fontWeight: "500",
     },
 
     // ── Manage folders
     manageSection: {
-        marginTop: 32,
+        marginTop: SP32,
         paddingHorizontal: PAD,
     },
     manageTitleRow: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 10,
-        marginBottom: 14,
+        gap: SP8,
+        marginBottom: SP16,
     },
     manageTitle: {
         color: palette.ink,
-        fontSize: 17,
+        fontSize: 16,
         fontWeight: "800",
         letterSpacing: -0.3,
     },
     manageTitleBadge: {
-        backgroundColor: "rgba(191,90,242,0.14)",
-        paddingHorizontal: 8,
+        backgroundColor: "rgba(191,90,242,0.12)",
+        paddingHorizontal: SP8,
         paddingVertical: 3,
-        borderRadius: 8,
+        borderRadius: 7,
     },
     manageTitleBadgeText: {
         color: palette.primary,
@@ -1675,28 +1756,28 @@ const s = StyleSheet.create({
     managedGlass: {
         overflow: "hidden",
         borderWidth: 0.5,
-        borderColor: "rgba(255,255,255,0.07)",
+        borderColor: BORDER_SUBTLE,
     },
     managedSpecular: {
         position: "absolute",
         top: 0,
-        left: 14,
-        right: 14,
+        left: SP12,
+        right: SP12,
         height: 0.5,
         backgroundColor: SPEC_TOP,
     },
     managedRow: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 12,
-        paddingHorizontal: 16,
-        paddingVertical: 14,
+        gap: SP12,
+        paddingHorizontal: SP16,
+        paddingVertical: SP16,
     },
     managedIconWrap: {
-        width: 34,
-        height: 34,
+        width: 36,
+        height: 36,
         borderRadius: 10,
-        backgroundColor: "rgba(191,90,242,0.12)",
+        backgroundColor: "rgba(191,90,242,0.10)",
         justifyContent: "center",
         alignItems: "center",
         flexShrink: 0,
@@ -1706,19 +1787,20 @@ const s = StyleSheet.create({
         color: palette.inkMuted,
         fontSize: 14,
         fontWeight: "500",
+        lineHeight: 20,
     },
     managedDivider: {
         height: 0.5,
-        marginHorizontal: 16,
+        marginHorizontal: SP16,
         backgroundColor: "rgba(255,255,255,0.06)",
     },
     addFolderBtn: {
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
-        gap: 8,
-        marginTop: 14,
-        paddingVertical: 12,
+        gap: SP8,
+        marginTop: SP16,
+        paddingVertical: SP12,
     },
     addFolderBtnText: {
         color: palette.primary,
@@ -1730,25 +1812,25 @@ const s = StyleSheet.create({
     stateCenter: {
         alignItems: "center",
         paddingHorizontal: PAD,
-        paddingTop: 80,
-        gap: 12,
+        paddingTop: 72,
+        gap: SP12,
     },
     loaderGlass: {
-        width: 88,
-        height: 88,
+        width: 84,
+        height: 84,
         justifyContent: "center",
         alignItems: "center",
-        marginBottom: 12,
+        marginBottom: SP16,
         overflow: "hidden",
         borderWidth: 0.5,
-        borderColor: "rgba(255,255,255,0.08)",
+        borderColor: BORDER_SUBTLE,
     },
     stateContainer: {
         paddingHorizontal: PAD,
-        marginTop: 24,
+        marginTop: SP24,
     },
     stateGlass: {
-        padding: 28,
+        padding: SP32,
         alignItems: "center",
         overflow: "hidden",
         borderWidth: 0.5,
@@ -1757,13 +1839,13 @@ const s = StyleSheet.create({
     stateSpecular: {
         position: "absolute",
         top: 0,
-        left: 24,
-        right: 24,
+        left: SP24,
+        right: SP24,
         height: 1,
         backgroundColor: SPEC_TOP,
     },
     stateIconWrap: {
-        marginBottom: 22,
+        marginBottom: SP24,
     },
     stateIconBg: {
         width: 80,
@@ -1774,19 +1856,21 @@ const s = StyleSheet.create({
     },
     stateTitle: {
         color: palette.ink,
-        fontSize: isTablet ? 24 : 21,
+        fontSize: isTablet ? 22 : 20,
         fontWeight: "900",
-        letterSpacing: -0.6,
+        letterSpacing: -0.5,
         textAlign: "center",
-        marginBottom: 10,
+        marginBottom: SP8,
+        lineHeight: isTablet ? 28 : 26,
     },
     stateSub: {
         color: palette.inkMuted,
         fontSize: 14,
         lineHeight: 22,
         textAlign: "center",
-        marginBottom: 28,
-        paddingHorizontal: 8,
+        marginBottom: SP32,
+        paddingHorizontal: SP8,
+        opacity: 0.9,
     },
 
     // Primary CTA button
@@ -1797,22 +1881,22 @@ const s = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
         flexDirection: "row",
-        gap: 8,
+        gap: SP8,
         width: "100%",
         // Shadow
         shadowColor: palette.primary,
         shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.35,
+        shadowOpacity: 0.30,
         shadowRadius: 14,
         elevation: 10,
     },
     primaryBtnSpec: {
         position: "absolute",
         top: 0,
-        left: 24,
-        right: 24,
+        left: SP24,
+        right: SP24,
         height: 1,
-        backgroundColor: "rgba(255,255,255,0.32)",
+        backgroundColor: "rgba(255,255,255,0.28)",
         zIndex: 1,
     },
     primaryBtnTxt: {
@@ -1826,7 +1910,7 @@ const s = StyleSheet.create({
     ghostBtn: {
         height: 52,
         borderRadius: 26,
-        backgroundColor: "rgba(255,255,255,0.07)",
+        backgroundColor: "rgba(255,255,255,0.06)",
         borderWidth: 0.5,
         borderColor: "rgba(255,255,255,0.12)",
         justifyContent: "center",
@@ -1840,7 +1924,7 @@ const s = StyleSheet.create({
 
     dualBtnRow: {
         flexDirection: "row",
-        gap: 12,
+        gap: SP12,
         width: "100%",
     },
 
@@ -1849,63 +1933,69 @@ const s = StyleSheet.create({
         flex: 1,
         justifyContent: "center",
         alignItems: "center",
+        paddingHorizontal: PAD,
     },
     onboardingBackdrop: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: "rgba(0,0,0,0.68)",
+        backgroundColor: "rgba(0,0,0,0.72)",
     },
     onboardingContent: {
-        width: SW - PAD * 2,
-        maxWidth: 340,
+        width: "100%",
+        maxWidth: 360,
     },
     onboardingGlass: {
-        padding: 28,
+        paddingHorizontal: SP24,
+        paddingTop: SP32,
+        paddingBottom: SP24,
         alignItems: "center",
         overflow: "hidden",
     },
     onboardingSpecular: {
         position: "absolute",
         top: 0,
-        left: 24,
-        right: 24,
+        left: SP24,
+        right: SP24,
         height: 1,
         backgroundColor: SPEC_TOP,
     },
     onboardingIconWrap: {
-        marginBottom: 22,
+        marginBottom: SP24,
     },
     onboardingIconBg: {
-        width: 88,
-        height: 88,
-        borderRadius: 26,
+        width: 84,
+        height: 84,
+        borderRadius: 24,
         justifyContent: "center",
         alignItems: "center",
     },
     onboardingTitle: {
         color: palette.ink,
-        fontSize: isTablet ? 23 : 20,
+        fontSize: isTablet ? 22 : 20,
         fontWeight: "900",
         letterSpacing: -0.5,
         textAlign: "center",
-        marginBottom: 12,
+        marginBottom: SP12,
+        lineHeight: isTablet ? 28 : 26,
     },
     onboardingSub: {
         color: palette.inkMuted,
         fontSize: 14,
-        lineHeight: 21,
+        lineHeight: 22,
         textAlign: "center",
-        marginBottom: 12,
+        marginBottom: SP12,
+        paddingHorizontal: SP4,
     },
     onboardingNote: {
-        color: "rgba(170,170,185,0.45)",
+        color: "rgba(170,170,185,0.40)",
         fontSize: 12,
         lineHeight: 18,
         textAlign: "center",
-        marginBottom: 24,
+        marginBottom: SP24,
+        paddingHorizontal: SP8,
     },
     onboardingActions: {
         width: "100%",
-        gap: 12,
+        gap: SP12,
     },
     onboardingPrimaryBtn: {
         height: 52,
@@ -1914,15 +2004,21 @@ const s = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
         flexDirection: "row",
-        gap: 8,
+        gap: SP8,
+        width: "100%",
+        shadowColor: palette.primary,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.30,
+        shadowRadius: 14,
+        elevation: 10,
     },
     onboardingBtnSpec: {
         position: "absolute",
         top: 0,
-        left: 24,
-        right: 24,
+        left: SP24,
+        right: SP24,
         height: 1,
-        backgroundColor: "rgba(255,255,255,0.32)",
+        backgroundColor: "rgba(255,255,255,0.28)",
         zIndex: 1,
     },
     onboardingPrimaryBtnText: {
@@ -1932,11 +2028,14 @@ const s = StyleSheet.create({
         letterSpacing: 0.2,
     },
     onboardingSecondaryBtn: {
-        height: 44,
-        borderRadius: 22,
+        height: 52,
+        borderRadius: 26,
         justifyContent: "center",
         alignItems: "center",
-        backgroundColor: "rgba(255,255,255,0.04)",
+        width: "100%",
+        backgroundColor: "rgba(255,255,255,0.06)",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.08)",
     },
     onboardingSecondaryBtnText: {
         color: palette.inkMuted,
@@ -1946,6 +2045,6 @@ const s = StyleSheet.create({
 
     // ── Permission Denied Modal
     deniedIconWrap: {
-        marginBottom: 20,
+        marginBottom: SP20,
     },
 });

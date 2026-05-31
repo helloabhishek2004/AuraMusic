@@ -25,6 +25,7 @@ import { useRecentSearchStore } from "@/src/features/search/store/recent-search.
 import { RecentSearchItem } from "@/src/features/search/types/recent-search";
 import { useSearch } from "@/src/hooks/use-search";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
+import { useBackHandler, BackPriority } from "@/src/navigation/back";
 import { MusicTrack } from "@/src/types/music";
 import { DownloadButton } from "@/src/components/ui/download-button";
 import { Ionicons } from "@expo/vector-icons";
@@ -54,6 +55,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Keyboard,
 } from "react-native";
 import Reanimated, {
   useAnimatedStyle,
@@ -1361,6 +1363,17 @@ export default function SearchScreen() {
 
   // ── Search focus state — slide search bar for keyboard ──────────────────
   const [isFocused, setIsFocused] = useState(false);
+
+  useBackHandler({
+    id: 'search-keyboard-dismiss',
+    enabled: isFocused,
+    priority: BackPriority.KEYBOARD_DISMISS,
+    onBack: useCallback(() => {
+      Keyboard.dismiss();
+      inputRef.current?.blur();
+      return true;
+    }, [])
+  });
 
   const createPlayerTrack = useCallback(
     (track: any): PlayerTrack => ({

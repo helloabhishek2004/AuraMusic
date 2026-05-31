@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo } from 'react';
+import { BackPriorityProvider } from '../src/navigation/back';
 import { Stack } from 'expo-router';
 import { ThemeProvider as NavigationThemeProvider, DarkTheme } from '@react-navigation/native';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { MusicProvider, useNowPlayingTrack } from '../src/context/MusicContext';
 import { palette } from '../src/design/tokens';
 import { StyleSheet } from 'react-native';
-import { usePathname, useSegments } from 'expo-router';
+
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts, Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
@@ -13,10 +14,10 @@ import { Manrope_700Bold } from '@expo-google-fonts/manrope';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { enableFreeze } from 'react-native-screens';
 
-import MiniPlayer from '../src/components/MiniPlayer';
+
 import { PlaybackService } from '../src/features/player/services/playback.service';
 import { PlaybackController } from '../src/features/player/services/playback.controller';
-import { useSmartBackNavigation } from '../src/hooks/use-navigation-history';
+
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 enableFreeze(true);
@@ -201,7 +202,6 @@ function StartupPermissionGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <>{children}</>;
 }
 
 export default function RootLayout() {
@@ -236,7 +236,6 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, error]);
 
-  useSmartBackNavigation();
 
   const navigationTheme = useMemo(
     () => ({
@@ -262,6 +261,7 @@ export default function RootLayout() {
       <NavigationThemeProvider value={navigationTheme}>
         <MusicProvider>
           <GestureHandlerRootView style={styles.root}>
+            <BackPriorityProvider>
             <DynamicTrackTheme />
             <StatusBar style="light" translucent backgroundColor="transparent" />
             <Stack
@@ -300,6 +300,7 @@ export default function RootLayout() {
               <Stack.Screen name="local_library" options={{ animation: 'slide_from_right' }} />
             </Stack>
             <PlayerOverlay />
+            </BackPriorityProvider>
           </GestureHandlerRootView>
         </MusicProvider>
       </NavigationThemeProvider>

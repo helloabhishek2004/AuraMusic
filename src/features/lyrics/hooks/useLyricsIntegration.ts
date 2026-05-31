@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from "react";
-import { useDerivedValue, SharedValue } from "react-native-reanimated";
+import { useDerivedValue, SharedValue, useSharedValue } from "react-native-reanimated";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { useLyricsStore } from "../store/lyrics.store";
 import TrackPlayer from "@rntp/player";
@@ -11,7 +11,7 @@ export const useLyricsIntegration = (isVisible: boolean) => {
   const lyricsData = useLyricsStore((state) => state.lyrics);
   const fetchLyrics = useLyricsStore((state) => state.fetchLyrics);
   
-  const activeLineIndex = usePlayerStore(s => s.activeLineIndex) || useSharedValue(-1);
+  const activeLineIndex = useSharedValue(-1);
   const isFollowing = useSharedValue(true);
 
   // Optimized Active Line Detection on UI Thread
@@ -28,7 +28,7 @@ export const useLyricsIntegration = (isVisible: boolean) => {
     // Fast Path: Still on same line?
     if (last >= 0 && last < lines.length) {
       const cur = lines[last].time;
-      const nxt = lines[last].endTime || (last + 1 < lines.length ? lines[last + 1].time : Infinity);
+      const nxt = (lines[last] as any).endTime || (last + 1 < lines.length ? lines[last + 1].time : Infinity);
       if (t >= cur && t < nxt) return;
     }
 

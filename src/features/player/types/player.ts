@@ -70,7 +70,7 @@ export interface PlaybackActions {
   togglePlayback: () => Promise<void>;
   stop: () => Promise<void>;
   next: () => Promise<void>;
-  previous: () => Promise<void>;
+  previous: (forcePrevious?: boolean) => Promise<void>;
   seek: (position: number) => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
   setRepeatMode: (mode: RepeatMode) => void;

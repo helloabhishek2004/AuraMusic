@@ -5,7 +5,8 @@ import {
   LayoutChangeEvent,
   useWindowDimensions,
   Platform,
-  ActivityIndicator
+  ActivityIndicator,
+  Text
 } from "react-native";
 import Animated, {
   useAnimatedStyle,
@@ -22,7 +23,7 @@ import Animated, {
 import { FlashList } from "@shopify/flash-list";
 import { palette, spacing, typography } from "@/src/design/tokens";
 
-const AnimatedFlashList = Animated.createAnimatedComponent(FlashList);
+const AnimatedFlashList = Animated.createAnimatedComponent(FlashList as any) as any;
 
 interface LyricLineData {
   time: number;
