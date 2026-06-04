@@ -4,10 +4,14 @@ import { PlayerTrack } from '../types/player';
 export function usePlayer() {
   const store = usePlayerStore();
 
-  const playTrack = async (track: PlayerTrack, queue?: PlayerTrack[]) => {
+  const playTrack = async (track: PlayerTrack, queue?: PlayerTrack[], context?: any) => {
     if (queue) {
       const index = queue.findIndex(t => t.id === track.id);
-      await store.setQueue(queue, index >= 0 ? index : 0);
+      await store.setQueue(queue, index >= 0 ? index : 0, context || {
+        sourceId: track.id,
+        sourceType: "manual",
+        generatedAt: Date.now()
+      });
     } else {
       await store.setTrack(track);
     }

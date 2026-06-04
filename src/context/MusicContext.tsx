@@ -23,6 +23,8 @@ type MusicProgressContextType = {
   bufferedMs: SharedValue<number>;
 };
 
+import { QueueContext } from "../features/player/services/queue-intelligence";
+
 type MusicActionsContextType = {
   play: (track?: Track) => Promise<void>;
   pause: () => Promise<void>;
@@ -30,7 +32,7 @@ type MusicActionsContextType = {
   prev: (forcePrevious?: boolean) => Promise<void>;
   seek: (progress: number) => Promise<void>;
   setTrack: (track: Track) => Promise<void>;
-  setQueue: (tracks: Track[], startIndex?: number) => Promise<void>;
+  setQueue: (tracks: Track[], startIndex?: number, context?: QueueContext) => Promise<void>;
   playNext: (track: Track) => void;
   addToQueue: (track: Track) => void;
   toggleRepeat: () => Promise<void>;

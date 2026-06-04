@@ -161,7 +161,18 @@ export async function resolveAudioOnly(t: PlayerTrack, preloadedTrack?: PlayerTr
                     const { getPreferredStreamingQuality } = await import("./audio-quality");
                     const quality = await getPreferredStreamingQuality();
                     
-                    const { streamUrl } = await musicService.resolveStream(resolved.id, quality);
+                    let targetId = resolved.id;
+                    const isCatalogId = resolved.source === 'local' || targetId.length < 11 || targetId === 'nebula' || targetId === 'neon' || targetId === 'solar' || targetId === 'cosmic' || targetId === 'midnight';
+                    if (isCatalogId) {
+                        console.log(`[TrackResolver] Catalog track detected: ${resolved.title}. Performing search lookup...`);
+                        const searchResults = await musicService.searchSongs(`${resolved.title} ${resolved.artist}`);
+                        if (searchResults && searchResults.length > 0) {
+                            targetId = searchResults[0].id;
+                            console.log(`[TrackResolver] Resolved catalog track to online ID: ${targetId}`);
+                        }
+                    }
+
+                    const { streamUrl } = await musicService.resolveStream(targetId, quality);
                     if (streamUrl) {
                         resolved = { ...resolved, url: streamUrl };
                         useMediaCacheStore.getState().cacheTrack(resolved);

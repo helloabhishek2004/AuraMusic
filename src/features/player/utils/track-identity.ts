@@ -46,3 +46,11 @@ export function getCanonicalTrackId(track: Partial<PlayerTrack>): string {
     // 4. Absolute fallback
     return track.id || `unknown-${Date.now()}`;
 }
+
+export function verifyTrackIdentity(
+  selectedId: string,
+  resolvedId: string,
+  nativeId: string
+): boolean {
+  return selectedId === resolvedId && resolvedId === nativeId;
+}

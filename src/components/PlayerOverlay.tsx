@@ -47,6 +47,7 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { useRouter, useSegments } from "expo-router";
 import { playbackProgress } from "@/src/features/player/services/playback-progress";
+import { useResponsiveMetrics } from "@/src/hooks/use-responsive-metrics";
 
 import { usePlayerUIStore } from "@/src/features/player/store/player-ui.store";
 import { useBackHandler, BackPriority } from "@/src/navigation/back";
@@ -643,23 +644,67 @@ const DevicePickerSurface = memo(({ visible, onClose, accentColor }: any) => {
   );
 });
 
-// ── Main Player Overlay ───────────────────────────────────────────────────────
-export default function PlayerOverlay() {
+interface PlayerOverlayProps {
+  expandProgress: SharedValue<number>;
+}
+
+export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   const router = useRouter();
   const segments = useSegments();
   const insets = useSafeAreaInsets();
 
+  const metrics = useResponsiveMetrics();
   const isExpanded = usePlayerUIStore(s => s.isExpanded);
   const expand = usePlayerUIStore(s => s.expand);
   const collapse = usePlayerUIStore(s => s.collapse);
   const activeSurface = usePlayerUIStore(s => s.activeSurface);
   
   const currentTrack = usePlayerStore(s => s.currentTrack);
+  const queue = usePlayerStore(s => s.queue);
+  const currentIndex = usePlayerStore(s => s.currentIndex);
+  const prevTrack = currentIndex > 0 ? queue[currentIndex - 1] : null;
+  const nextTrack = currentIndex < queue.length - 1 ? queue[currentIndex + 1] : null;
   const isPlaying = usePlayerStore(s => s.isPlaying);
   const isTransitioning = usePlayerStore(s => s.isTransitioning);
   const isPreloading = usePlayerStore(s => s.isPreloading);
   const isBuffering = usePlayerStore(s => s.isBuffering);
   const isTransitionLoading = isTransitioning || isPreloading || isBuffering;
+
+  const bgFadeProgress = useSharedValue(1);
+
+  const [bgBuffers, setBgBuffers] = useState(() => {
+    const initialPalette = currentTrack?.dominantColors 
+      ? paletteFromDominant(currentTrack.dominantColors) 
+      : getDeterministicPalette(currentTrack?.id);
+    return {
+      prevArtwork: currentTrack?.art || null,
+      currentArtwork: currentTrack?.art || null,
+      prevPalette: initialPalette,
+      currentPalette: initialPalette,
+    };
+  });
+
+  useEffect(() => {
+    const nextPalette = currentTrack?.dominantColors 
+      ? paletteFromDominant(currentTrack.dominantColors) 
+      : getDeterministicPalette(currentTrack?.id);
+    const nextArtwork = currentTrack?.art || null;
+
+    setBgBuffers(prev => {
+      if (prev.currentArtwork === nextArtwork && prev.currentPalette.backgroundBase === nextPalette.backgroundBase) {
+        return prev;
+      }
+      return {
+        prevArtwork: prev.currentArtwork,
+        currentArtwork: nextArtwork,
+        prevPalette: prev.currentPalette,
+        currentPalette: nextPalette,
+      };
+    });
+
+    bgFadeProgress.value = 0;
+    bgFadeProgress.value = withTiming(1, { duration: 450 });
+  }, [currentTrack?.id]);
 
   const play = usePlayerStore(s => s.play);
   const pause = usePlayerStore(s => s.pause);
@@ -780,7 +825,6 @@ export default function PlayerOverlay() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
   }, [activeSurface, openMenu, closeMenu, isLocked]);
 
-  const expandProgress = useSharedValue(0);
   const startProgress = useSharedValue(0);
   const surfaceOpenProgress = useSharedValue(0);
 
@@ -846,32 +890,12 @@ export default function PlayerOverlay() {
 
   const miniGesture = Gesture.Exclusive(collapsedPan, collapsedTap);
 
-  // Gesture definition for PlayerOverlayPresentation
-  const expandedPan = Gesture.Pan().enabled(activeSurface !== 'lyrics')
-    .onStart(() => {
-      "worklet";
-      startProgress.value = expandProgress.value;
-    })
-    .onUpdate((e) => {
-      "worklet";
-      const delta = e.translationY / (SH * 0.65);
-      expandProgress.value = Math.max(0, Math.min(1, startProgress.value - delta));
-    })
-    .onEnd((e) => {
-      "worklet";
-      if (e.velocityY > 500 || expandProgress.value < 0.5) {
-        expandProgress.value = withSpring(0, SPR_MAIN, (finished) => {
-          if (finished) runOnJS(collapse)();
-        });
-      } else {
-        expandProgress.value = withSpring(1, SPR_MAIN, (finished) => {
-          if (finished) runOnJS(expand)();
-        });
-      }
-    });
+  const isGestureEnabled = activeSurface !== 'lyrics' && activeSurface !== 'queue';
 
   const artSwipeX = useSharedValue(0);
   const artScale = useSharedValue(1);
+  const artDismissY = useSharedValue(0);
+  const dragDirection = useSharedValue<'none' | 'horizontal' | 'vertical'>('none');
 
   const nextTrackJS = () => {
     next();
@@ -882,36 +906,116 @@ export default function PlayerOverlay() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
-  const artworkSwipe = Gesture.Pan()
-    .activeOffsetX([-20, 20])
-    .failOffsetY([-20, 20])
+  // Gesture definition for PlayerOverlayPresentation
+  const expandedPan = Gesture.Pan()
+    .enabled(isGestureEnabled)
+    .onStart(() => {
+      "worklet";
+      startProgress.value = expandProgress.value;
+      artDismissY.value = 0;
+    })
     .onUpdate((e) => {
       "worklet";
-      artSwipeX.value = e.translationX;
-      artScale.value = interpolate(Math.abs(e.translationX), [0, SW * 0.4], [1, 0.94], Extrapolate.CLAMP);
+      const dy = e.translationY;
+      if (dy > 0) {
+        artDismissY.value = dy;
+        const delta = dy / (SH * 0.85);
+        expandProgress.value = Math.max(0, Math.min(1, startProgress.value - delta));
+      }
     })
     .onEnd((e) => {
       "worklet";
-      if (e.translationX < -SW * 0.25 || e.velocityX < -400) {
-        artSwipeX.value = withTiming(-SW, { duration: 180 }, (finished) => {
+      const threshold = SH * 0.22;
+      if (e.translationY > threshold || e.velocityY > 500) {
+        expandProgress.value = withSpring(0, SPR_MAIN, (finished) => {
           if (finished) {
-            runOnJS(nextTrackJS)();
-            artSwipeX.value = 0;
-            artScale.value = withSpring(1);
-          }
-        });
-      } else if (e.translationX > SW * 0.25 || e.velocityX > 400) {
-        artSwipeX.value = withTiming(SW, { duration: 180 }, (finished) => {
-          if (finished) {
-            runOnJS(prevTrackJS)();
-            artSwipeX.value = 0;
-            artScale.value = withSpring(1);
+            runOnJS(collapse)();
+            artDismissY.value = 0;
           }
         });
       } else {
-        artSwipeX.value = withSpring(0);
-        artScale.value = withSpring(1);
+        expandProgress.value = withSpring(1, SPR_MAIN);
+        artDismissY.value = withSpring(0, SPR_REBOUND);
       }
+    });
+
+  const artworkSwipe = Gesture.Pan()
+    .enabled(isGestureEnabled)
+    .onStart(() => {
+      "worklet";
+      dragDirection.value = 'none';
+      startProgress.value = expandProgress.value;
+      artDismissY.value = 0;
+      artSwipeX.value = 0;
+    })
+    .onUpdate((e) => {
+      "worklet";
+      const dx = e.translationX;
+      const dy = e.translationY;
+
+      if (dragDirection.value === 'none') {
+        const absX = Math.abs(dx);
+        const absY = Math.abs(dy);
+        if (absX > 10 || absY > 10) {
+          if (absX > absY) {
+            dragDirection.value = 'horizontal';
+          } else {
+            if (dy > 0) {
+              dragDirection.value = 'vertical';
+            }
+          }
+        }
+      }
+
+      if (dragDirection.value === 'horizontal') {
+        artSwipeX.value = dx;
+        artScale.value = interpolate(Math.abs(dx), [0, SW * 0.4], [1, 0.94], Extrapolate.CLAMP);
+        artDismissY.value = 0;
+      } else if (dragDirection.value === 'vertical') {
+        artDismissY.value = Math.max(0, dy);
+        artSwipeX.value = 0;
+        const delta = Math.max(0, dy) / (SH * 0.85);
+        expandProgress.value = Math.max(0, Math.min(1, startProgress.value - delta));
+      }
+    })
+    .onEnd((e) => {
+      "worklet";
+      if (dragDirection.value === 'horizontal') {
+        if (e.translationX < -SW * 0.25 || e.velocityX < -400) {
+          artSwipeX.value = withSpring(-SW, SPR_SWIPE, (finished) => {
+            if (finished) {
+              runOnJS(nextTrackJS)();
+              artSwipeX.value = 0;
+              artScale.value = withSpring(1);
+            }
+          });
+        } else if (e.translationX > SW * 0.25 || e.velocityX > 400) {
+          artSwipeX.value = withSpring(SW, SPR_SWIPE, (finished) => {
+            if (finished) {
+              runOnJS(prevTrackJS)();
+              artSwipeX.value = 0;
+              artScale.value = withSpring(1);
+            }
+          });
+        } else {
+          artSwipeX.value = withSpring(0, SPR_REBOUND);
+          artScale.value = withSpring(1, SPR_REBOUND);
+        }
+      } else if (dragDirection.value === 'vertical') {
+        const threshold = SH * 0.22;
+        if (e.translationY > threshold || e.velocityY > 500) {
+          expandProgress.value = withSpring(0, SPR_MAIN, (finished) => {
+            if (finished) {
+              runOnJS(collapse)();
+              artDismissY.value = 0;
+            }
+          });
+        } else {
+          expandProgress.value = withSpring(1, SPR_MAIN);
+          artDismissY.value = withSpring(0, SPR_REBOUND);
+        }
+      }
+      dragDirection.value = 'none';
     });
 
   const breathValue = useSharedValue(1);
@@ -1058,25 +1162,44 @@ export default function PlayerOverlay() {
     opacity: 0.4 * surfaceOpenProgress.value
   }));
 
+  const prevBgStyle = useAnimatedStyle(() => {
+    const p = expandProgress.value;
+    const expansionBgFade = interpolate(p, [0, 0.38], [0, 1], Extrapolate.CLAMP);
+    return {
+      opacity: expansionBgFade * (1 - bgFadeProgress.value),
+      transform: [{ scale: 1 }],
+    };
+  });
+
+  const currentBgStyle = useAnimatedStyle(() => {
+    const p = expandProgress.value;
+    const expansionBgFade = interpolate(p, [0, 0.38], [0, 1], Extrapolate.CLAMP);
+    const scaleSettle = interpolate(bgFadeProgress.value, [0, 1], [1.04, 1], Extrapolate.CLAMP);
+    return {
+      opacity: expansionBgFade * bgFadeProgress.value,
+      transform: [{ scale: scaleSettle }],
+    };
+  });
+
   const overlayStyle = useAnimatedStyle(() => {
     const p = expandProgress.value;
-    const opacity = interpolate(p, [0, 0.38], [0, 1], Extrapolate.CLAMP);
     const translateY = interpolate(p, [0, 1], [SH * 0.8, 0], Extrapolate.CLAMP);
+    const scale = interpolate(p, [0, 1], [0.95, 1], Extrapolate.CLAMP);
     const isHidden = p <= 0.01;
     return {
-      opacity,
-      transform: [{ translateY }],
+      transform: [
+        { translateY },
+        { scale },
+      ],
       display: isHidden ? 'none' : 'flex',
     };
   });
 
   const controlsStyle = useAnimatedStyle(() => {
     const p = expandProgress.value;
-    // Start fading in controls much earlier (from 0.35 instead of 0.75)
-    const expandOp = interpolate(p, [0.35, 0.85], [0, 1], Extrapolate.CLAMP);
+    const overlayContentOpacity = interpolate(p, [0.08, 0.35], [0, 1], Extrapolate.CLAMP);
+    const op = overlayContentOpacity * controlsOpacity.value * interpolate(surfaceOpenProgress.value, [0, 1], [1, 0]);
     const expandY = interpolate(p, [0.35, 0.85], [24, 0], Extrapolate.CLAMP);
-
-    const op = expandOp * controlsOpacity.value * interpolate(surfaceOpenProgress.value, [0, 1], [1, 0]);
     const ty = expandY + interpolate(surfaceOpenProgress.value, [0, 1], [0, 24]);
 
     return { 
@@ -1088,23 +1211,126 @@ export default function PlayerOverlay() {
 
   const expArtStyle = useAnimatedStyle(() => {
     const isLyricsActive = activeSurface === 'lyrics' || lastSurface === 'lyrics';
-    const artworkFade = interpolate(expandProgress.value, [0.35, 0.85], [0, 1], Extrapolate.CLAMP);
-    const dim = artworkFade * (isLyricsActive ? interpolate(surfaceOpenProgress.value, [0, 1], [1, 0]) : 1);
+    const dim = isLyricsActive ? interpolate(surfaceOpenProgress.value, [0, 1], [1, 0]) : 1;
+    
+    const p = expandProgress.value;
+    const scaleFactor = 48 / ART_BOX;
+    const currentScale = interpolate(p, [0, 1], [scaleFactor, 1], Extrapolate.CLAMP);
+    
+    const miniArtCenterX = (SW - metrics.navWidth) / 2 + 12 + 24;
+    const miniArtCenterY = SH - bottomOffset - 10 - 24;
+    const expandedArtCenterX = SW / 2;
+    const expandedArtCenterY = insets.top + 60 + ART_BOX / 2;
+
+    const targetTranslateX = miniArtCenterX - expandedArtCenterX;
+    const currentTranslateX = interpolate(p, [0, 1], [targetTranslateX, 0], Extrapolate.CLAMP);
+    
+    const parentTranslateY = interpolate(p, [0, 1], [SH * 0.8, 0], Extrapolate.CLAMP);
+    const desiredScreenY = interpolate(p, [0, 1], [miniArtCenterY, expandedArtCenterY], Extrapolate.CLAMP);
+    const currentTranslateY = desiredScreenY - parentTranslateY - expandedArtCenterY;
+    
+    const currentBorderRadius = interpolate(p, [0, 1], [13 * (ART_BOX / 48), 12], Extrapolate.CLAMP);
     const breathSc = activeSurface !== 'lyrics' ? breathValue.value : 1;
+
+    const verticalDragScale = artDismissY.value > 0
+      ? interpolate(artDismissY.value, [0, SH * 0.4], [0.98, 0.92], Extrapolate.CLAMP)
+      : 1.0;
+
     return { 
       opacity: dim, 
+      borderRadius: currentBorderRadius,
       transform: [
-        { translateX: artSwipeX.value },
-        { scale: breathSc * artScale.value },
+        { translateX: currentTranslateX + artSwipeX.value },
+        { translateY: currentTranslateY + artDismissY.value * 0.3 },
+        { scale: currentScale * breathSc * artScale.value * verticalDragScale },
       ], 
       display: dim <= 0.01 ? "none" : "flex" 
     };
   });
 
-  const bottomBarOverlayStyle = useAnimatedStyle(() => ({ 
-    opacity: controlsOpacity.value, 
-    transform: [{ translateY: interpolate(controlsOpacity.value, [0, 1], [12, 0]) }] 
-  }));
+  const prevArtStyle = useAnimatedStyle(() => {
+    const isLyricsActive = activeSurface === 'lyrics' || lastSurface === 'lyrics';
+    const dim = isLyricsActive ? interpolate(surfaceOpenProgress.value, [0, 1], [1, 0]) : 1;
+
+    const p = expandProgress.value;
+    const scaleFactor = 48 / ART_BOX;
+    const currentScale = interpolate(p, [0, 1], [scaleFactor, 1], Extrapolate.CLAMP);
+
+    const miniArtCenterX = (SW - metrics.navWidth) / 2 + 12 + 24;
+    const miniArtCenterY = SH - bottomOffset - 10 - 24;
+    const expandedArtCenterX = SW / 2;
+    const expandedArtCenterY = insets.top + 60 + ART_BOX / 2;
+
+    const targetTranslateX = miniArtCenterX - expandedArtCenterX;
+    const currentTranslateX = interpolate(p, [0, 1], [targetTranslateX, 0], Extrapolate.CLAMP);
+
+    const parentTranslateY = interpolate(p, [0, 1], [SH * 0.8, 0], Extrapolate.CLAMP);
+    const desiredScreenY = interpolate(p, [0, 1], [miniArtCenterY, expandedArtCenterY], Extrapolate.CLAMP);
+    const currentTranslateY = desiredScreenY - parentTranslateY - expandedArtCenterY;
+
+    const currentBorderRadius = interpolate(p, [0, 1], [13 * (ART_BOX / 48), 12], Extrapolate.CLAMP);
+
+    const prevArtScale = interpolate(artSwipeX.value, [0, SW * 0.4], [0.9, 1.0], Extrapolate.CLAMP);
+    const opacity = interpolate(Math.abs(artSwipeX.value), [0, SW * 0.3], [0, 1], Extrapolate.CLAMP);
+
+    return {
+      opacity: dim * opacity * (1 - surfaceOpenProgress.value),
+      borderRadius: currentBorderRadius,
+      transform: [
+        { translateX: currentTranslateX + artSwipeX.value - (ART_BOX + 24) },
+        { translateY: currentTranslateY + artDismissY.value * 0.3 },
+        { scale: currentScale * prevArtScale },
+      ],
+      display: dim * opacity <= 0.01 ? "none" : "flex"
+    };
+  });
+
+  const nextArtStyle = useAnimatedStyle(() => {
+    const isLyricsActive = activeSurface === 'lyrics' || lastSurface === 'lyrics';
+    const dim = isLyricsActive ? interpolate(surfaceOpenProgress.value, [0, 1], [1, 0]) : 1;
+
+    const p = expandProgress.value;
+    const scaleFactor = 48 / ART_BOX;
+    const currentScale = interpolate(p, [0, 1], [scaleFactor, 1], Extrapolate.CLAMP);
+
+    const miniArtCenterX = (SW - metrics.navWidth) / 2 + 12 + 24;
+    const miniArtCenterY = SH - bottomOffset - 10 - 24;
+    const expandedArtCenterX = SW / 2;
+    const expandedArtCenterY = insets.top + 60 + ART_BOX / 2;
+
+    const targetTranslateX = miniArtCenterX - expandedArtCenterX;
+    const currentTranslateX = interpolate(p, [0, 1], [targetTranslateX, 0], Extrapolate.CLAMP);
+
+    const parentTranslateY = interpolate(p, [0, 1], [SH * 0.8, 0], Extrapolate.CLAMP);
+    const desiredScreenY = interpolate(p, [0, 1], [miniArtCenterY, expandedArtCenterY], Extrapolate.CLAMP);
+    const currentTranslateY = desiredScreenY - parentTranslateY - expandedArtCenterY;
+
+    const currentBorderRadius = interpolate(p, [0, 1], [13 * (ART_BOX / 48), 12], Extrapolate.CLAMP);
+
+    const nextArtScale = interpolate(artSwipeX.value, [0, -SW * 0.4], [0.9, 1.0], Extrapolate.CLAMP);
+    const opacity = interpolate(Math.abs(artSwipeX.value), [0, SW * 0.3], [0, 1], Extrapolate.CLAMP);
+
+    return {
+      opacity: dim * opacity * (1 - surfaceOpenProgress.value),
+      borderRadius: currentBorderRadius,
+      transform: [
+        { translateX: currentTranslateX + artSwipeX.value + (ART_BOX + 24) },
+        { translateY: currentTranslateY + artDismissY.value * 0.3 },
+        { scale: currentScale * nextArtScale },
+      ],
+      display: dim * opacity <= 0.01 ? "none" : "flex"
+    };
+  });
+
+  const bottomBarOverlayStyle = useAnimatedStyle(() => {
+    const p = expandProgress.value;
+    const overlayContentOpacity = interpolate(p, [0.08, 0.35], [0, 1], Extrapolate.CLAMP);
+    const op = overlayContentOpacity * controlsOpacity.value;
+    return { 
+      opacity: op, 
+      transform: [{ translateY: interpolate(controlsOpacity.value, [0, 1], [12, 0]) }] 
+    };
+  });
 
   const queueIconStyle = useAnimatedStyle(() => {
     const isLyricsActive = activeSurface === 'lyrics' || lastSurface === 'lyrics';
@@ -1130,22 +1356,70 @@ export default function PlayerOverlay() {
         panGesture={miniGesture}
         bottomOffset={bottomOffset}
       />
-      <Animated.View style={[StyleSheet.absoluteFill, overlayStyle, { backgroundColor: palette.backgroundBase }]} pointerEvents={isExpanded ? "auto" : "none"}>
-        {artworkUri ? (
-          <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            <Image source={{ uri: artworkUri }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={Platform.OS === "android" ? 80 : 110} />
-            {Platform.OS === "ios" && <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />}
-            {(activeSurface === 'lyrics' || lastSurface === 'lyrics') && <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "#000" }, atmosphereStyle]} />}
-            <LinearGradient colors={["transparent", "rgba(0, 0, 0, 0.15)", "rgba(0, 0, 0, 0.38)", "rgba(0, 0, 0, 0.68)", "rgba(0, 0, 0, 0.88)", "rgba(0, 0, 0, 0.98)"]} locations={[0, 0.2, 0.4, 0.6, 0.8, 1]} style={{ position: "absolute", bottom: 0, height: "60%", width: "100%" }} />
-          </View>
-        ) : <LinearGradient colors={["#120f26", "#090514"]} style={StyleSheet.absoluteFill} />}
+      <Animated.View style={[StyleSheet.absoluteFill, overlayStyle, { backgroundColor: 'transparent' }]} pointerEvents={isExpanded ? "auto" : "none"}>
+        
+        {/* Layer 1: Previous Background */}
+        <Animated.View style={[StyleSheet.absoluteFill, prevBgStyle, { backgroundColor: bgBuffers.prevPalette.backgroundBase }]} pointerEvents="none">
+          {bgBuffers.prevArtwork ? (
+            <View style={StyleSheet.absoluteFill}>
+              <Image source={{ uri: bgBuffers.prevArtwork }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={Platform.OS === "android" ? 80 : 110} />
+              {Platform.OS === "ios" && <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />}
+            </View>
+          ) : (
+            <LinearGradient colors={["#120f26", "#090514"]} style={StyleSheet.absoluteFill} />
+          )}
+        </Animated.View>
+
+        {/* Layer 2: Current Background */}
+        <Animated.View style={[StyleSheet.absoluteFill, currentBgStyle, { backgroundColor: bgBuffers.currentPalette.backgroundBase }]} pointerEvents="none">
+          {bgBuffers.currentArtwork ? (
+            <View style={StyleSheet.absoluteFill}>
+              <Image source={{ uri: bgBuffers.currentArtwork }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={Platform.OS === "android" ? 80 : 110} />
+              {Platform.OS === "ios" && <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />}
+            </View>
+          ) : (
+            <LinearGradient colors={["#120f26", "#090514"]} style={StyleSheet.absoluteFill} />
+          )}
+        </Animated.View>
+
+        {/* Shared atmospheric darkened view for lyrics overlay */}
+        {(activeSurface === 'lyrics' || lastSurface === 'lyrics') && <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "#000" }, atmosphereStyle]} pointerEvents="none" />}
+
+        {/* Bottom linear gradient for contrast */}
+        <LinearGradient colors={["transparent", "rgba(0, 0, 0, 0.15)", "rgba(0, 0, 0, 0.38)", "rgba(0, 0, 0, 0.68)", "rgba(0, 0, 0, 0.88)", "rgba(0, 0, 0, 0.98)"]} locations={[0, 0.2, 0.4, 0.6, 0.8, 1]} style={{ position: "absolute", bottom: 0, height: "60%", width: "100%" }} pointerEvents="none" />
+
         <GestureDetector gesture={expandedPan}><View style={{ position: "absolute", top: 0, width: "100%", height: GESTURE_ZONE }} /></GestureDetector>
+        
+        {prevTrack && (
+          <Animated.View style={[st.artShadow, { position: "absolute", left: (SW - ART_BOX) / 2, top: insets.top + 60, width: ART_BOX, height: ART_BOX, overflow: "hidden" }, prevArtStyle]}>
+            {prevTrack.art ? (
+              <Image source={{ uri: prevTrack.art }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+            ) : (
+              <LinearGradient colors={["rgba(255,255,255,0.06)", "rgba(255,255,255,0.01)"]} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="musical-notes" size={40} color="rgba(255,255,255,0.18)" />
+              </LinearGradient>
+            )}
+          </Animated.View>
+        )}
+
         <GestureDetector gesture={artworkSwipe}>
-          <Animated.View style={[st.artShadow, { position: "absolute", left: (SW - ART_BOX) / 2, top: insets.top + 60, width: ART_BOX, height: ART_BOX, borderRadius: 12, overflow: "hidden" }, expArtStyle]}>
+          <Animated.View style={[st.artShadow, { position: "absolute", left: (SW - ART_BOX) / 2, top: insets.top + 60, width: ART_BOX, height: ART_BOX, overflow: "hidden" }, expArtStyle]}>
             {artworkUri ? <Image source={{ uri: artworkUri }} style={{ width: "100%", height: "100%" }} contentFit="cover" /> : <LinearGradient colors={["rgba(255,255,255,0.06)", "rgba(255,255,255,0.01)"]} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Ionicons name="musical-notes" size={40} color="rgba(255,255,255,0.18)" /></LinearGradient>}
             {isTransitionLoading && <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)", borderRadius: 12, alignItems: "center", justifyContent: "center" }}><ActivityIndicator size="large" color="rgba(255,255,255,0.8)" /></View>}
           </Animated.View>
         </GestureDetector>
+
+        {nextTrack && (
+          <Animated.View style={[st.artShadow, { position: "absolute", left: (SW - ART_BOX) / 2, top: insets.top + 60, width: ART_BOX, height: ART_BOX, overflow: "hidden" }, nextArtStyle]}>
+            {nextTrack.art ? (
+              <Image source={{ uri: nextTrack.art }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+            ) : (
+              <LinearGradient colors={["rgba(255,255,255,0.06)", "rgba(255,255,255,0.01)"]} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+                <Ionicons name="musical-notes" size={40} color="rgba(255,255,255,0.18)" />
+              </LinearGradient>
+            )}
+          </Animated.View>
+        )}
         <View style={[st.controlsArea, { top: ART_H - 150 }]}>{Platform.OS === "ios" && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />}</View>
         <Animated.View style={[st.controlsContent, { top: ART_H + 25, bottom: Math.max(insets.bottom + 8, 20) + 70 }, controlsStyle]} pointerEvents={activeSurface === 'controls' ? "box-none" : "none"}>
           <View style={st.infoRow}>
@@ -1181,7 +1455,7 @@ export default function PlayerOverlay() {
       </Animated.View>
       {(activeSurface === 'queue' || lastSurface === 'queue') && <QueueSheet isVisible={activeSurface === 'queue'} onClose={closeQueue} accentColor={AURA_ACCENT} />}
       {activeSurface === 'devices' && <DevicePickerSurface visible={true} onClose={closeDevices} accentColor={AURA_ACCENT} />}
-      {(activeSurface === 'menu' || lastSurface === 'menu') && currentTrack && <MoreMenuSurface visible={activeSurface === 'menu'} onClose={closeMenu} accentColor={AURA_ACCENT} currentTrack={currentTrack} onAddToPlaylist={() => { closeMenu(); setTimeout(() => setShowPlaylist(true), 150); }} onShare={async () => { closeMenu(); try { await Share.share({ message: `Listening to "${currentTrack.title}" by ${currentTrack.artist}` }); } catch(_) {} }} isShuffle={isShuffle} toggleShuffle={toggleShuffle} repeatMode={repeatMode} toggleRepeat={toggleRepeat} />}
+      {(activeSurface === 'menu' || lastSurface === 'menu') && currentTrack && <MoreMenuSurface visible={activeSurface === 'menu'} onClose={closeMenu} accentColor={AURA_ACCENT} currentTrack={currentTrack} onAddToPlaylist={() => { closeMenu(); setTimeout(() => setShowPlaylist(true), 150); }} onShare={async () => { closeMenu(); try { await Share.share({ message: `Listening to "${currentTrack.title}" by ${currentTrack.artist}` }); const { useAnalyticsStore } = require('../features/analytics/store/analytics.store'); useAnalyticsStore.getState().trackShared(currentTrack.id); } catch(_) {} }} isShuffle={isShuffle} toggleShuffle={toggleShuffle} repeatMode={repeatMode} toggleRepeat={toggleRepeat} />}
       {showInsight && currentTrack && <InsightPanel isVisible={true} onClose={() => setShowInsight(false)} track={currentTrack} accentColor={AURA_ACCENT} />}
       {showPlaylist && currentTrack && <AddToPlaylistSheet visible={true} track={currentTrack} onClose={() => setShowPlaylist(false)} />}
     </View>

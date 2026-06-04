@@ -145,6 +145,13 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
     };
   });
 
+  const miniArtStyle = useAnimatedStyle(() => {
+    const p = expandProgress ? expandProgress.value : 0;
+    return {
+      opacity: interpolate(p, [0, 0.05], [1, 0], Extrapolate.CLAMP),
+    };
+  });
+
   const accent = track?.dominantColors?.[0] ?? DEFAULT_ACCENT;
   const bottom = bottomOffset ?? (Math.max(insets.bottom + 14, 24) + 80);
 
@@ -187,12 +194,12 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
 
     const renderInnerContent = () => (
       <>
-        <View style={styles.artWrap}>
+        <Reanimated.View style={[styles.artWrap, miniArtStyle]}>
           <Image source={{ uri: track.art }} style={styles.art} contentFit="cover" transition={180} />
           {isBuffering && <View style={[StyleSheet.absoluteFill, styles.bufferingOverlay]}><ActivityIndicator size="small" color={accent} /></View>}
           {status === 'error' && <View style={[StyleSheet.absoluteFill, styles.errorOverlay]}><Ionicons name="alert-circle" size={20} color="#FFF" /></View>}
           <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.artRim]} />
-        </View>
+        </Reanimated.View>
         <View style={styles.meta}>
           <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.title} numberOfLines={1}>{track.title}</Text>
           <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.artist} numberOfLines={1}>{formatArtistDisplay(track.artist)}</Text>

@@ -20,6 +20,8 @@ export interface SettingsState {
   crossfadeDuration: number; // 0–12
   gaplessPlayback: boolean;
   normalizeVolume: boolean;
+  autoplayEnabled: boolean;
+  smartShuffleEnabled: boolean;
 
   // STORAGE
   maxSongCacheGB: number | 'unlimited';
@@ -48,9 +50,11 @@ export const useSettingsStore = create<SettingsState>()(
       downloadOnlyOnWifi: true,
       autoDownloadLikedSongs: false,
       crossfadeEnabled: false,
-      crossfadeDuration: 6,
+      crossfadeDuration: 3,
       gaplessPlayback: true,
       normalizeVolume: true,
+      autoplayEnabled: true,
+      smartShuffleEnabled: true,
       maxSongCacheGB: 5,
       reduceMotion: false,
       accentColor: '#B19CD9',

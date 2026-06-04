@@ -13,6 +13,7 @@ import {
 import type { PlaybackContext } from '@/src/features/playlist/types/playlist';
 import { useMediaCacheStore } from "../../cache/store/media-cache.store";
 import { QueueEngine } from "../utils/queue-engine";
+import { QueueContext } from "../services/queue-intelligence";
 
 interface ExtendedPlayerStore extends PlayerStore {
   isPreloading: boolean;
@@ -26,6 +27,7 @@ interface ExtendedPlayerStore extends PlayerStore {
   updateTrackMetadata: (trackId: string, partial: Partial<PlayerTrack>) => void;
   restoreSession: () => Promise<void>;
   resolveAutoAdvance: () => Promise<void>;
+  injectAutoplayQueue: (tracks: PlayerTrack[]) => Promise<void>;
 }
 
 export const usePlayerStore = create<ExtendedPlayerStore>()(
@@ -47,6 +49,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       isShuffle: false,
       error: null,
       _hasHydrated: false,
+      queueContext: null,
 
       // Lyrics State
       lyrics: null as any,
@@ -206,6 +209,10 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
           const resolvedTrack = await resolveAudioOnly(track, null, true);
 
+          if (!resolvedTrack.url) {
+            throw new Error(`Track "${resolvedTrack.title}" has no playable stream URL.`);
+          }
+
           if (get().lastResolutionId !== resolutionId) {
             transitionManager.setTransitioning(false);
             set({ isTransitioning: false });
@@ -243,17 +250,24 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           get().preloadNext();
 
         } catch (error) {
+          console.warn("[PlayerStore] setTrack failed to resolve:", error);
           if (get().lastResolutionId === resolutionId) {
-            transitionManager.setTransitioning(false);
-            const errGuard = get()._transitionGuard;
-            set({
-              status: "error",
-              error: (error as Error).message || "Playback failed",
-              isPlaying: false,
-              isBuffering: false,
-              isTransitioning: false,
-              _transitionGuard: { ...errGuard, inProgress: false, owner: null, destinationId: null }
-            });
+            const { queue } = get();
+            if (queue.length > 1) {
+              console.warn("[PlayerStore] Auto-skipping unplayable track, calling next().");
+              get().next();
+            } else {
+              transitionManager.setTransitioning(false);
+              const errGuard = get()._transitionGuard;
+              set({
+                status: "error",
+                error: (error as Error).message || "Playback failed",
+                isPlaying: false,
+                isBuffering: false,
+                isTransitioning: false,
+                _transitionGuard: { ...errGuard, inProgress: false, owner: null, destinationId: null }
+              });
+            }
           }
         }
       },
@@ -423,7 +437,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         }
       },
 
-      setQueue: async (tracks: PlayerTrack[], startIndex: number = 0) => {
+      setQueue: async (tracks: PlayerTrack[], startIndex: number = 0, context?: QueueContext) => {
         // Hydrate from cache immediately for responsive UI
         const cacheStore = useMediaCacheStore.getState();
         const hydratedTracks = tracks.map(t => {
@@ -440,9 +454,16 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         if (isShuffle && original.length > 0) {
           const startingTrack = original[startIndex];
           if (startingTrack) {
-            const remainingTracks = original.filter((_, idx) => idx !== startIndex);
-            const shuffledRemaining = [...remainingTracks].sort(() => Math.random() - 0.5);
-            activeQueue = [startingTrack, ...shuffledRemaining];
+            const { useSettingsStore } = require("../../settings/store/settings.store");
+            const settings = useSettingsStore.getState();
+            if (settings.smartShuffleEnabled) {
+              const { generateSmartShuffleQueue } = require("../services/smart-shuffle");
+              activeQueue = generateSmartShuffleQueue(original, startingTrack);
+            } else {
+              const remainingTracks = original.filter((_, idx) => idx !== startIndex);
+              const shuffledRemaining = [...remainingTracks].sort(() => Math.random() - 0.5);
+              activeQueue = [startingTrack, ...shuffledRemaining];
+            }
             targetIndex = 0;
           }
         }
@@ -454,9 +475,31 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           queue: activeQueue,
           originalQueue: original,
           currentIndex: targetIndex,
+          queueContext: context || null,
         });
 
         await get().setTrack(activeQueue[targetIndex]);
+      },
+
+      injectAutoplayQueue: async (tracks: PlayerTrack[]) => {
+        const { queue, originalQueue } = get();
+        try {
+          await PlaybackService.addTracks(tracks);
+          if (typeof __DEV__ !== "undefined" && __DEV__) {
+            console.info(`[PlayerStore] injectAutoplayQueue: successfully injected ${tracks.length} tracks natively.`);
+          }
+          set({
+            queue: [...queue, ...tracks],
+            originalQueue: [...originalQueue, ...tracks],
+            queueContext: {
+              sourceId: "autoplay-radio",
+              sourceType: "autoplay",
+              generatedAt: Date.now()
+            }
+          });
+        } catch (e) {
+          console.error("[PlayerStore] injectAutoplayQueue failed natively:", e);
+        }
       },
 
       playNext: async (track: PlayerTrack) => {
@@ -1199,6 +1242,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           repeatMode: state.repeatMode,
           isShuffle: state.isShuffle,
           activeContext: state.activeContext,
+          queueContext: state.queueContext,
         };
       },
       onRehydrateStorage: (state) => {

@@ -1,3 +1,5 @@
+import { QueueContext } from "../services/queue-intelligence";
+
 export interface PlayerTrack {
   id: string;
   title: string;
@@ -52,12 +54,13 @@ export interface PlaybackState {
   _transitionGuard: TransitionGuard;
   lyrics: any;
   isLyricsLoading: boolean;
+  queueContext?: QueueContext | null;
 }
 
 export interface PlaybackActions {
   setTrack: (track: PlayerTrack) => Promise<void>;
   fetchLyrics: (track: PlayerTrack) => Promise<void>;
-  setQueue: (tracks: PlayerTrack[], startIndex?: number) => Promise<void>;
+  setQueue: (tracks: PlayerTrack[], startIndex?: number, context?: QueueContext) => Promise<void>;
   addToQueue: (track: PlayerTrack) => void;
   playNext: (track: PlayerTrack) => void;
   removeFromQueue: (index: number) => void;

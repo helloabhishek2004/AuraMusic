@@ -29,6 +29,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import { useScrollToTopOnTabPress } from "@/src/hooks/use-scroll-to-top";
 import React, {
   memo,
   useCallback,
@@ -1113,6 +1114,8 @@ const DownloadedTrackRow = memo(({
 // ─── MAIN SCREEN ──────────────────────────────────────────────────────────────
 
 export default function LibraryScreen() {
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTopOnTabPress(scrollRef);
   const insets = useSafeAreaInsets();
   const { bottomPadding } = usePlaybackInsets();
   const router = useRouter();
@@ -1145,6 +1148,7 @@ export default function LibraryScreen() {
       <AmbientBG />
 
       <ScrollView
+        ref={scrollRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: bottomPadding + 40 }}
         scrollIndicatorInsets={{ bottom: bottomPadding + 40 }}

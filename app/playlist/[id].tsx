@@ -45,6 +45,7 @@ import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { PlayerTrack } from "@/src/features/player/types/player";
 import PlaylistArtwork from "@/src/features/playlist/components/PlaylistArtwork";
 import { usePlaylistStore } from "@/src/features/playlist/store/playlist.store";
+import { useRecommendationsStore } from "@/src/features/recommendations/store/recommendations.store";
 import { openArtistByName } from "@/src/navigation/music-navigation";
 import { useNetInfo } from "@react-native-community/netinfo";
 
@@ -597,6 +598,7 @@ const ListHeader = React.memo(
     onAddSongsPress,
     isLikedPlaylist,
   }: any) => {
+    const [isExplanationExpanded, setIsExplanationExpanded] = React.useState(playlist._isExpanded || false);
     // Animated value for left glow intensity on the art frame
     const artGlowAnim = useRef(
       new Animated.Value(isCurrentPlaylistPlaying ? 1 : 0.4),
@@ -733,13 +735,55 @@ const ListHeader = React.memo(
           style={[styles.heroTextContainer, { opacity: heroFade }]}
         >
           <Text style={styles.heroTitle}>{playlist.name}</Text>
+          {playlist.isSeed && playlist.seedArtists && playlist.seedArtists.length > 0 ? (
+            <Text style={styles.seedArtistsText}>
+              Generated from: {playlist.seedArtists.join(', ')}
+            </Text>
+          ) : null}
           {playlist.description ? (
             <Text style={styles.heroDescription}>{playlist.description}</Text>
           ) : null}
           <Text style={styles.heroStats}>
             {resolvedTracks.length} song{resolvedTracks.length !== 1 ? "s" : ""}{" "}
-            • {isLikedPlaylist ? "Your Favorites" : "Local Playlist"}
+            • {playlist.isSeed ? `${(() => {
+              const totalSec = resolvedTracks.reduce((acc: number, t: any) => acc + (t.duration || 0), 0);
+              const hours = Math.floor(totalSec / 3600);
+              const minutes = Math.floor((totalSec % 3600) / 60);
+              return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+            })()} • Updated ${playlist.generatedAt || 'today'}` : isLikedPlaylist ? "Your Favorites" : "Local Playlist"}
           </Text>
+
+          {playlist.isSeed && playlist.reason ? (
+            <View style={styles.explanationContainer}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => {
+                  const expanded = !playlist._isExpanded;
+                  playlist._isExpanded = expanded; // toggle
+                  // Triggers re-render since it mutates state via state change
+                  setIsExplanationExpanded(expanded);
+                }}
+                style={styles.explanationHeader}
+              >
+                <Ionicons
+                  name="information-circle-outline"
+                  size={16}
+                  color={gradientColors[0]}
+                />
+                <Text style={styles.explanationHeaderTitle}>Why you're seeing this</Text>
+                <Ionicons
+                  name={isExplanationExpanded ? "chevron-up" : "chevron-down"}
+                  size={14}
+                  color="rgba(255,255,255,0.4)"
+                />
+              </TouchableOpacity>
+              {isExplanationExpanded && (
+                <View style={styles.explanationBody}>
+                  <Text style={styles.explanationBodyText}>{playlist.reason}</Text>
+                </View>
+              )}
+            </View>
+          ) : null}
 
           {/* Action buttons row */}
           <View style={styles.heroActions}>
@@ -1890,6 +1934,56 @@ const LocalPlaylistView = React.memo(
     const isLikedPlaylist = playlistId === "liked-songs";
     const storePlaylist = usePlaylistStore((s) => s.playlists[playlistId]);
 
+    const isSeedPlaylist = useMemo(() => {
+      return !isLikedPlaylist && !storePlaylist;
+    }, [isLikedPlaylist, storePlaylist]);
+
+    const dailyMixes = useRecommendationsStore((s) => s.dailyMixes || []);
+    const madeForYou = useRecommendationsStore((s) => s.madeForYou || []);
+    const becauseYouLike = useRecommendationsStore((s) => s.becauseYouLike || []);
+    const rediscover = useRecommendationsStore((s) => s.rediscover || []);
+    const recentlyLoved = useRecommendationsStore((s) => s.recentlyLoved || []);
+    const trendingSeeds = useRecommendationsStore((s) => s.trendingSeeds || []);
+    const generatedAtTime = useRecommendationsStore((s) => s.generatedAt);
+
+    const seed = useMemo(() => {
+      if (!isSeedPlaylist) return null;
+      const allSeeds = [...dailyMixes, ...madeForYou, ...becauseYouLike, ...rediscover, ...recentlyLoved, ...trendingSeeds];
+      return allSeeds.find((s) => s.id === playlistId) || null;
+    }, [isSeedPlaylist, playlistId, dailyMixes, madeForYou, becauseYouLike, rediscover, recentlyLoved, trendingSeeds]);
+
+    const [seedTracks, setSeedTracks] = useState<PlayerTrack[]>([]);
+    const [isSeedLoading, setIsSeedLoading] = useState(false);
+
+    useEffect(() => {
+      if (!seed) return;
+      let active = true;
+      const hydrate = async () => {
+        setIsSeedLoading(true);
+        try {
+          const { hydrateRecommendationSeed } = require("@/src/features/recommendations/services/recommendation-hydrator");
+          const tracks = await hydrateRecommendationSeed(seed);
+          if (active && tracks) {
+            // HARDENING: Verify tracks do not contain placeholder/demo audio (No SoundHelix/PicSum urls in playback uri)
+            const verifiedTracks = tracks.filter((t: PlayerTrack) => {
+              const urlLower = (t.url || '').toLowerCase();
+              const isPlaceholderUrl = urlLower.includes("soundhelix") || urlLower.includes("placeholder");
+              return t.id && t.title && t.artist && !isPlaceholderUrl;
+            });
+            setSeedTracks(verifiedTracks);
+          }
+        } catch (err) {
+          console.error("[PlaylistDetails] Seed hydration failed:", err);
+        } finally {
+          if (active) setIsSeedLoading(false);
+        }
+      };
+      hydrate();
+      return () => {
+        active = false;
+      };
+    }, [seed]);
+
     const playlist = useMemo(() => {
       if (isLikedPlaylist) {
         return {
@@ -1898,10 +1992,35 @@ const LocalPlaylistView = React.memo(
           description: "Your favorite tracks, all in one place.",
           trackIds: [],
           gradientColors: [COLORS.primary, "#7B2FBE"],
+          mood: "LIKES",
+        };
+      }
+      if (isSeedPlaylist) {
+        let formattedTime = "today";
+        if (generatedAtTime) {
+          try {
+            const date = new Date(generatedAtTime);
+            formattedTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          } catch (e) {
+            // ignore
+          }
+        }
+        return {
+          id: playlistId,
+          name: seed?.title || "Personalized Mix",
+          description: seed?.type === 'playlist' ? ((seed as any)?.reason || 'Custom themed mix based on your preferences.') : `Vibe playlist generated from top artist ${seed?.title || 'your taste'}.`,
+          trackIds: seedTracks.map(t => t.id),
+          gradientColors: ['#9B38DA', '#46f5e0'] as [string, string],
+          mood: seed?.type?.toUpperCase() || "MIX",
+          coverArt: seed?.image || undefined,
+          isSeed: true,
+          generatedAt: formattedTime,
+          seedArtists: (seed as any)?.seedArtists || [],
+          reason: (seed as any)?.reason || "",
         };
       }
       return storePlaylist;
-    }, [isLikedPlaylist, storePlaylist]);
+    }, [isLikedPlaylist, isSeedPlaylist, storePlaylist, seed, seedTracks, playlistId, generatedAtTime]);
 
     const downloadedTracks = useDownloadStore((s) => s.downloadedTracks);
     const netInfo = useNetInfo();
@@ -1912,6 +2031,9 @@ const LocalPlaylistView = React.memo(
     const resolvedTracks = useMemo(() => {
       if (isLikedPlaylist) {
         return getLikedTracks();
+      }
+      if (isSeedPlaylist) {
+        return seedTracks;
       }
       if (!playlist) return [];
       const resolved: PlayerTrack[] = [];
@@ -1941,7 +2063,7 @@ const LocalPlaylistView = React.memo(
         }
       }
       return resolved;
-    }, [isLikedPlaylist, playlist, downloadedTracks, isOffline, likedTracks]);
+    }, [isLikedPlaylist, isSeedPlaylist, playlist, downloadedTracks, isOffline, likedTracks, seedTracks]);
 
     const removeTrack = usePlaylistStore((s) => s.removeTrack);
     const reorderTracks = usePlaylistStore((s) => s.reorderTracks);
@@ -2101,10 +2223,18 @@ const LocalPlaylistView = React.memo(
 
         if (shuffle) {
           if (!currentIsShuffle) await toggleShuffle();
-          await setQueue(resolvedTracks, 0);
+          await setQueue(resolvedTracks, 0, {
+            sourceId: playlistId,
+            sourceType: "playlist",
+            generatedAt: Date.now()
+          });
         } else {
           if (currentIsShuffle) await toggleShuffle();
-          await setQueue(resolvedTracks, 0);
+          await setQueue(resolvedTracks, 0, {
+            sourceId: playlistId,
+            sourceType: "playlist",
+            generatedAt: Date.now()
+          });
         }
       },
       [
@@ -2142,7 +2272,11 @@ const LocalPlaylistView = React.memo(
         if (store.activeContext?.id === playlistId && store.queue.length === resolvedTracks.length) {
             await store.jumpToQueueIndex(index);
         } else {
-            await setQueue(resolvedTracks, index);
+            await setQueue(resolvedTracks, index, {
+              sourceId: playlistId,
+              sourceType: "playlist",
+              generatedAt: Date.now()
+            });
             store.setActiveContext(context as any);
         }
       },
@@ -2500,7 +2634,7 @@ const LocalPlaylistView = React.memo(
             }
           }}
 
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
           renderItem={renderDraggableItem}
           extraData={currentTrack?.id}
           ListHeaderComponent={
@@ -2541,31 +2675,45 @@ const LocalPlaylistView = React.memo(
           scrollIndicatorInsets={{ bottom: bottomPadding }}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <LiquidGlassSurface
-                style={{
-                  width: 88,
-                  height: 88,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginBottom: 20,
-                }}
-                borderRadius={44}
-                blurIntensity={50}
-                showTopSpecular
-                showLeftSpecular
-              >
-                <Ionicons
-                  name="musical-notes-outline"
-                  size={40}
-                  color="rgba(255,255,255,0.28)"
+            isSeedLoading ? (
+              <View style={styles.emptyContainer}>
+                <ActivityIndicator
+                  size="large"
+                  color={COLORS.primary}
+                  style={{ marginBottom: 20 }}
                 />
-              </LiquidGlassSurface>
-              <Text style={styles.emptyTitle}>Empty Playlist</Text>
-              <Text style={styles.emptySubtitle}>
-                Start adding songs from your library.
-              </Text>
-            </View>
+                <Text style={styles.emptyTitle}>Curating your vibe...</Text>
+                <Text style={styles.emptySubtitle}>
+                  Please wait while we hydrate personalized tracks.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.emptyContainer}>
+                <LiquidGlassSurface
+                  style={{
+                    width: 88,
+                    height: 88,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginBottom: 20,
+                  }}
+                  borderRadius={44}
+                  blurIntensity={50}
+                  showTopSpecular
+                  showLeftSpecular
+                >
+                  <Ionicons
+                    name="musical-notes-outline"
+                    size={40}
+                    color="rgba(255,255,255,0.28)"
+                  />
+                </LiquidGlassSurface>
+                <Text style={styles.emptyTitle}>Empty Playlist</Text>
+                <Text style={styles.emptySubtitle}>
+                  Start adding songs from your library.
+                </Text>
+              </View>
+            )
           }
         />
 
@@ -3065,7 +3213,11 @@ const LegacyPlaylistView = React.memo(
         }
 
         if (shuffle && !store.isShuffle) await toggleShuffle();
-        await setQueue(tracks, 0);
+        await setQueue(tracks, 0, {
+          sourceId: playlistId,
+          sourceType: "playlist",
+          generatedAt: Date.now()
+        });
       },
       [
         isLoading,
@@ -3104,7 +3256,11 @@ const LegacyPlaylistView = React.memo(
           isPlaying ? await pause() : await play();
           return;
         }
-        await setQueue(tracks, idx >= 0 ? idx : 0);
+        await setQueue(tracks, idx >= 0 ? idx : 0, {
+          sourceId: playlistId,
+          sourceType: "playlist",
+          generatedAt: Date.now()
+        });
       },
       [isLoading, isPlaying, pause, play, setQueue, PLAYLIST_DATA, playlistId],
     );
@@ -3890,6 +4046,47 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     marginBottom: 22,
     letterSpacing: 0.3,
+  },
+  seedArtistsText: {
+    color: "rgba(255, 255, 255, 0.65)",
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 8,
+  },
+  explanationContainer: {
+    marginTop: 6,
+    marginBottom: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: GLASS.borderSubtle,
+    backgroundColor: "rgba(255,255,255,0.035)",
+    overflow: "hidden",
+  },
+  explanationHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  explanationHeaderTitle: {
+    flex: 1,
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  explanationBody: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    borderTopWidth: 1,
+    borderTopColor: GLASS.borderSubtle,
+    paddingTop: 10,
+  },
+  explanationBodyText: {
+    color: "rgba(170,170,185,0.7)",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "400",
   },
   heroActions: { flexDirection: "row", gap: 12 },
   actionBtn: {

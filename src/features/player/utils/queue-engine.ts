@@ -95,11 +95,19 @@ export const QueueEngine = {
     queue: PlayerTrack[],
     currentTrack: PlayerTrack
   ): PlayerTrack[] {
+    try {
+      const { useSettingsStore } = require("../../settings/store/settings.store");
+      const smartShuffle = useSettingsStore.getState().smartShuffleEnabled;
+      if (smartShuffle) {
+        const { generateSmartShuffleQueue } = require("../services/smart-shuffle");
+        return generateSmartShuffleQueue(queue, currentTrack);
+      }
+    } catch (e) {
+      console.warn("[QueueEngine] Failed to resolve settings for smart shuffle:", e);
+    }
+
     const remaining = queue.filter((t) => t.id !== currentTrack.id);
-    
-    // Deterministic-like shuffle randomization
     const shuffled = [...remaining].sort(() => Math.random() - 0.5);
-    
     return [currentTrack, ...shuffled];
   },
 

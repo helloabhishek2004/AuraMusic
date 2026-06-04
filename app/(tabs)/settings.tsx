@@ -46,6 +46,9 @@ import { CacheManager, StorageStats } from "../../src/features/cache/services/ca
 import { useDownloadStore } from "../../src/features/download/store/download.store";
 import { AudioSessionController } from "../../src/features/audio/native/audio-session";
 import { downloadCleanupService } from "../../src/features/download/services/download-cleanup.service";
+import { useAnalyticsStore, getRecentHistory, getTopArtists, getTopAlbums, getTopTracks } from "../../src/features/analytics/store/analytics.store";
+import { useRecommendationsStore } from "../../src/features/recommendations/store/recommendations.store";
+import { useScrollToTopOnTabPress } from "../../src/hooks/use-scroll-to-top";
 
 const { width: SW } = Dimensions.get("window");
 
@@ -443,11 +446,61 @@ const CachePills = ({ current, onSelect }: { current: number | "unlimited"; onSe
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const settings = useSettingsStore();
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTopOnTabPress(scrollRef);
   const downloadedTracks = useDownloadStore(s => s.downloadedTracks);
 
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [modalType, setModalType] = useState<null | "streamingWifi" | "streamingCellular" | "downloadWifi" | "downloadCellular">(null);
+  const [devOpen, setDevOpen] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+
+  const analyticsHistory = useAnalyticsStore(s => s.history);
+  const artistAffinities = useAnalyticsStore(s => s.artistAffinities);
+  const albumAffinities = useAnalyticsStore(s => s.albumAffinities);
+  const trackAffinities = useAnalyticsStore(s => s.trackAffinities);
+  const resetAnalytics = useAnalyticsStore(s => s.resetAnalytics);
+
+  const topArtists = useMemo(() => {
+    return Object.keys(artistAffinities)
+      .map((key) => ({ key, ...artistAffinities[key] }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.playCount - a.playCount;
+      });
+  }, [artistAffinities]);
+
+  const topAlbums = useMemo(() => {
+    return Object.keys(albumAffinities)
+      .map((key) => ({ key, ...albumAffinities[key] }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.playCount - a.playCount;
+      });
+  }, [albumAffinities]);
+
+  const topTracks = useMemo(() => {
+    return Object.keys(trackAffinities)
+      .map((key) => ({ key, ...trackAffinities[key] }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.playCount - a.playCount;
+      });
+  }, [trackAffinities]);
+
+  const recStore = useRecommendationsStore();
+
+  const totalPlays = useMemo(() => {
+    return Object.values(trackAffinities).reduce((acc, t) => acc + (t.playCount || 0), 0);
+  }, [trackAffinities]);
+
+  const totalCompletions = useMemo(() => {
+    return Object.values(trackAffinities).reduce((acc, t) => acc + (t.completionCount || 0), 0);
+  }, [trackAffinities]);
+
+  const totalSkips = useMemo(() => {
+    return Object.values(trackAffinities).reduce((acc, t) => acc + (t.skipCount || 0), 0);
+  }, [trackAffinities]);
 
   const refreshStats = async () => {
     const stats = await CacheManager.getCacheStats();
@@ -570,6 +623,7 @@ export default function SettingsScreen() {
       <AmbientBackground />
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[st.scroll, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 180 }]}
         showsVerticalScrollIndicator={false}
         overScrollMode="never"
@@ -680,6 +734,20 @@ export default function SettingsScreen() {
               icon="equalizer" iconColor="#FDE047" iconBg="rgba(234,179,8,0.10)"
               label="Equalizer" sub="Custom frequency adjustment"
               onPress={handleOpenEQ} chevron
+            />
+            <Divider />
+            {/* Autoplay Radio */}
+            <Row
+              icon="radio" iconColor="#34D399" iconBg="rgba(52,211,153,0.10)"
+              label="Autoplay Radio" sub="Continuation mix when queue ends"
+              right={<Toggle value={settings.autoplayEnabled} onChange={() => settings.toggleSetting("autoplayEnabled")} />}
+            />
+            <Divider />
+            {/* Smart Shuffle */}
+            <Row
+              icon="shuffle" iconColor="#60A5FA" iconBg="rgba(96,165,250,0.10)"
+              label="Smart Shuffle" sub="Weighted smart track shuffle"
+              right={<Toggle value={settings.smartShuffleEnabled} onChange={() => settings.toggleSetting("smartShuffleEnabled")} />}
             />
           </GlassCard>
         </Section>
@@ -802,6 +870,228 @@ export default function SettingsScreen() {
           </GlassCard>
         </Section>
 
+        {/* ── TELEMETRY DIAGNOSTICS & DEVELOPER DASHBOARD (section 6) ────────────────── */}
+        <Section index={5}>
+          <SectionLabel icon="bug-report" title="Developer Diagnostics" />
+          <GlassCard r={32} style={{ overflow: "hidden" }}>
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                setDevOpen(!devOpen);
+              }}
+              activeOpacity={0.78}
+              style={st.row}
+            >
+              <View style={st.rowInner}>
+                <View style={st.rowLeft}>
+                  <View style={[st.iconBadge, { backgroundColor: "rgba(191,90,242,0.12)" }]}>
+                    <MaterialIcons name="developer-mode" size={20} color={PRIMARY} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.rowLabel}>Telemetry Validation Dashboard</Text>
+                    <Text style={st.rowSub}>{devOpen ? "Collapse diagnostic metrics" : "Inspect raw affinity data & logs"}</Text>
+                  </View>
+                </View>
+                <MaterialIcons 
+                  name={devOpen ? "keyboard-arrow-up" : "keyboard-arrow-down"} 
+                  size={24} 
+                  color="rgba(255,255,255,0.40)" 
+                />
+              </View>
+            </TouchableOpacity>
+
+            {devOpen && (
+              <View style={{ paddingHorizontal: 20, paddingBottom: 24 }}>
+                <Divider />
+                
+                {/* 1. Analytics Overview */}
+                <Text style={st.devSectionHeader}>Analytics Overview</Text>
+                <View style={st.devOverviewGrid}>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{totalPlays}</Text>
+                    <Text style={st.devOverviewLabel}>Played</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{totalCompletions}</Text>
+                    <Text style={st.devOverviewLabel}>Completed</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{totalSkips}</Text>
+                    <Text style={st.devOverviewLabel}>Skipped</Text>
+                  </View>
+                </View>
+
+                <View style={st.devOverviewGrid}>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{Object.keys(artistAffinities).length}</Text>
+                    <Text style={st.devOverviewLabel}>Unique Artists</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{Object.keys(albumAffinities).length}</Text>
+                    <Text style={st.devOverviewLabel}>Unique Albums</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{Object.keys(trackAffinities).length}</Text>
+                    <Text style={st.devOverviewLabel}>Unique Tracks</Text>
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 12, opacity: 0.7 }}>
+                  <Text style={st.devInfoText}>History Size: {analyticsHistory.length} / 200</Text>
+                  <Text style={st.devInfoText}>Last Flush: {analyticsHistory[0]?.playedAt ? new Date(analyticsHistory[0].playedAt).toLocaleTimeString() : "Never"}</Text>
+                </View>
+
+                <Divider />
+
+                {/* 2. Top Artists Table */}
+                <Text style={st.devSectionHeader}>Top Artists</Text>
+                {topArtists.length === 0 ? (
+                  <Text style={st.devEmptyText}>No artist telemetry recorded yet.</Text>
+                ) : (
+                  topArtists.map((artist, idx) => (
+                    <View key={artist.key} style={st.devTableRow}>
+                      <Text style={st.devTableTextMain} numberOfLines={1}>{idx + 1}. {artist.key}</Text>
+                      <View style={{ flexDirection: "row", gap: 10 }}>
+                        <Text style={st.devTableTextBadge}>Score: {artist.score.toFixed(1)}</Text>
+                        <Text style={st.devTableTextSub}>P: {artist.playCount} | C: {artist.completionCount}</Text>
+                      </View>
+                    </View>
+                  ))
+                )}
+
+                <Divider />
+
+                {/* 3. Top Albums Table */}
+                <Text style={st.devSectionHeader}>Top Albums</Text>
+                {topAlbums.length === 0 ? (
+                  <Text style={st.devEmptyText}>No album telemetry recorded yet.</Text>
+                ) : (
+                  topAlbums.map((album, idx) => (
+                    <View key={album.key} style={st.devTableRow}>
+                      <Text style={st.devTableTextMain} numberOfLines={1}>{idx + 1}. {album.key}</Text>
+                      <View style={{ flexDirection: "row", gap: 10 }}>
+                        <Text style={st.devTableTextBadge}>Score: {album.score.toFixed(1)}</Text>
+                        <Text style={st.devTableTextSub}>P: {album.playCount} | C: {album.completionCount}</Text>
+                      </View>
+                    </View>
+                  ))
+                )}
+
+                <Divider />
+
+                {/* 4. Top Tracks Table */}
+                <Text style={st.devSectionHeader}>Top Tracks</Text>
+                {topTracks.length === 0 ? (
+                  <Text style={st.devEmptyText}>No track telemetry recorded yet.</Text>
+                ) : (
+                  topTracks.map((track, idx) => {
+                    const match = analyticsHistory.find((h) => h.id === track.key);
+                    const title = match?.title || track.key;
+                    const artist = match?.artist || "Unknown";
+                    return (
+                      <View key={track.key} style={st.devTableRow}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={st.devTableTextMain} numberOfLines={1}>{idx + 1}. {title}</Text>
+                          <Text style={st.devTableTextSubSmall} numberOfLines={1}>{artist}</Text>
+                        </View>
+                        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                          <Text style={st.devTableTextBadge}>Score: {track.score.toFixed(1)}</Text>
+                          <Text style={st.devTableTextSub}>P: {track.playCount} | S: {track.skipCount}</Text>
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+
+                <Divider />
+
+                {/* 5. Recent History Log */}
+                <Text style={st.devSectionHeader}>Recent History Log</Text>
+                {analyticsHistory.length === 0 ? (
+                  <Text style={st.devEmptyText}>No listening history recorded yet.</Text>
+                ) : (
+                  analyticsHistory.slice(0, 5).map((entry, idx) => (
+                    <View key={`${entry.id}-${entry.playedAt}`} style={st.devTableRow}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={st.devTableTextMain} numberOfLines={1}>{idx + 1}. {entry.title}</Text>
+                        <Text style={st.devTableTextSubSmall} numberOfLines={1}>
+                          {new Date(entry.playedAt).toLocaleTimeString()} • {Math.round(entry.completionRatio * 100)}%
+                        </Text>
+                      </View>
+                      <Text style={[st.devTableTextBadge, entry.skipped && { backgroundColor: "rgba(239,68,68,0.15)", color: "#f87171" }]}>
+                        {entry.skipped ? "Skipped" : "Played"}
+                      </Text>
+                    </View>
+                  ))
+                )}
+
+                <Divider />
+
+                {/* 6. Dangerous Actions */}
+                <Text style={st.devSectionHeader}>Dangerous Actions</Text>
+                <View style={{ gap: 12, marginTop: 8 }}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      recStore.generateRecommendations();
+                      const time = recStore.generatedAt ? new Date(recStore.generatedAt).toLocaleTimeString() : new Date().toLocaleTimeString();
+                      Alert.alert("Recommendations", `Seeds successfully regenerated at ${time}.`);
+                    }}
+                    activeOpacity={0.78}
+                    style={st.devActionBtn}
+                  >
+                    <MaterialIcons name="sync" size={16} color={PRIMARY} />
+                    <Text style={st.devActionBtnTxt}>Regenerate Recommendations</Text>
+                  </TouchableOpacity>
+
+                  <View style={{ flexDirection: "row", gap: 12 }}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                        Alert.alert(
+                          "Clear Analytics",
+                          "Reset all persistent playback analytics history and affinity scores? This cannot be undone.",
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Reset",
+                              style: "destructive",
+                              onPress: () => {
+                                resetAnalytics();
+                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                Alert.alert("Success", "Analytics telemetry cleared.");
+                              }
+                            }
+                          ]
+                        );
+                      }}
+                      activeOpacity={0.78}
+                      style={[st.devActionBtn, { flex: 1, borderColor: "rgba(239,68,68,0.2)" }]}
+                    >
+                      <MaterialIcons name="delete-forever" size={16} color="#f87171" />
+                      <Text style={[st.devActionBtnTxt, { color: "#f87171" }]}>Clear Analytics</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                        recStore.resetRecommendations();
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                        Alert.alert("Success", "Recommendations store cleared.");
+                      }}
+                      activeOpacity={0.78}
+                      style={[st.devActionBtn, { flex: 1 }]}
+                    >
+                      <MaterialIcons name="refresh" size={16} color="#cbc3d9" />
+                      <Text style={st.devActionBtnTxt}>Reset Recs</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            )}
+          </GlassCard>
+        </Section>
+
       </ScrollView>
 
       {/* QUALITY MODAL */}
@@ -872,4 +1162,100 @@ const st = StyleSheet.create({
   modalOptSub: { fontSize: 12, color: "rgba(170,170,185,0.65)", marginTop: 2 },
   modalDismiss: { margin: 16, paddingVertical: 14, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", borderWidth: 0.75, borderColor: "rgba(255,255,255,0.08)" },
   modalDismissText: { color: "rgba(170,170,185,0.65)", fontSize: 12, fontWeight: "800", letterSpacing: 1.2 },
+  devSectionHeader: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: PRIMARY,
+    textTransform: "uppercase",
+    letterSpacing: 1.5,
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  devOverviewGrid: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 10,
+  },
+  devOverviewItem: {
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    padding: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  devOverviewVal: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#FFF",
+  },
+  devOverviewLabel: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.40)",
+    textTransform: "uppercase",
+    marginTop: 2,
+  },
+  devInfoText: {
+    fontSize: 10,
+    color: "rgba(255,255,255,0.45)",
+    fontWeight: "600",
+  },
+  devTableRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: 0.5,
+    borderBottomColor: "rgba(255,255,255,0.04)",
+  },
+  devTableTextMain: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#FFF",
+  },
+  devTableTextSub: {
+    fontSize: 10,
+    color: "rgba(255,255,255,0.40)",
+    fontWeight: "600",
+  },
+  devTableTextSubSmall: {
+    fontSize: 10,
+    color: "rgba(255,255,255,0.45)",
+    marginTop: 2,
+  },
+  devTableTextBadge: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: SECONDARY,
+    backgroundColor: "rgba(70,245,224,0.10)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  devEmptyText: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.30)",
+    fontStyle: "italic",
+    paddingVertical: 8,
+  },
+  devActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderRadius: 14,
+    paddingVertical: 12,
+  },
+  devActionBtnTxt: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#FFF",
+  },
 });

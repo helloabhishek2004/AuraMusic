@@ -175,6 +175,11 @@ export const usePlaylistStore = create<PlaylistStore>()(
         if (!playlist) return 'duplicate';
         if (playlist.trackIds.includes(track.id)) return 'duplicate';
 
+        try {
+          const { useAnalyticsStore } = require('../../analytics/store/analytics.store');
+          useAnalyticsStore.getState().trackAddedToPlaylist(track.id);
+        } catch (e) {}
+
         set((state) => ({
           playlists: {
             ...state.playlists,
@@ -203,7 +208,13 @@ export const usePlaylistStore = create<PlaylistStore>()(
         if (newTracks.length === 0) return { added: 0, skipped };
 
         const newSnapshots: Record<string, PlaylistTrackSnapshot> = {};
-        newTracks.forEach((t) => { newSnapshots[t.id] = toSnapshot(t); });
+        newTracks.forEach((t) => { 
+          newSnapshots[t.id] = toSnapshot(t); 
+          try {
+            const { useAnalyticsStore } = require('../../analytics/store/analytics.store');
+            useAnalyticsStore.getState().trackAddedToPlaylist(t.id);
+          } catch (e) {}
+        });
 
         set((state) => ({
           playlists: {

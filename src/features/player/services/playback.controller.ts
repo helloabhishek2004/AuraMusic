@@ -16,6 +16,167 @@ export class PlaybackController {
   private static lastState: PlaybackState | null = null;
   private static healingInProgress = new Set<string>();
 
+  // Analytics Session State
+  private static sessionTrackId: string | null = null;
+  private static sessionStartedAt: number = 0;
+  private static sessionStartPositionMs: number = 0;
+  private static maxPositionMs: number = 0;
+  private static hasCrossed30s: boolean = false;
+  private static hasRegisteredPlay: boolean = false;
+  private static lastFlushedTrackId: string | null = null;
+
+  private static startSession(trackId: string, startPositionMs: number = 0) {
+    if (this.sessionTrackId && this.sessionTrackId !== trackId) {
+      this.flushCurrentSession(false);
+    }
+
+    if (this.lastFlushedTrackId === trackId && startPositionMs < 5000) {
+      try {
+        const { useAnalyticsStore } = require("../../analytics/store/analytics.store");
+        useAnalyticsStore.getState().trackRepeated(trackId);
+      } catch (e) {}
+    }
+    this.lastFlushedTrackId = null;
+
+    this.sessionTrackId = trackId;
+    this.sessionStartedAt = Date.now();
+    this.sessionStartPositionMs = startPositionMs;
+    this.maxPositionMs = startPositionMs;
+    this.hasCrossed30s = startPositionMs >= 30000;
+    this.hasRegisteredPlay = startPositionMs >= 30000;
+
+    try {
+      const { useAnalyticsStore } = require("../../analytics/store/analytics.store");
+      useAnalyticsStore.getState().setCurrentSession({
+        trackId,
+        startedAt: this.sessionStartedAt,
+        startPosition: startPositionMs,
+      });
+    } catch (e) {
+      console.warn("[PlaybackController] Failed to set currentSession in analytics store:", e);
+    }
+  }
+
+  private static clearSession() {
+    this.sessionTrackId = null;
+    this.sessionStartedAt = 0;
+    this.sessionStartPositionMs = 0;
+    this.maxPositionMs = 0;
+    this.hasCrossed30s = false;
+    this.hasRegisteredPlay = false;
+
+    try {
+      const { useAnalyticsStore } = require("../../analytics/store/analytics.store");
+      useAnalyticsStore.getState().setCurrentSession(null);
+    } catch (e) {}
+  }
+
+  private static async flushCurrentSession(wasCompleted: boolean) {
+    if (!this.sessionTrackId) return;
+
+    const trackId = this.sessionTrackId;
+    const startPositionMs = this.sessionStartPositionMs;
+    const finalPosition = this.maxPositionMs;
+    const hasCrossed30s = this.hasCrossed30s;
+
+    this.lastFlushedTrackId = trackId;
+
+    // Reset immediately to avoid duplicate flush triggers from concurrent event handlers
+    this.clearSession();
+
+    try {
+      const playerStore = usePlayerStore.getState();
+      const track = playerStore.queue.find(t => t.id === trackId) || playerStore.currentTrack;
+      if (!track) return;
+
+      const duration = track.duration || playerStore.duration || 0;
+      const completionRatio = wasCompleted
+        ? 1.0
+        : (duration > 0 ? Math.min(1.0, finalPosition / duration) : 0);
+
+      // Skip Detection: position < 30000 AND track changes (not completed naturally)
+      const skipped = !hasCrossed30s && !wasCompleted;
+
+      const { useAnalyticsStore } = require("../../analytics/store/analytics.store");
+
+      const activeContext = playerStore.activeContext;
+      let sourceContext = activeContext ? {
+        type: activeContext.type as any,
+        id: activeContext.id,
+        title: activeContext.name || undefined
+      } : undefined;
+
+      if (playerStore.queueContext?.sourceType === "autoplay") {
+        sourceContext = {
+          type: "autoplay",
+          id: "autoplay-radio",
+          title: "Autoplay Radio"
+        };
+      }
+
+      // 1. Write history entry
+      useAnalyticsStore.getState().addHistoryEntry({
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        artistId: track.artistId || null,
+        album: track.album || null,
+        albumId: track.albumId || null,
+        art: track.art || null,
+        positionMs: finalPosition,
+        durationMs: duration,
+        completionRatio,
+        skipped,
+        trackSnapshot: track,
+        sourceContext,
+      });
+
+      // 2. Accumulate affinities
+      const listenMs = Math.max(0, finalPosition - startPositionMs);
+      const skipWithin15s = skipped && finalPosition < 15000;
+      const abandoned = skipped && sourceContext?.type === "playlist" && finalPosition < 30000;
+
+      const affinityUpdate: any = {
+        totalListenMs: listenMs,
+        trackId: track.id,
+        albumName: track.album || undefined,
+        skipWithin15s,
+        abandoned,
+      };
+
+      if (skipped) {
+        affinityUpdate.skipCount = 1;
+      }
+
+      if (wasCompleted) {
+        affinityUpdate.completionCount = 1;
+      }
+
+      if (track.artist) {
+        useAnalyticsStore.getState().incrementArtistAffinity(track.artist, affinityUpdate);
+      }
+      if (track.album) {
+        useAnalyticsStore.getState().incrementAlbumAffinity(track.album, {
+          totalListenMs: listenMs,
+          playCount: 0,
+          completionCount: wasCompleted ? 1 : 0,
+          skipCount: skipped ? 1 : 0,
+          score: 0,
+        });
+      }
+      useAnalyticsStore.getState().incrementTrackAffinity(track.id, {
+        totalListenMs: listenMs,
+        playCount: 0,
+        completionCount: wasCompleted ? 1 : 0,
+        skipCount: skipped ? 1 : 0,
+        score: 0,
+      });
+
+    } catch (e) {
+      console.error("[PlaybackController] Error flushing session telemetry:", e);
+    }
+  }
+
   static initialize() {
     if (_controllerInitialized && this.isInitialized) return;
     _controllerInitialized = true;
@@ -49,12 +210,45 @@ export class PlaybackController {
         case PlaybackState.Ended:
           if (store.isTransitioning) return;
           
+          PlaybackController.flushCurrentSession(true);
+
           store.updateProgress(0, store.duration, 0);
-          store.resolveAutoAdvance();
+
+          if (store.repeatMode === "track" && store.currentTrack) {
+            try {
+              const { useAnalyticsStore } = require("../../analytics/store/analytics.store");
+              useAnalyticsStore.getState().trackRepeated(store.currentTrack.id);
+            } catch (e) {}
+          }
+
+          const { useSettingsStore } = require("../../settings/store/settings.store");
+          const settings = useSettingsStore.getState();
+          if (settings.autoplayEnabled && store.repeatMode === "off" && store.currentIndex === store.queue.length - 1 && store.currentTrack) {
+            const lastTrack = store.currentTrack;
+            const { AutoplayRadio } = require("./autoplay-radio");
+            AutoplayRadio.generateContinuationQueue(lastTrack).then((continuationTracks: PlayerTrack[]) => {
+              if (continuationTracks && continuationTracks.length > 0) {
+                store.injectAutoplayQueue(continuationTracks).then(() => {
+                  store.resolveAutoAdvance();
+                });
+              } else {
+                store.resolveAutoAdvance();
+              }
+            }).catch((err: any) => {
+              console.error("[PlaybackController] Autoplay failed:", err);
+              store.resolveAutoAdvance();
+            });
+          } else {
+            store.resolveAutoAdvance();
+          }
           break;
         case PlaybackState.Idle:
           if (store.status !== "idle") {
             store.setStatus("idle");
+          }
+          // Safe fallback if player goes idle and has an uncompleted active session
+          if (PlaybackController.sessionTrackId) {
+            PlaybackController.flushCurrentSession(false);
           }
           break;
         case PlaybackState.Error:
@@ -78,6 +272,42 @@ export class PlaybackController {
       // Zustand still updated for non-perf-critical consumers (queue, seek, crossfade, etc.)
       const store = usePlayerStore.getState();
       store.updateProgress(elapsedMs, durationMs, store.bufferedPosition);
+
+      // Playback Telemetry Sync
+      const currentTrack = store.currentTrack;
+      if (currentTrack && currentTrack.id) {
+        if (PlaybackController.sessionTrackId !== currentTrack.id) {
+          PlaybackController.startSession(currentTrack.id, elapsedMs);
+        }
+
+        if (elapsedMs > PlaybackController.maxPositionMs) {
+          PlaybackController.maxPositionMs = elapsedMs;
+        }
+
+        // 30 Second Rule Check
+        if (!PlaybackController.hasRegisteredPlay && PlaybackController.maxPositionMs >= 30000) {
+          PlaybackController.hasCrossed30s = true;
+          PlaybackController.hasRegisteredPlay = true;
+
+          try {
+            const { useAnalyticsStore } = require("../../analytics/store/analytics.store");
+            const artistAffUpdate = {
+              playCount: 1,
+              trackId: currentTrack.id,
+              albumName: currentTrack.album || undefined,
+            };
+            if (currentTrack.artist) {
+              useAnalyticsStore.getState().incrementArtistAffinity(currentTrack.artist, artistAffUpdate);
+            }
+            if (currentTrack.album) {
+              useAnalyticsStore.getState().incrementAlbumAffinity(currentTrack.album, { playCount: 1, score: 1 });
+            }
+            useAnalyticsStore.getState().incrementTrackAffinity(currentTrack.id, { playCount: 1, score: 1 });
+          } catch (e) {
+            console.error("[PlaybackController] Error registering 30s play count affinity:", e);
+          }
+        }
+      }
     });
 
     // 2. Is Playing Changed (Atomic toggle sync)
@@ -187,6 +417,15 @@ export class PlaybackController {
         const store = usePlayerStore.getState();
         const guard = store._transitionGuard;
 
+        // Analytics Telemetry Sync on Transition
+        const mediaId = data.item ? ((data.item as any)?.mediaId || (data.item as any)?.id) : null;
+        if (PlaybackController.sessionTrackId && PlaybackController.sessionTrackId !== mediaId) {
+          PlaybackController.flushCurrentSession(false);
+        }
+        if (mediaId && PlaybackController.sessionTrackId !== mediaId) {
+          PlaybackController.startSession(mediaId, 0);
+        }
+
         // Defensive: reset isTransitioning on native transition to prevent lockup.
         // But only when no JS operation owns the transition — never cancel a
         // transition that setTrack/resolveAutoAdvance/next/previous initiated.
@@ -197,7 +436,6 @@ export class PlaybackController {
         if (PlaybackService.isReorderingQueue()) return;
         if (!data.item) return;
 
-        const mediaId = (data.item as any)?.mediaId || (data.item as any)?.id;
         if (!mediaId) return;
 
         const newIndex = store.queue.findIndex((t: PlayerTrack) => t.id === mediaId);

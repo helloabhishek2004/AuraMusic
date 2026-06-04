@@ -12,6 +12,7 @@ import {
   Share,
   ActivityIndicator,
   FlatList,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
@@ -26,6 +27,11 @@ import { useMusicNavigation } from '@/src/navigation/music-navigation';
 import { useDownloadStore } from '@/src/features/download/store/download.store';
 import { useLikesStore } from '@/src/features/likes/store/likes.store';
 import { DownloadManager } from '@/src/features/download/services/download.manager';
+import { useAnalyticsStore, getContinueListeningCandidates, getRecentlyPlayedCandidates, getTopArtists, getTopAlbums, getRecentHistory, splitArtistNames } from '@/src/features/analytics/store/analytics.store';
+import { useRecommendationsStore } from '@/src/features/recommendations/store/recommendations.store';
+import { hydrateRecommendationSeed } from '@/src/features/recommendations/services/recommendation-hydrator';
+import { getCanonicalTrackId } from '@/src/features/player/utils/track-identity';
+import { useScrollToTopOnTabPress } from '@/src/hooks/use-scroll-to-top';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const PAD = 24;
@@ -500,8 +506,28 @@ const BentoCard = React.memo(({
   );
 });
 
+function formatRelativeTime(timestamp: number): string {
+  const now = Date.now();
+  const diffMs = now - timestamp;
+  if (diffMs < 0) return 'Just now';
+  
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHr / 24);
+
+  if (diffSec < 60) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffDay === 1) return 'Yesterday';
+  if (diffDay < 7) return `${diffDay}d ago`;
+  
+  return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 // ── CONTINUE LISTENING CARD (REDESIGNED LIKE PAGE.HTML) ───────────────────
-const ContinueListeningCard = React.memo(({ track, onPress }: any) => {
+const ContinueListeningCard = React.memo(({ track, isPlaying, isPaused, onPress }: any) => {
+  const progressPercent = Math.round(track.completionRatio * 100);
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -510,11 +536,11 @@ const ContinueListeningCard = React.memo(({ track, onPress }: any) => {
     >
       <PremiumGlass r={20} blur={40} gloss style={s.clCardGlass}>
         <View style={s.clCardImageContainer}>
-          <Image source={{ uri: track.image }} style={s.clCardImage} contentFit="cover" transition={200} />
+          <Image source={{ uri: track.art }} style={s.clCardImage} contentFit="cover" transition={200} />
           
           {/* Progress bar overlay at the bottom */}
           <View style={s.clProgressBarContainer}>
-            <View style={[s.clProgressBarActive, { width: `${track.progress * 100}%` }]} />
+            <View style={[s.clProgressBarActive, { width: `${track.completionRatio * 100}%` }]} />
           </View>
         </View>
       </PremiumGlass>
@@ -524,12 +550,51 @@ const ContinueListeningCard = React.memo(({ track, onPress }: any) => {
       <Text style={s.clCardArtist} numberOfLines={1}>
         {track.artist}
       </Text>
+      
+      <View style={s.clProgressInfo}>
+        {isPlaying ? (
+          <Text style={s.clNowPlayingText}>Now Playing</Text>
+        ) : isPaused ? (
+          <Text style={s.clPausedText}>Paused</Text>
+        ) : (
+          <Text style={s.clProgressText}>{progressPercent}% completed</Text>
+        )}
+        <Text style={s.clTimeText}> • {formatRelativeTime(track.playedAt)}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// ── RECENTLY PLAYED CARD (EDITORIAL GLASS DESIGN) ─────────────────────────
+const RecentlyPlayedCard = React.memo(({ track, isPlaying, onPress }: any) => {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={s.rpCardContainer}
+    >
+      <PremiumGlass r={16} blur={30} gloss style={s.rpCardGlass}>
+        <View style={s.rpCardImageContainer}>
+          <Image source={{ uri: track.art }} style={s.rpCardImage} contentFit="cover" transition={200} />
+          {isPlaying && (
+            <View style={s.rpActiveOverlay}>
+              <Ionicons name="volume-high" size={24} color={C.primary} />
+            </View>
+          )}
+        </View>
+      </PremiumGlass>
+      <Text style={s.rpCardTitle} numberOfLines={1}>
+        {track.title}
+      </Text>
+      <Text style={s.rpCardArtist} numberOfLines={1}>
+        {track.artist}
+      </Text>
     </TouchableOpacity>
   );
 });
 
 // ── CIRCULAR ARTIST CARD ───────────────────────────────────────────────────
-const CircleArtistCard = ({ name, image, onPress }: any) => {
+const CircleArtistCard = ({ name, image, score, onPress }: any) => {
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -542,9 +607,131 @@ const CircleArtistCard = ({ name, image, onPress }: any) => {
       <Text style={s.circleArtistName} numberOfLines={1}>
         {name}
       </Text>
+      {score !== undefined && score > 0 && (
+        <Text style={s.circleArtistScore} numberOfLines={1}>
+          Affinity: {score.toFixed(1)}
+        </Text>
+      )}
     </TouchableOpacity>
   );
 };
+
+// ── FAVORITE ALBUM CARD ───────────────────────────────────────────────────
+const FavoriteAlbumCard = React.memo(({ album, onPress }: any) => {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={s.favAlbumContainer}
+    >
+      <PremiumGlass r={22} blur={45} gloss style={s.favAlbumGlass}>
+        <View style={s.favAlbumImageContainer}>
+          <Image 
+            source={{ uri: album.image }} 
+            style={s.favAlbumImage} 
+            contentFit="cover" 
+            transition={200} 
+          />
+        </View>
+      </PremiumGlass>
+      <Text style={s.favAlbumTitle} numberOfLines={1}>
+        {album.title}
+      </Text>
+      <Text style={s.favAlbumArtist} numberOfLines={1}>
+        {album.artist}
+      </Text>
+    </TouchableOpacity>
+  );
+});
+
+// ── DAILY MIX CARD ────────────────────────────────────────────────────────
+const DailyMixCard = React.memo(({ seed, onPress }: any) => {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={s.dmCardContainer}
+    >
+      <PremiumGlass r={20} blur={35} gloss style={s.dmCardGlass}>
+        <View style={s.dmCardImageContainer}>
+          <Image 
+            source={{ uri: seed.image }} 
+            style={s.dmCardImage} 
+            contentFit="cover" 
+            transition={200} 
+          />
+          <View style={s.dmBadge}>
+            <Ionicons name="sparkles" size={10} color={C.accent} />
+            <Text style={s.dmBadgeText}>MIX</Text>
+          </View>
+        </View>
+      </PremiumGlass>
+      <Text style={s.dmCardTitle} numberOfLines={1}>
+        {seed.title}
+      </Text>
+      <Text style={s.dmCardSubtitle} numberOfLines={1}>
+        Based on your taste
+      </Text>
+    </TouchableOpacity>
+  );
+});
+
+// ── BECAUSE YOU LIKE CARD ──────────────────────────────────────────────────
+const BecauseYouLikeCard = React.memo(({ seed, onPress }: any) => {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={s.bylCardContainer}
+    >
+      <PremiumGlass r={24} blur={40} gloss style={s.bylCardGlass}>
+        <Image 
+          source={{ uri: seed.image }} 
+          style={s.bylCardImage} 
+          contentFit="cover" 
+          transition={200} 
+        />
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.85)']}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
+        <View style={s.bylCardContent}>
+          <Text style={s.bylCardLabel}>BECAUSE YOU LIKE</Text>
+          <Text style={s.bylCardArtist} numberOfLines={1}>{seed.title}</Text>
+        </View>
+      </PremiumGlass>
+    </TouchableOpacity>
+  );
+});
+
+// ── SEED TRACK CARD (REDISCOVER & LOVED) ────────────────────────────────────
+const SeedTrackCard = React.memo(({ seed, onPress }: any) => {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={s.stCardContainer}
+    >
+      <PremiumGlass r={16} blur={30} gloss style={s.stCardGlass}>
+        <View style={s.stCardImageContainer}>
+          <Image 
+            source={{ uri: seed.image }} 
+            style={s.stCardImage} 
+            contentFit="cover" 
+            transition={200} 
+          />
+        </View>
+      </PremiumGlass>
+      <Text style={s.stCardTitle} numberOfLines={1}>
+        {seed.title}
+      </Text>
+      <Text style={s.stCardArtist} numberOfLines={1}>
+        {seed.artistName || 'Unknown Artist'}
+      </Text>
+    </TouchableOpacity>
+  );
+});
 
 // ── SWIPEABLE HERO CARD ────────────────────────────────────────────────────
 const SwipeableHeroCard = ({ albums, onPlay }: any) => {
@@ -569,7 +756,7 @@ const SwipeableHeroCard = ({ albums, onPlay }: any) => {
       >
         {albums.map((album: any) => (
           <View key={album.id} style={[s.heroSlide, { width: cardWidth }]}>
-            <Image source={{ uri: album.image }} style={s.heroImage} contentFit="cover" contentPosition="center" />
+            <Image source={{ uri: album.artwork || album.image }} style={s.heroImage} contentFit="cover" contentPosition="center" />
             <LinearGradient
               colors={['rgba(0,0,0,0.12)', 'rgba(0,0,0,0.28)', 'rgba(0,0,0,0.82)']}
               locations={[0, 0.45, 1]}
@@ -579,8 +766,17 @@ const SwipeableHeroCard = ({ albums, onPlay }: any) => {
             <View style={s.heroBottom}>
               <BlurView intensity={65} tint="dark" style={StyleSheet.absoluteFill} />
               <View style={s.heroInfo}>
-                <Text style={s.heroTitle}>{album.title}</Text>
-                <Text style={s.heroSubtitle}>{album.artist}</Text>
+                <Text numberOfLines={1} style={s.heroTitle}>{album.title}</Text>
+                <Text numberOfLines={1} style={s.heroSubtitle}>{album.artist}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                  <Text style={{ color: C.accent, fontSize: 11, fontWeight: 'bold' }}>{album.confidence}</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, marginLeft: 8 }}>{album.updatedAt}</Text>
+                </View>
+                {album.reason && (
+                  <Text numberOfLines={1} style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, marginTop: 4 }}>
+                    {album.reason}
+                  </Text>
+                )}
               </View>
 
               <View style={s.heroControls}>
@@ -635,9 +831,11 @@ const SectionHeader = ({ title, onSeeAll }: any) => (
 
 // ── MAIN HOME SCREEN ───────────────────────────────────────────────────────
 export default function HomeScreen() {
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTopOnTabPress(scrollRef);
   const insets = useSafeAreaInsets();
   const { bottomPadding } = usePlaybackInsets();
-  const { goNowPlaying, goArtist, goPlaylist, goAlbum } = useMusicNavigation('home');
+  const { goNowPlaying, goArtist, goPlaylist, goAlbum, goArtistByName, router } = useMusicNavigation('home');
   const [likedSongs, setLikedSongs] = useState<Set<string>>(new Set());
   const [downloadedSongs, setDownloadedSongs] = useState<Set<string>>(new Set());
 
@@ -724,54 +922,488 @@ export default function HomeScreen() {
   const { setQueue } = useMusic();
   const setActiveContext = usePlayerStore(s => s.setActiveContext);
 
-  const continueListeningTracks = useMemo(() => [
-    { id: 'cl-midnight-city', title: 'Midnight City', artist: 'M83', progress: 0.66, image: 'https://picsum.photos/400/400?random=20' },
-    { id: 'cl-starboy', title: 'Starboy', artist: 'The Weeknd', progress: 0.25, image: 'https://picsum.photos/400/400?random=21' },
-    { id: 'cl-levitating', title: 'Levitating', artist: 'Dua Lipa', progress: 0.80, image: 'https://picsum.photos/400/400?random=22' },
-    { id: 'cl-blinding-lights', title: 'Blinding Lights', artist: 'The Weeknd', progress: 0.45, image: 'https://picsum.photos/400/400?random=23' },
-    { id: 'cl-stay', title: 'Stay', artist: 'The Kid LAROI & Justin Bieber', progress: 0.90, image: 'https://picsum.photos/400/400?random=24' },
-    { id: 'cl-save-tears', title: 'Save Your Tears', artist: 'The Weeknd', progress: 0.15, image: 'https://picsum.photos/400/400?random=25' },
-    { id: 'cl-bad-habits', title: 'Bad Habits', artist: 'Ed Sheeran', progress: 0.50, image: 'https://picsum.photos/400/400?random=26' },
-  ], []);
+  const history = useAnalyticsStore(s => s.history);
+  const artistAffinities = useAnalyticsStore(s => s.artistAffinities);
+  const albumAffinities = useAnalyticsStore(s => s.albumAffinities);
+  const analyticsVersion = useAnalyticsStore(s => s.analyticsVersion);
+
+  const continueListeningCandidates = useMemo(() => {
+    const seen = new Set<string>();
+    const list = history
+      .filter((e) => e.positionMs >= 30000 && e.completionRatio < 0.95 && !e.skipped)
+      .sort((a, b) => b.playedAt - a.playedAt);
+      
+    return list.filter((e) => {
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
+  }, [history]);
+
+  const continueListeningTracks = useMemo(() => {
+    return continueListeningCandidates
+      .filter((t) => t.art && !t.art.includes('placeholder') && !t.art.includes('picsum.photos'))
+      .slice(0, 7);
+  }, [continueListeningCandidates]);
+
+  const recentlyPlayedCandidates = useMemo(() => {
+    const seen = new Set<string>();
+    const list = history
+      .filter((e) => !!e.trackSnapshot)
+      .sort((a, b) => b.playedAt - a.playedAt);
+      
+    return list.filter((e) => {
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
+  }, [history]);
+
+  const recentlyPlayedTracks = useMemo(() => {
+    return recentlyPlayedCandidates
+      .filter((t) => t.art && !t.art.includes('placeholder') && !t.art.includes('picsum.photos'))
+      .slice(0, 20);
+  }, [recentlyPlayedCandidates]);
+
+  const rawTopArtists = useMemo(() => {
+    return Object.keys(artistAffinities)
+      .map((key) => ({ key, ...artistAffinities[key] }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.playCount - a.playCount;
+      });
+  }, [artistAffinities]);
+
+  const rawTopAlbums = useMemo(() => {
+    return Object.keys(albumAffinities)
+      .map((key) => ({ key, ...albumAffinities[key] }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.playCount - a.playCount;
+      });
+  }, [albumAffinities]);
+
+  const recStoreVersion = useRecommendationsStore(s => s.analyticsVersion);
+  const generateRecommendations = useRecommendationsStore(s => s.generateRecommendations);
+
+  const lastRecommendationBuild = useRecommendationsStore(s => s.lastRecommendationBuild);
+  const refreshTrendingIfNeeded = useRecommendationsStore(s => s.refreshTrendingIfNeeded);
+
+  useEffect(() => {
+    // Re-check trending seeds freshness on mount/focus
+    refreshTrendingIfNeeded();
+
+    const now = Date.now();
+    const timeSinceLastBuild = now - (lastRecommendationBuild || 0);
+    const fourHours = 4 * 60 * 60 * 1000;
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    
+    // Check if new history items exist since the last build
+    const latestHistoryTime = history[0]?.playedAt || 0;
+    
+    if (!lastRecommendationBuild || timeSinceLastBuild > sevenDays || (timeSinceLastBuild > fourHours && latestHistoryTime > (lastRecommendationBuild || 0))) {
+      console.log('[Recommendations] Recommendations are stale (older than 7 days) or fresher telemetry detected. Rebuilding.');
+      generateRecommendations();
+    }
+  }, [lastRecommendationBuild, history, generateRecommendations, refreshTrendingIfNeeded]);
+
+  const artistCache = useAnalyticsStore((s) => s.artistCache || {});
+  const rawDailyMixes = useRecommendationsStore(s => s.dailyMixes || []);
+  const rawMadeForYou = useRecommendationsStore(s => s.madeForYou || []);
+  const rawRediscover = useRecommendationsStore(s => s.rediscover || []);
+  const rawBecauseYouLike = useRecommendationsStore(s => s.becauseYouLike || []);
+  const rawRecentlyLoved = useRecommendationsStore(s => s.recentlyLoved || []);
+  const trendingSeeds = useRecommendationsStore(s => s.trendingSeeds || []);
+  const rawTrendingForYou = useRecommendationsStore(s => s.trendingForYou);
+  const rawTopSongs = useRecommendationsStore(s => s.topSongs || []);
+  const rawRecoTopArtists = useRecommendationsStore(s => s.topArtists || []);
+
+  const isStale = useMemo(() => {
+    if (!lastRecommendationBuild) return true;
+    const sevenDays = 7 * 24 * 60 * 60 * 1000;
+    return (Date.now() - lastRecommendationBuild) > sevenDays;
+  }, [lastRecommendationBuild]);
+
+  const dailyMixes = useMemo(() => {
+    if (isStale) return [];
+    return rawDailyMixes.filter(item => item.image && !item.image.includes('placeholder') && !item.image.includes('picsum.photos'));
+  }, [rawDailyMixes, isStale]);
+
+  const madeForYou = useMemo(() => {
+    if (isStale) return [];
+    return rawMadeForYou.filter(item => item.image && !item.image.includes('placeholder') && !item.image.includes('picsum.photos'));
+  }, [rawMadeForYou, isStale]);
+
+  const rediscover = useMemo(() => {
+    if (isStale) return [];
+    return rawRediscover.filter(item => item.image && !item.image.includes('placeholder') && !item.image.includes('picsum.photos'));
+  }, [rawRediscover, isStale]);
+
+  const becauseYouLike = useMemo(() => {
+    if (isStale) return [];
+    return rawBecauseYouLike.filter(item => item.image && !item.image.includes('placeholder') && !item.image.includes('picsum.photos'));
+  }, [rawBecauseYouLike, isStale]);
+
+  const recentlyLoved = useMemo(() => {
+    if (isStale) return [];
+    return rawRecentlyLoved.filter(item => item.image && !item.image.includes('placeholder') && !item.image.includes('picsum.photos'));
+  }, [rawRecentlyLoved, isStale]);
+
+  const trendingForYou = useMemo(() => {
+    if (isStale || !rawTrendingForYou) return null;
+    if (rawTrendingForYou.image && !rawTrendingForYou.image.includes('placeholder') && !rawTrendingForYou.image.includes('picsum.photos')) {
+      return rawTrendingForYou;
+    }
+    return null;
+  }, [rawTrendingForYou, isStale]);
+
+  const topSongs = useMemo(() => {
+    if (isStale) return [];
+    return rawTopSongs.filter(item => item.image && !item.image.includes('placeholder') && !item.image.includes('picsum.photos'));
+  }, [rawTopSongs, isStale]);
+
+  const topArtists = useMemo(() => {
+    if (isStale) return [];
+    return rawRecoTopArtists.filter(item => item.image && !item.image.includes('placeholder') && !item.image.includes('picsum.photos'));
+  }, [rawRecoTopArtists, isStale]);
+  const listeningDNA = useRecommendationsStore(s => s.listeningDNA);
+  const tasteDriftLevel = useRecommendationsStore(s => s.tasteDriftLevel);
+  const registerRecommendationShown = useRecommendationsStore(s => s.registerRecommendationShown);
+
+  // Fatigue protection registration on feed visibility/load
+  useEffect(() => {
+    dailyMixes.forEach(s => registerRecommendationShown(s.id));
+    madeForYou.forEach(s => registerRecommendationShown(s.id));
+    becauseYouLike.forEach(s => registerRecommendationShown(s.id));
+    rediscover.forEach(s => registerRecommendationShown(s.id));
+    recentlyLoved.forEach(s => registerRecommendationShown(s.id));
+    if (trendingForYou) {
+      registerRecommendationShown(trendingForYou.id);
+    }
+  }, [dailyMixes, madeForYou, becauseYouLike, rediscover, recentlyLoved, trendingForYou, registerRecommendationShown]);
+  const favoriteArtists = useMemo(() => {
+    return rawTopArtists
+      .filter((artist) => artist.score > 0)
+      .map((artist) => {
+        const cached = artistCache[artist.key];
+        const match = history.find((h) => {
+          const names = splitArtistNames(h.artist);
+          return names.includes(artist.key);
+        });
+
+        // Rule 5: Only render artists with a real, cached profile image (never track/album artwork or picsum)
+        const image = cached?.image;
+        if (!image || image.includes('placeholder') || image.includes('picsum.photos')) {
+          return null;
+        }
+
+        return {
+          name: artist.key,
+          id: cached?.id || match?.artistId || null,
+          image: image,
+          score: artist.score,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .slice(0, 10);
+  }, [rawTopArtists, history, artistCache]);
+
+  const recentlyPlayedArtists = useMemo(() => {
+    const list: Array<{ name: string; id: string | null; image: string }> = [];
+    const seen = new Set<string>();
+
+    for (const entry of history) {
+      const names = splitArtistNames(entry.artist);
+      for (const name of names) {
+        if (!seen.has(name)) {
+          seen.add(name);
+          const cached = artistCache[name];
+          const image = cached?.image;
+          
+          // Rule 5: Only render artists with a real, cached profile image
+          if (image && !image.includes('placeholder') && !image.includes('picsum.photos')) {
+            list.push({
+              name,
+              id: cached?.id || (names[0] === name ? entry.artistId : null),
+              image: image,
+            });
+          }
+        }
+      }
+      if (list.length >= 10) break;
+    }
+    return list;
+  }, [history, artistCache]);
+
+  // Asynchronously resolve profile image & browseId for favorite and recently played artists
+  useEffect(() => {
+    const missing = new Set<string>();
+
+    favoriteArtists.forEach((a) => {
+      if (!artistCache[a.name] || !artistCache[a.name].image || !artistCache[a.name].id) {
+        missing.add(a.name);
+      }
+    });
+
+    recentlyPlayedArtists.forEach((a) => {
+      if (!artistCache[a.name] || !artistCache[a.name].image || !artistCache[a.name].id) {
+        missing.add(a.name);
+      }
+    });
+
+    if (missing.size === 0) return;
+
+    let active = true;
+    const resolveMissing = async () => {
+      const { musicService } = require('@/src/services/api/music');
+      const cacheAction = useAnalyticsStore.getState().cacheArtistDetails;
+      for (const name of missing) {
+        if (!active) break;
+        try {
+          console.log(`[ArtistResolver] Resolving artist profile for: ${name}`);
+          const results = await musicService.searchArtists(name);
+          if (results && results.length > 0) {
+            const bestMatch = results[0];
+            if (bestMatch && bestMatch.id && active) {
+              cacheAction(name, {
+                id: bestMatch.id,
+                image: bestMatch.art || '',
+              });
+            }
+          }
+        } catch (err) {
+          console.warn(`[ArtistResolver] Failed to resolve details for artist ${name}:`, err);
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    };
+
+    resolveMissing();
+
+    return () => {
+      active = false;
+    };
+  }, [favoriteArtists, recentlyPlayedArtists, artistCache]);
+
+  const handlePlaySeed = useCallback(async (seed: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const tracks = await hydrateRecommendationSeed(seed);
+      if (tracks && tracks.length > 0) {
+        let contextType: any = 'home';
+        if (seed.type === 'artist' || seed.type === 'album' || seed.type === 'playlist') {
+          contextType = seed.type;
+        }
+        setActiveContext({ type: contextType, id: seed.id, name: seed.title });
+        
+        const queueTracks = tracks.map((t: any) => ({
+          id: t.id,
+          url: t.url || '',
+          title: t.title,
+          artist: t.artist,
+          art: t.art,
+          duration: t.duration || 240,
+          dominantColors: t.dominantColors || ['#bf5af2', '#1a0033'],
+        }));
+        
+        setQueue(queueTracks as any, 0);
+        goNowPlaying(queueTracks[0].id);
+      } else {
+        Alert.alert('Playback Error', 'No playable tracks could be loaded for this mix.');
+      }
+    } catch (e) {
+      console.error('[HomeScreen] Error hydrating dynamic seed:', e);
+      Alert.alert('Hydration Error', 'An error occurred while loading this mix.');
+    }
+  }, [goNowPlaying, setQueue, setActiveContext]);
+
+
+
+  const heroSlides = useMemo(() => {
+    const list = [];
+
+    // Helper for relative time
+    const getRelativeTime = (timestamp: number | null) => {
+      if (!timestamp) return 'Updated today';
+      const diffMs = Date.now() - timestamp;
+      const diffMins = Math.round(diffMs / 60000);
+      if (diffMins < 1) return 'Updated just now';
+      if (diffMins < 60) return `Updated ${diffMins} min ago`;
+      const diffHours = Math.round(diffMins / 60);
+      if (diffHours < 24) return `Updated ${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+      return 'Updated today';
+    };
+
+    const recoStore = useRecommendationsStore.getState();
+    const lastBuild = recoStore.lastRecommendationBuild;
+    const timeText = getRelativeTime(lastBuild);
+
+    // Slot 1: Daily Soundtrack (Comfort/Familiar mix) - Rule 8: Hero requires confidence >= 70
+    const dailyMix = dailyMixes && dailyMixes[0];
+    if (dailyMix && (!dailyMix.confidence || dailyMix.confidence >= 70)) {
+      list.push({
+        id: dailyMix.id,
+        title: 'Daily Soundtrack',
+        artist: dailyMix.title || 'Your Daily Soundtrack',
+        image: dailyMix.image,
+        isSeed: true,
+        seed: dailyMix,
+        artwork: dailyMix.image,
+        confidence: dailyMix.confidence ? `${dailyMix.confidence}% Match` : '98% Match',
+        reason: dailyMix.reason || 'Based on your recent favorites',
+        updatedAt: timeText,
+      });
+    }
+
+    // Slot 2: Trending For You - Rule 8: Hero requires confidence >= 70
+    const trending = trendingForYou;
+    if (trending && (!trending.confidence || trending.confidence >= 70)) {
+      list.push({
+        id: trending.id,
+        title: 'Trending For You',
+        artist: trending.title || 'Personalized Hits',
+        image: trending.image,
+        isSeed: true,
+        seed: trending,
+        artwork: trending.image,
+        confidence: trending.confidence ? `${trending.confidence}% Match` : '91% Match',
+        reason: trending.reason || 'Popular among artists you frequently enjoy',
+        updatedAt: timeText,
+      });
+    }
+
+    // Slot 3: Taste Evolution - Rule 8: Hero requires confidence >= 70
+    let evolutionTitle = 'Your Taste is Evolving';
+    let defaultReason = 'Exploring fresh new sounds for you';
+    let defaultConfidence = 76;
+
+    if (tasteDriftLevel === 'major') {
+      evolutionTitle = 'Exploring New Sounds';
+      defaultReason = 'Exploring new sounds outside your comfort zone';
+      defaultConfidence = 76;
+    } else if (tasteDriftLevel === 'moderate') {
+      evolutionTitle = 'Your Taste Is Evolving';
+      defaultReason = 'Your taste profile is evolving with new discoveries';
+      defaultConfidence = 82;
+    } else if (listeningDNA && listeningDNA.explorationScore > 60) {
+      evolutionTitle = 'Hidden Gems';
+      defaultReason = 'Exploring lesser-known artists you might like';
+      defaultConfidence = 85;
+    } else if (listeningDNA && listeningDNA.primarySession === 'night') {
+      evolutionTitle = 'Late Night Energy';
+      defaultReason = 'Atmospheric late-night tracks to wind down';
+      defaultConfidence = 80;
+    } else {
+      evolutionTitle = 'Back To Your Favorites';
+      defaultReason = 'Rediscover your all-time favorite tracks';
+      defaultConfidence = 94;
+    }
+
+    const evoSeed = madeForYou && madeForYou[0] ? madeForYou[0] : (rediscover && rediscover[0] ? rediscover[0] : null);
+    const confidenceScore = evoSeed?.confidence ?? defaultConfidence;
+    if (evoSeed && confidenceScore >= 70) {
+      list.push({
+        id: evoSeed.id,
+        title: evolutionTitle,
+        artist: evoSeed.title || 'Personalized for your taste',
+        image: evoSeed.image,
+        isSeed: true,
+        seed: evoSeed,
+        artwork: evoSeed.image,
+        confidence: `${confidenceScore}% Match`,
+        reason: evoSeed.reason || defaultReason,
+        updatedAt: timeText,
+      });
+    }
+
+    // Rule 1: Filter out any slides without real artwork or placeholder/picsum images
+    return list.filter(slide => slide.artwork && !slide.artwork.includes('placeholder') && !slide.artwork.includes('picsum.photos'));
+  }, [dailyMixes, trendingForYou, tasteDriftLevel, listeningDNA, madeForYou, rediscover]);
 
   const handlePlayCLTrack = useCallback((track: any) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    setActiveContext({ type: 'home', id: 'home' });
+    const { resumeTrackFromHistory } = require('@/src/features/player/utils/playback-resume');
+    resumeTrackFromHistory(track, goNowPlaying, 'home');
+  }, [goNowPlaying]);
 
-    const queueTracks = continueListeningTracks.map(t => ({
-      id: t.id,
-      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3',
-      title: t.title,
-      artist: t.artist,
-      art: t.image,
-      duration: 240,
-      dominantColors: ['#bf5af2', '#1a0033'],
-    }));
+  const handlePlayRPTrack = useCallback((track: any) => {
+    const { resumeTrackFromHistory } = require('@/src/features/player/utils/playback-resume');
+    resumeTrackFromHistory(track, goNowPlaying, 'home');
+  }, [goNowPlaying]);
 
-    const idx = queueTracks.findIndex(q => q.id === track.id);
-    setQueue(queueTracks as any, idx !== -1 ? idx : 0);
-    goNowPlaying(track.id);
-  }, [goNowPlaying, setQueue, setActiveContext, continueListeningTracks]);
+  const handleArtistClick = useCallback(async (artist: { name: string; id: string | null }) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (artist.id && artist.id.length > 5) {
+      goArtist(artist.id);
+      return;
+    }
+    try {
+      const { musicService } = require('@/src/services/api/music');
+      const results = await musicService.searchArtists(artist.name);
+      if (results && results.length > 0) {
+        const bestMatch = results[0];
+        if (bestMatch && bestMatch.id) {
+          goArtist(bestMatch.id);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('[HomeScreen] Failed to resolve artist browseId dynamically:', e);
+    }
+    goArtistByName(artist.name);
+  }, [goArtist, goArtistByName]);
 
-  const handlePlayPress = useCallback((track: any) => {
+  const favoriteAlbums = useMemo(() => {
+    return rawTopAlbums
+      .filter((album) => album.score > 0)
+      .map((album) => {
+        const match = history.find((h) => h.album === album.key);
+        const image = match?.art;
+        if (!image || image.includes('placeholder') || image.includes('picsum.photos')) {
+          return null;
+        }
+        return {
+          title: album.key,
+          id: match?.albumId || album.key,
+          artist: match?.artist || 'Unknown Artist',
+          image: image,
+          score: album.score,
+        };
+      })
+      .filter((a): a is NonNullable<typeof a> => a !== null)
+      .slice(0, 10);
+  }, [rawTopAlbums, history]);
+
+  const currentTrack = usePlayerStore(s => s.currentTrack);
+  const isPlaying = usePlayerStore(s => s.isPlaying);
+
+  const handlePlayPress = useCallback((item: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     
+    if (item.isSeed && item.seed) {
+      if (item.seed.type === 'radio' || item.seed.type === 'playlist' || item.seed.type === 'artist') {
+        goPlaylist(item.seed.id);
+      } else {
+        handlePlaySeed(item.seed);
+      }
+      return;
+    }
+
     setActiveContext({ type: 'home', id: 'home' });
     
-    const idx = tracks.findIndex(t => t.id === track.id);
+    const idx = tracks.findIndex(t => t.id === item.id);
     const queueTracks = tracks.map(t => ({
       id: t.id,
-      url: trackUrls[t.id] ?? 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-9.mp3',
+      url: '',
       title: t.title,
       artist: t.artist,
-      art: t.image,
+      art: item.image,
       duration: 240,
       dominantColors: ['#bf5af2', '#1a0033'],
     }));
     
     setQueue(queueTracks as any, idx !== -1 ? idx : 0);
-    goNowPlaying(track.id);
-  }, [goNowPlaying, setQueue, tracks, setActiveContext]);
+    goNowPlaying(item.id);
+  }, [goNowPlaying, setQueue, tracks, setActiveContext, handlePlaySeed]);
 
   return (
     <View style={s.root}>
@@ -781,6 +1413,7 @@ export default function HomeScreen() {
       <AnimatedGradientBackground />
 
       <ScrollView
+        ref={scrollRef}
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[s.scrollContent, { paddingTop: insets.top + 10, paddingBottom: bottomPadding }]}
         scrollIndicatorInsets={{ bottom: bottomPadding }}
@@ -795,101 +1428,355 @@ export default function HomeScreen() {
           </View>
         </MaterialEntrance>
 
-        {/* Swipeable Hero Featured Cards */}
-        <MaterialEntrance delay={100}>
-          <SwipeableHeroCard albums={albums} onPlay={handlePlayPress} />
-        </MaterialEntrance>
+        {/* Swipeable Hero Featured Cards or Onboarding */}
+        {heroSlides.length > 0 ? (
+          <MaterialEntrance delay={100}>
+            <SwipeableHeroCard albums={heroSlides} onPlay={handlePlayPress} />
+          </MaterialEntrance>
+        ) : (
+          <MaterialEntrance delay={100}>
+            <View style={s.onboardingCard}>
+              <PremiumGlass r={32} blur={60} gloss gradient style={s.onboardingGlass}>
+                <Ionicons name="sparkles" size={42} color={C.primary} style={{ marginBottom: 12, alignSelf: 'center' }} />
+                <Text style={s.onboardingTitle}>Start listening to build your soundtrack</Text>
+                <Text style={s.onboardingSub}>Your personal Daily Soundtrack, Trending mixes, and Taste snapshots will appear here as you play more music.</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    router.push('/search');
+                  }}
+                  activeOpacity={0.85}
+                  style={s.onboardingCTA}
+                >
+                  <LinearGradient
+                    colors={[C.primary, C.primaryMid]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFill}
+                  />
+                  <Text style={s.onboardingCTAText}>Discover Music</Text>
+                </TouchableOpacity>
+              </PremiumGlass>
+            </View>
+          </MaterialEntrance>
+        )}
 
         {/* Continue Listening */}
-        <MaterialEntrance delay={200}>
-          <SectionHeader
-            title="Continue Listening"
-          />
-          <ScrollView
-            horizontal
-            contentInsetAdjustmentBehavior="automatic"
-            showsHorizontalScrollIndicator={false}
-            style={s.hzScroll}
-            contentContainerStyle={s.hzScrollContent}
-          >
-            {continueListeningTracks.map((track) => (
-              <ContinueListeningCard
-                key={track.id}
-                track={track}
-                onPress={() => handlePlayCLTrack(track)}
-              />
-            ))}
-          </ScrollView>
-        </MaterialEntrance>
+        {continueListeningTracks.length > 0 && (
+          <MaterialEntrance delay={200}>
+            <SectionHeader
+              title="Continue Listening"
+            />
+            <ScrollView
+              horizontal
+              contentInsetAdjustmentBehavior="automatic"
+              showsHorizontalScrollIndicator={false}
+              style={s.hzScroll}
+              contentContainerStyle={s.hzScrollContent}
+            >
+              {continueListeningTracks.map((track) => {
+                const candidateCanonical = getCanonicalTrackId({ id: track.id, title: track.title, artist: track.artist });
+                const isPlayingNow = isPlaying && currentTrack && getCanonicalTrackId(currentTrack) === candidateCanonical;
+                const isPausedNow = !isPlaying && currentTrack && getCanonicalTrackId(currentTrack) === candidateCanonical;
+
+                return (
+                  <ContinueListeningCard
+                    key={track.id}
+                    track={track}
+                    isPlaying={isPlayingNow}
+                    isPaused={isPausedNow}
+                    onPress={() => handlePlayCLTrack(track)}
+                  />
+                );
+              })}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Recently Played */}
+        {recentlyPlayedTracks.length > 0 && (
+          <MaterialEntrance delay={250}>
+            <SectionHeader
+              title="Recently Played"
+            />
+            <ScrollView
+              horizontal
+              contentInsetAdjustmentBehavior="automatic"
+              showsHorizontalScrollIndicator={false}
+              style={s.hzScroll}
+              contentContainerStyle={s.hzScrollContent}
+            >
+              {recentlyPlayedTracks.map((track) => {
+                const candidateCanonical = getCanonicalTrackId({ id: track.id, title: track.title, artist: track.artist });
+                const isPlayingNow = isPlaying && currentTrack && getCanonicalTrackId(currentTrack) === candidateCanonical;
+
+                return (
+                  <RecentlyPlayedCard
+                    key={track.playedAt}
+                    track={track}
+                    isPlaying={isPlayingNow}
+                    onPress={() => handlePlayRPTrack(track)}
+                  />
+                );
+              })}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Your Top Songs */}
+        {topSongs && topSongs.length > 0 && (
+          <MaterialEntrance delay={260}>
+            <SectionHeader title="Your Top Songs" />
+            <ScrollView
+              horizontal
+              contentInsetAdjustmentBehavior="automatic"
+              showsHorizontalScrollIndicator={false}
+              style={s.hzScroll}
+              contentContainerStyle={s.hzScrollContent}
+            >
+              {topSongs.map((item, idx) => (
+                <SeedTrackCard
+                  key={`${item.id}-${idx}`}
+                  seed={item}
+                  onPress={() => handlePlaySeed(item)}
+                />
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
 
         {/* Made For You */}
-        <MaterialEntrance delay={300}>
-          <View style={s.madeForYouSection}>
-            <SectionHeader title="Made For You" />
-            {playlistsData.map((playlist) => (
-              <BentoCard
-                key={playlist.id}
-                image={playlist.image}
-                tag={playlist.tag}
-                title={playlist.title}
-                subtitle={playlist.subtitle}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  goPlaylist(playlist.id);
-                }}
-              />
-            ))}
-          </View>
-        </MaterialEntrance>
+        {madeForYou && madeForYou.length > 0 && (
+          <MaterialEntrance delay={300}>
+            <View style={s.madeForYouSection}>
+              <SectionHeader title="Made For You" />
+              {madeForYou.map((seed, idx) => (
+                <BentoCard
+                  key={`${seed.id}-${idx}`}
+                  image={seed.image}
+                  tag={seed.type === 'playlist' ? 'PERSONALIZED' : 'RECOMMENDED'}
+                  title={seed.title}
+                  subtitle={seed.reason || 'Personalized mix based on your taste profile.'}
+                  onPress={() => goPlaylist(seed.id)}
+                />
+              ))}
+            </View>
+          </MaterialEntrance>
+        )}
+
+        {/* Daily Mixes */}
+        {dailyMixes && dailyMixes.length > 0 && (
+          <MaterialEntrance delay={310}>
+            <SectionHeader title="Daily Mixes" />
+            <ScrollView
+              horizontal
+              contentInsetAdjustmentBehavior="automatic"
+              showsHorizontalScrollIndicator={false}
+              style={s.hzScroll}
+              contentContainerStyle={s.hzScrollContent}
+            >
+              {dailyMixes.map((mix, idx) => (
+                <DailyMixCard
+                  key={`${mix.id}-${idx}`}
+                  seed={mix}
+                  onPress={() => goPlaylist(mix.id)}
+                />
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Because You Like */}
+        {becauseYouLike && becauseYouLike.length > 0 && (
+          <MaterialEntrance delay={320}>
+            <SectionHeader title="Because You Like" />
+            <ScrollView
+              horizontal
+              contentInsetAdjustmentBehavior="automatic"
+              showsHorizontalScrollIndicator={false}
+              style={s.hzScroll}
+              contentContainerStyle={s.hzScrollContent}
+            >
+              {becauseYouLike.map((item, idx) => (
+                <BecauseYouLikeCard
+                  key={`${item.id}-${idx}`}
+                  seed={item}
+                  onPress={() => goPlaylist(item.id)}
+                />
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Top Artists */}
+        {topArtists && topArtists.length > 0 && (
+          <MaterialEntrance delay={270}>
+            <SectionHeader title="Top Artists This Month" />
+            <ScrollView
+              horizontal
+              contentInsetAdjustmentBehavior="automatic"
+              showsHorizontalScrollIndicator={false}
+              style={s.artistScroll}
+              contentContainerStyle={s.artistScrollContent}
+            >
+              {topArtists.map((artist, idx) => (
+                <CircleArtistCard
+                  key={`${artist.id}-${idx}`}
+                  name={artist.title}
+                  image={artist.image}
+                  score={artist.score}
+                  onPress={() => handleArtistClick({ name: artist.title, id: artist.id })}
+                />
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Favorite Artists */}
+        {favoriteArtists.length > 0 && (
+          <MaterialEntrance delay={275}>
+            <SectionHeader title="Favorite Artists" />
+            <ScrollView 
+              horizontal 
+              contentInsetAdjustmentBehavior="automatic" 
+              showsHorizontalScrollIndicator={false} 
+              style={s.artistScroll}
+              contentContainerStyle={s.artistScrollContent}
+            >
+              {favoriteArtists.map((artist) => (
+                <CircleArtistCard
+                  key={artist.name}
+                  name={artist.name}
+                  image={artist.image}
+                  score={artist.score}
+                  onPress={() => handleArtistClick(artist)}
+                />
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Favorite Albums */}
+        {favoriteAlbums.length > 0 && (
+          <MaterialEntrance delay={290}>
+            <SectionHeader title="Favorite Albums" />
+            <ScrollView
+              horizontal
+              contentInsetAdjustmentBehavior="automatic"
+              showsHorizontalScrollIndicator={false}
+              style={s.hzScroll}
+              contentContainerStyle={s.hzScrollContent}
+            >
+              {favoriteAlbums.map((album, idx) => (
+                <FavoriteAlbumCard
+                  key={`${album.id || album.title}-${idx}`}
+                  album={album}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    goAlbum(album.id);
+                  }}
+                />
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Trending Now */}
+        {trendingSeeds && trendingSeeds.length > 0 && (
+          <MaterialEntrance delay={500}>
+            <SectionHeader title="Trending Now" />
+            <ScrollView 
+              horizontal 
+              contentInsetAdjustmentBehavior="automatic" 
+              showsHorizontalScrollIndicator={false} 
+              style={s.hzScroll}
+              contentContainerStyle={s.hzScrollContent}
+            >
+              {trendingSeeds.map((seed, idx) => (
+                <View key={seed.id} style={{ width: 280, marginRight: 20 }}>
+                  <BentoCard
+                    image={seed.image}
+                    tag={seed.source === 'india' ? 'TRENDING IN INDIA' : 'GLOBAL HITS'}
+                    title={seed.title}
+                    subtitle={`Hydrated live from charts. Updated today.`}
+                    onPress={() => goPlaylist(seed.id)}
+                  />
+                </View>
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Rediscover */}
+        {rediscover && rediscover.length > 0 && (
+          <MaterialEntrance delay={330}>
+            <SectionHeader title="Rediscover" />
+            <ScrollView
+              horizontal
+              contentInsetAdjustmentBehavior="automatic"
+              showsHorizontalScrollIndicator={false}
+              style={s.hzScroll}
+              contentContainerStyle={s.hzScrollContent}
+            >
+              {rediscover.map((item, idx) => (
+                <SeedTrackCard
+                  key={`${item.id}-${idx}`}
+                  seed={item}
+                  onPress={() => handlePlaySeed(item)}
+                />
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Recently Loved */}
+        {recentlyLoved && recentlyLoved.length > 0 && (
+          <MaterialEntrance delay={340}>
+            <SectionHeader title="Recently Loved" />
+            <ScrollView
+              horizontal
+              contentInsetAdjustmentBehavior="automatic"
+              showsHorizontalScrollIndicator={false}
+              style={s.hzScroll}
+              contentContainerStyle={s.hzScrollContent}
+            >
+              {recentlyLoved.map((item, idx) => (
+                <SeedTrackCard
+                  key={`${item.id}-${idx}`}
+                  seed={item}
+                  onPress={() => handlePlaySeed(item)}
+                />
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
 
         {/* Recently Played Artists */}
-        <MaterialEntrance delay={400}>
-          <SectionHeader title="Recently Played" />
-          <ScrollView 
-            horizontal 
-            contentInsetAdjustmentBehavior="automatic" 
-            showsHorizontalScrollIndicator={false} 
-            style={s.artistScroll}
-            contentContainerStyle={s.artistScrollContent}
-          >
-            {artists.map((artist) => (
-              <CircleArtistCard
-                key={artist.id}
-                name={artist.name}
-                image={artist.image}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  goArtist(artist.id);
-                }}
-              />
-            ))}
-          </ScrollView>
-        </MaterialEntrance>
-
-        {/* Trending Section */}
-        <MaterialEntrance delay={500}>
-          <SectionHeader title="Trending Now" />
-          <ScrollView 
-            horizontal 
-            contentInsetAdjustmentBehavior="automatic" 
-            showsHorizontalScrollIndicator={false} 
-            style={s.hzScroll}
-            contentContainerStyle={s.hzScrollContent}
-          >
-            {albums.map((album) => (
-              <View key={album.id} style={{ width: 280, marginRight: 20 }}>
-                <BentoCard
-                  image={album.image}
-                  title={album.title}
-                  subtitle={album.artist}
-                  onPress={() => goAlbum(album.id)}
+        {recentlyPlayedArtists.length > 0 && (
+          <MaterialEntrance delay={400}>
+            <SectionHeader title="Recently Played Artists" />
+            <ScrollView 
+              horizontal 
+              contentInsetAdjustmentBehavior="automatic" 
+              showsHorizontalScrollIndicator={false} 
+              style={s.artistScroll}
+              contentContainerStyle={s.artistScrollContent}
+            >
+              {recentlyPlayedArtists.map((artist, idx) => (
+                <CircleArtistCard
+                  key={`${artist.name}-${idx}`}
+                  name={artist.name}
+                  image={artist.image}
+                  onPress={() => handleArtistClick(artist)}
                 />
-              </View>
-            ))}
-          </ScrollView>
-        </MaterialEntrance>
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
 
       </ScrollView>
+
+
     </View>
   );
 }
@@ -947,7 +1834,7 @@ const s = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 138,
+    height: 154,
     paddingHorizontal: 28,
     paddingVertical: 20,
     flexDirection: 'row',
@@ -1208,6 +2095,14 @@ const s = StyleSheet.create({
     width: 128,
     textAlign: 'center',
   },
+  circleArtistScore: {
+    color: 'rgba(255, 255, 255, 0.48)',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 2,
+    width: 128,
+    textAlign: 'center',
+  },
 
   // Artist Scroll
   artistScroll: {
@@ -1269,5 +2164,322 @@ const s = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     opacity: 0.65,
+  },
+  clProgressInfo: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  clProgressText: {
+    color: C.textSecondary,
+    fontSize: 11,
+    fontWeight: '600',
+    opacity: 0.5,
+  },
+  clNowPlayingText: {
+    color: C.primary,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: -0.1,
+  },
+  clPausedText: {
+    color: C.amber,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: -0.1,
+  },
+  clTimeText: {
+    color: C.textSecondary,
+    fontSize: 11,
+    fontWeight: '500',
+    opacity: 0.45,
+  },
+  rpCardContainer: {
+    width: 120,
+    marginRight: 14,
+    marginBottom: 8,
+  },
+  rpCardGlass: {
+    width: 120,
+    height: 120,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  rpCardImageContainer: {
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    position: 'relative',
+    borderRadius: 16,
+  },
+  rpCardImage: {
+    width: '100%',
+    height: '100%',
+  },
+  rpActiveOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rpCardTitle: {
+    color: C.text,
+    fontWeight: '600',
+    fontSize: 13,
+    letterSpacing: -0.15,
+    marginBottom: 2,
+  },
+  rpCardArtist: {
+    color: C.textSecondary,
+    fontSize: 11,
+    fontWeight: '500',
+    opacity: 0.6,
+  },
+  favAlbumContainer: {
+    width: 180,
+    marginRight: 20,
+    marginBottom: 12,
+  },
+  favAlbumGlass: {
+    width: 180,
+    height: 180,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  favAlbumImageContainer: {
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    borderRadius: 22,
+  },
+  favAlbumImage: {
+    width: '100%',
+    height: '100%',
+  },
+  favAlbumTitle: {
+    color: C.text,
+    fontWeight: '700',
+    fontSize: 14,
+    letterSpacing: -0.2,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  favAlbumArtist: {
+    color: C.textSecondary,
+    fontSize: 12,
+    fontWeight: '500',
+    opacity: 0.6,
+  },
+
+  // Daily Mix Cards
+  dmCardContainer: {
+    width: 180,
+    marginRight: 20,
+    marginBottom: 12,
+  },
+  dmCardGlass: {
+    width: 180,
+    height: 180,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  dmCardImageContainer: {
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    borderRadius: 20,
+    position: 'relative',
+  },
+  dmCardImage: {
+    width: '100%',
+    height: '100%',
+  },
+  dmBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  dmBadgeText: {
+    color: C.accent,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  dmCardTitle: {
+    color: C.text,
+    fontWeight: '700',
+    fontSize: 14,
+    letterSpacing: -0.2,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  dmCardSubtitle: {
+    color: C.textSecondary,
+    fontSize: 12,
+    fontWeight: '500',
+    opacity: 0.6,
+  },
+
+  // Because You Like Cards
+  bylCardContainer: {
+    width: 220,
+    marginRight: 20,
+    marginBottom: 12,
+  },
+  bylCardGlass: {
+    width: 220,
+    height: 140,
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  bylCardImage: {
+    width: '100%',
+    height: '100%',
+  },
+  bylCardContent: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+  },
+  bylCardLabel: {
+    color: C.accent,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  bylCardArtist: {
+    color: C.text,
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+
+  // Seed Track Cards (Rediscover / Recently Loved)
+  stCardContainer: {
+    width: 140,
+    marginRight: 16,
+    marginBottom: 12,
+  },
+  stCardGlass: {
+    width: 140,
+    height: 140,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  stCardImageContainer: {
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    borderRadius: 16,
+  },
+  stCardImage: {
+    width: '100%',
+    height: '100%',
+  },
+  stCardTitle: {
+    color: C.text,
+    fontWeight: '700',
+    fontSize: 13,
+    letterSpacing: -0.15,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  stCardArtist: {
+    color: C.textSecondary,
+    fontSize: 11,
+    fontWeight: '500',
+    opacity: 0.6,
+  },
+
+  // Hydration Loader Overlay
+  loaderOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  loaderContainer: {
+    padding: 32,
+    alignItems: 'center',
+    gap: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  loaderText: {
+    color: C.text,
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  onboardingCard: {
+    height: 360,
+    marginHorizontal: PAD,
+    borderRadius: 36,
+    overflow: 'hidden',
+    marginBottom: 44,
+  },
+  onboardingGlass: {
+    flex: 1,
+    padding: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  onboardingTitle: {
+    color: C.text,
+    fontSize: 24,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: -0.4,
+    marginBottom: 12,
+  },
+  onboardingSub: {
+    color: C.textSecondary,
+    fontSize: 14,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 20,
+    opacity: 0.7,
+    marginBottom: 28,
+    paddingHorizontal: 12,
+  },
+  onboardingCTA: {
+    height: 52,
+    paddingHorizontal: 36,
+    borderRadius: 26,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    shadowColor: C.primary,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  onboardingCTAText: {
+    color: C.text,
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: -0.1,
   },
 });

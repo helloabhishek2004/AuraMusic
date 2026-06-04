@@ -11,6 +11,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import { useScrollToTopOnTabPress } from "@/src/hooks/use-scroll-to-top";
 import React, {
   useCallback,
   useEffect,
@@ -848,6 +849,8 @@ const StorageCard = ({ storage }: { storage: SInfo }) => {
 
 // ── MAIN SCREEN ───────────────────────────────────────────────────────────────
 export default function DownloadsScreen() {
+  const flashListRef = useRef<any>(null);
+  useScrollToTopOnTabPress(flashListRef);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const storage = useStorage();
@@ -933,7 +936,11 @@ export default function DownloadsScreen() {
         duration: t.duration || 0,
         dominantColors: t.dominantColors || [C.primary, C.primaryMid],
       }));
-      setQueue(hydratedTracks as any, idx !== -1 ? idx : 0);
+      setQueue(hydratedTracks as any, idx !== -1 ? idx : 0, {
+        sourceId: "downloads",
+        sourceType: "manual",
+        generatedAt: Date.now()
+      });
       openNowPlaying(router, track.id);
     },
     [setQueue, router, tracks, setActiveContext],

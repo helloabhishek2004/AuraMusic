@@ -1035,7 +1035,11 @@ export default function LocalLibraryScreen() {
             const startIndex = playerTracks.findIndex((t) => t.id === track.id);
 
             setActiveContext({ type: "local", id: "local" });
-            setQueue(playerTracks, startIndex !== -1 ? startIndex : 0);
+            setQueue(playerTracks, startIndex !== -1 ? startIndex : 0, {
+                sourceId: "local",
+                sourceType: "manual",
+                generatedAt: Date.now()
+            });
             // Removed navigation to /now_playing
         },
         [setQueue, tracks]

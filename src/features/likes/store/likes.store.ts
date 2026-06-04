@@ -40,6 +40,11 @@ export const useLikesStore = create<LikesState & LikesActions>()(
       },
 
       likeTrack: (track: PlayerTrack) => {
+        try {
+          const { useAnalyticsStore } = require('../../analytics/store/analytics.store');
+          useAnalyticsStore.getState().trackLiked(track.id);
+        } catch (e) {}
+
         set((state) => ({
           likedTrackIds: { ...state.likedTrackIds, [track.id]: true },
           likedAt: { ...state.likedAt, [track.id]: Date.now() },

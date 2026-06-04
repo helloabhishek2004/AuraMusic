@@ -431,7 +431,12 @@ function ArtistPage() {
       url: "",
       duration: parseDuration(track.duration),
     }));
-    await setQueue(tracks, 0);
+    await setQueue(tracks, 0, {
+      sourceId: artist.id,
+      sourceType: "radio",
+      seedArtists: [artist.name],
+      generatedAt: Date.now()
+    });
   }, [artist, setQueue]);
 
   const handleShuffleArtist = useCallback(async () => {
@@ -445,14 +450,20 @@ function ArtistPage() {
       url: "",
       duration: parseDuration(track.duration),
     }));
-    await setQueue(tracks, 0);
+    await setQueue(tracks, 0, {
+      sourceId: artist.id,
+      sourceType: "radio",
+      seedArtists: [artist.name],
+      generatedAt: Date.now()
+    });
   }, [artist, setQueue]);
 
   const handleTrackPress = useCallback(
     async (track: MusicTrack) => {
-      const index = artist?.songs.findIndex((t) => t.id === track.id) ?? 0;
+      if (!artist) return;
+      const index = artist.songs.findIndex((t) => t.id === track.id) ?? 0;
       await setQueue(
-        artist?.songs.map((t) => ({
+        artist.songs.map((t) => ({
           id: t.id,
           title: t.title,
           artist: t.artist,
@@ -461,6 +472,12 @@ function ArtistPage() {
           duration: parseDuration(t.duration),
         })) ?? [],
         index,
+        {
+          sourceId: artist.id,
+          sourceType: "manual",
+          seedArtists: [artist.name],
+          generatedAt: Date.now()
+        }
       );
     },
     [artist, setQueue],

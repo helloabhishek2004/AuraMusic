@@ -240,7 +240,11 @@ function AlbumScreen() {
         duration: parseDuration(track.duration),
       }));
 
-      await setQueue(tracksToPlay, 0);
+      await setQueue(tracksToPlay, 0, {
+        sourceId: album.id,
+        sourceType: "album",
+        generatedAt: Date.now()
+      });
       navigation.goNowPlaying(tracksToPlay[0].id);
     },
     [album, setQueue, navigation, isShuffle, toggleShuffle],
@@ -259,7 +263,11 @@ function AlbumScreen() {
         url: "",
         duration: parseDuration(t.duration),
       }));
-      await setQueue(tracksToPlay, index);
+      await setQueue(tracksToPlay, index, {
+        sourceId: album.id,
+        sourceType: "album",
+        generatedAt: Date.now()
+      });
       navigation.goNowPlaying(track.id);
     },
     [album, setQueue, navigation],

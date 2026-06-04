@@ -504,4 +504,17 @@ export const musicService = {
       throw error;
     }
   },
+
+  /**
+   * Fetch trending and top charts from backend.
+   */
+  getCharts: async (country?: string): Promise<{ trending: any[]; songs: any[]; artists: any[] }> => {
+    try {
+      const response = await apiClient.get(`/charts`, { params: { country } });
+      return response.data || { trending: [], songs: [], artists: [] };
+    } catch (error) {
+      console.error('[MusicAPI] Error fetching charts:', error);
+      return { trending: [], songs: [], artists: [] };
+    }
+  },
 };

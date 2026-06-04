@@ -843,6 +843,98 @@ async def get_lyrics(video_id: str, title: str = Query(...), artist: str = Query
             print(f"[Backend] Lyrics error: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to fetch lyrics: {str(e)}")
 
+@app.get("/charts")
+def get_charts(country: Optional[str] = Query(None, description="Country code for charts, e.g. IN")):
+    """
+    Fetch trending and top songs/artists charts from YouTube Music using YTMusic.get_charts.
+    Resolves playlist ids to actual tracks.
+    """
+    def resolve_chart_songs(playlists, limit=25):
+        songs = []
+        if not playlists or not isinstance(playlists, list):
+            return songs
+        playlist_id = playlists[0].get("playlistId")
+        if playlist_id:
+            try:
+                playlist_data = yt.get_playlist(playlist_id, limit=limit)
+                for item in playlist_data.get("tracks", []):
+                    mapped = map_song(item)
+                    if mapped:
+                        songs.append(mapped)
+            except Exception as e:
+                print(f"[Backend] Error resolving playlist {playlist_id}: {e}")
+        return songs
+
+    try:
+        print(f"[Backend] Fetching charts (country='{country}')")
+        charts_data = yt.get_charts(country=country) if country else yt.get_charts()
+        
+        trending_songs = []
+        top_songs = []
+        top_artists = []
+
+        # 1. Resolve Artists (directly returned as a list of artist dicts)
+        if "artists" in charts_data and isinstance(charts_data["artists"], list):
+            for item in charts_data["artists"]:
+                mapped = map_artist(item)
+                if mapped:
+                    top_artists.append(mapped)
+                else:
+                    name = item.get("artist") or item.get("title")
+                    browse_id = item.get("browseId")
+                    if name and browse_id:
+                        top_artists.append({
+                            "id": browse_id,
+                            "browseId": browse_id,
+                            "title": name,
+                            "artist": name,
+                            "thumbnail": get_high_res_thumbnail(item.get("thumbnails", [])),
+                            "subscribers": item.get("subscribers"),
+                            "type": "artist"
+                        })
+
+        # 2. Resolve Songs from Playlists
+        if "videos" in charts_data and isinstance(charts_data["videos"], list):
+            playlists = charts_data["videos"]
+            if len(playlists) > 0:
+                trending_songs = resolve_chart_songs([playlists[0]], limit=25)
+            if len(playlists) > 1:
+                top_songs = resolve_chart_songs([playlists[1]], limit=25)
+        elif "daily" in charts_data and isinstance(charts_data["daily"], list):
+            playlists = charts_data["daily"]
+            if len(playlists) > 0:
+                trending_songs = resolve_chart_songs([playlists[0]], limit=25)
+            if len(playlists) > 1:
+                top_songs = resolve_chart_songs([playlists[1]], limit=25)
+
+        # Fallback for top_songs if empty but weekly exists
+        if not top_songs and "weekly" in charts_data and isinstance(charts_data["weekly"], list):
+            playlists = charts_data["weekly"]
+            if len(playlists) > 0:
+                top_songs = resolve_chart_songs([playlists[0]], limit=25)
+
+        # Legacy fallback in case ytmusicapi returns songs directly in some environments
+        if not trending_songs and "trending" in charts_data and "results" in charts_data["trending"]:
+            for item in charts_data["trending"]["results"]:
+                mapped = map_song(item)
+                if mapped:
+                    trending_songs.append(mapped)
+        if not top_songs and "songs" in charts_data and "results" in charts_data["songs"]:
+            for item in charts_data["songs"]["results"]:
+                mapped = map_song(item)
+                if mapped:
+                    top_songs.append(mapped)
+
+        return {
+            "trending": trending_songs,
+            "songs": top_songs,
+            "artists": top_artists
+        }
+    except Exception as e:
+        print(f"[Backend] Error fetching charts: {e}")
+        # Return fallback structures to keep frontend completely stable
+        return {"trending": [], "songs": [], "artists": []}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

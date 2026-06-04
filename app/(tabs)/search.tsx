@@ -56,7 +56,9 @@ import {
   TouchableOpacity,
   View,
   Keyboard,
+  TouchableWithoutFeedback,
 } from "react-native";
+import { useScrollToTopOnTabPress } from "@/src/hooks/use-scroll-to-top";
 import Reanimated, {
   useAnimatedStyle,
   useSharedValue,
@@ -1334,6 +1336,8 @@ const AnimatedBg = () => {
 const SEARCH_CATEGORIES = ["All", "Songs", "Artists", "Albums"];
 
 export default function SearchScreen() {
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTopOnTabPress(scrollRef);
   const insets = useSafeAreaInsets();
   const { bottomPadding } = usePlaybackInsets();
   const { goNowPlaying, goArtist, goArtistByName, goAlbum } =
@@ -1390,6 +1394,7 @@ export default function SearchScreen() {
 
   const handlePlay = useCallback(
     async (track: MusicTrack, contextList?: MusicTrack[]) => {
+      Keyboard.dismiss();
       if (!track?.id) return;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
@@ -1408,7 +1413,11 @@ export default function SearchScreen() {
 
       // 3. SYNC QUEUE and Resolve
       setActiveContext({ type: "search", id: query });
-      await setQueue(playerTracks, startIndex !== -1 ? startIndex : 0);
+      await setQueue(playerTracks, startIndex !== -1 ? startIndex : 0, {
+        sourceId: query,
+        sourceType: "search",
+        generatedAt: Date.now()
+      });
       
       return contextualQueue;
     },
@@ -1417,6 +1426,7 @@ export default function SearchScreen() {
 
   const handlePlaySong = useCallback(
     async (song: any) => {
+      Keyboard.dismiss();
       // Play and get the queue context used
       const playedQueue = await handlePlay({
         id: song.id,
@@ -1441,6 +1451,7 @@ export default function SearchScreen() {
 
   const handlePressArtist = useCallback(
     (artist: any) => {
+      Keyboard.dismiss();
       addRecentSearch({
         id: artist.id,
         type: "artist",
@@ -1456,6 +1467,7 @@ export default function SearchScreen() {
 
   const handlePressAlbum = useCallback(
     (album: any) => {
+      Keyboard.dismiss();
       addRecentSearch({
         id: album.id,
         type: "album",
@@ -1471,6 +1483,7 @@ export default function SearchScreen() {
 
   const handleRecentPress = useCallback(
     async (item: RecentSearchItem) => {
+      Keyboard.dismiss();
       if (item.type === "song")
         handlePlay(
           {
@@ -1556,6 +1569,8 @@ export default function SearchScreen() {
       <AnimatedBg />
 
       <ScrollView
+        ref={scrollRef}
+        onScrollBeginDrag={Keyboard.dismiss}
         contentContainerStyle={[
           s.scroll,
           {
@@ -1568,6 +1583,8 @@ export default function SearchScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
       >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={{ flex: 1 }}>
         {/* ── HEADER ──────────────────────────────────────────────── */}
         <Mat delay={0}>
           <View style={s.header}>
@@ -1831,6 +1848,8 @@ export default function SearchScreen() {
             )}
           </>
         )}
+          </View>
+        </TouchableWithoutFeedback>
       </ScrollView>
     </View>
   );

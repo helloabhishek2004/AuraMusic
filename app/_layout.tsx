@@ -6,6 +6,7 @@ import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { MusicProvider, useNowPlayingTrack } from '../src/context/MusicContext';
 import { palette } from '../src/design/tokens';
 import { StyleSheet } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, interpolate, Extrapolate } from 'react-native-reanimated';
 
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -252,6 +253,24 @@ export default function RootLayout() {
     []
   );
 
+  const expandProgress = useSharedValue(0);
+
+  const stackStyle = useAnimatedStyle(() => {
+    const p = expandProgress.value;
+    const scale = interpolate(p, [0, 1], [1, 0.96], Extrapolate.CLAMP);
+    const opacity = interpolate(p, [0, 1], [1, 0.85], Extrapolate.CLAMP);
+    const borderRadius = interpolate(p, [0, 1], [0, 24], Extrapolate.CLAMP);
+
+    return {
+      transform: [{ scale }],
+      opacity,
+      borderRadius,
+      overflow: borderRadius > 0.1 ? 'hidden' : 'visible',
+      backgroundColor: palette.background, // Preserve base application color on screen cards
+      flex: 1,
+    };
+  });
+
   if (!fontsLoaded && !error) {
     return null;
   }
@@ -264,42 +283,32 @@ export default function RootLayout() {
             <BackPriorityProvider>
             <DynamicTrackTheme />
             <StatusBar style="light" translucent backgroundColor="transparent" />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: 'transparent' },
-                animation: 'slide_from_right',
-                animationDuration: 220,
-                gestureEnabled: true,
-              }}
-            >
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen
-                name="artist/[id]"
-                options={{
+            <Animated.View style={stackStyle}>
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: 'transparent' },
                   animation: 'slide_from_right',
-                  animationDuration: 200,
+                  animationDuration: 260, // Optimized for premium ease-out decay (Apple Music style)
+                  gestureEnabled: true,
                 }}
-              />
-              <Stack.Screen
-                name="album/[id]"
-                options={{
-                  animation: 'slide_from_right',
-                  animationDuration: 200,
-                }}
-              />
-              <Stack.Screen
-                name="playlist/[id]"
-                options={{
-                  animation: 'slide_from_right',
-                  animationDuration: 200,
-                }}
-              />
-              <Stack.Screen name="create_playlist" options={{ animation: 'slide_from_bottom' }} />
-              <Stack.Screen name="downloads" options={{ animation: 'slide_from_right' }} />
-              <Stack.Screen name="local_library" options={{ animation: 'slide_from_right' }} />
-            </Stack>
-            <PlayerOverlay />
+              >
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="artist/[id]" />
+                <Stack.Screen name="album/[id]" />
+                <Stack.Screen name="playlist/[id]" />
+                <Stack.Screen 
+                  name="create_playlist" 
+                  options={{ 
+                    animation: 'slide_from_bottom',
+                    animationDuration: 280 
+                  }} 
+                />
+                <Stack.Screen name="downloads" />
+                <Stack.Screen name="local_library" />
+              </Stack>
+            </Animated.View>
+            <PlayerOverlay expandProgress={expandProgress} />
             </BackPriorityProvider>
           </GestureHandlerRootView>
         </MusicProvider>
@@ -324,7 +333,7 @@ function DynamicTrackTheme() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: palette.background,
+    backgroundColor: '#000', // Pure black backplate behind stack card layout
   }
 });
 

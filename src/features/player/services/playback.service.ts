@@ -354,6 +354,21 @@ export class PlaybackService {
     }
   }
 
+  static async addTracks(tracks: PlayerTrack[]): Promise<void> {
+    if (Platform.OS === "web") return;
+    try {
+      for (const track of tracks) {
+        const item = toMediaItem({
+          ...track,
+          url: normalizePlaybackUri(track.url)
+        }, !isPlayableUri(track.url));
+        await TrackPlayer.addMediaItem(item);
+      }
+    } catch (e) {
+      console.error("[Player] addTracks failed:", e);
+    }
+  }
+
   static async insertTrack(index: number, track: PlayerTrack): Promise<void> {
     if (Platform.OS === "web") return;
     try {
