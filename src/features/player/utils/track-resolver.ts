@@ -64,9 +64,8 @@ export function getPlaybackSourceType(track: PlayerTrack): PlaybackSourceType {
 export async function resolveTrack(t: PlayerTrack, preloadedTrack?: PlayerTrack | null): Promise<PlayerTrack> {
   const directUrl = normalizePlaybackUri(t.url);
   const directScheme = getUriScheme(directUrl);
-  const hasDownloadPath = !!(t as PlayerTrack & { localAudioPath?: string }).localAudioPath;
 
-  if ((t.isLocal || directScheme === "file" || directScheme === "content") && !hasDownloadPath && (directScheme === "file" || directScheme === "content")) {
+  if (t.isLocal || directScheme === "file" || directScheme === "content") {
     return { ...t, url: directUrl, isLocal: true };
   }
 
@@ -141,6 +140,12 @@ export async function resolveTrack(t: PlayerTrack, preloadedTrack?: PlayerTrack 
 const resolutionPromises = new Map<string, Promise<PlayerTrack>>();
 
 export async function resolveAudioOnly(t: PlayerTrack, preloadedTrack?: PlayerTrack | null, isPlayed: boolean = false): Promise<PlayerTrack> {
+    const directUrl = normalizePlaybackUri(t.url);
+    const directScheme = getUriScheme(directUrl);
+    if (t.isLocal || directScheme === "file" || directScheme === "content") {
+        return { ...t, url: directUrl, isLocal: true };
+    }
+
     // Deduplicate concurrent resolutions for the same track
     const existing = resolutionPromises.get(t.id);
     if (existing) return existing;
@@ -172,10 +177,40 @@ export async function resolveAudioOnly(t: PlayerTrack, preloadedTrack?: PlayerTr
                         }
                     }
 
-                    const { streamUrl } = await musicService.resolveStream(targetId, quality);
+                    let streamUrl: string | undefined;
+                    try {
+                        const res = await musicService.resolveStream(targetId, quality);
+                        streamUrl = res.streamUrl;
+                    } catch (e: any) {
+                        console.warn(`[TrackResolver] Primary stream resolution failed for ID ${targetId}:`, e.message || e);
+                        
+                        // Fallback: If it is an online track, search for the song and attempt to resolve using a fallback search result
+                        if (!isCatalogId) {
+                            console.log(`[TrackResolver] Attempting search fallback for failed online track: "${resolved.title}" by "${resolved.artist}"`);
+                            try {
+                                const searchResults = await musicService.searchSongs(`${resolved.title} ${resolved.artist}`);
+                                if (searchResults && searchResults.length > 0) {
+                                    const fallbackId = searchResults.find(s => s.id !== targetId)?.id || searchResults[0].id;
+                                    if (fallbackId && fallbackId !== targetId) {
+                                        console.log(`[TrackResolver] Trying fallback online ID: ${fallbackId}`);
+                                        try {
+                                            const res = await musicService.resolveStream(fallbackId, quality);
+                                            streamUrl = res.streamUrl;
+                                            console.log(`[TrackResolver] Successfully resolved fallback stream: ${fallbackId}`);
+                                        } catch (fallbackErr: any) {
+                                            console.warn(`[TrackResolver] Fallback resolution also failed:`, fallbackErr.message || fallbackErr);
+                                        }
+                                    }
+                                }
+                            } catch (searchErr: any) {
+                                console.warn(`[TrackResolver] Search fallback failed:`, searchErr.message || searchErr);
+                            }
+                        }
+                    }
+
                     if (streamUrl) {
-                        resolved = { ...resolved, url: streamUrl };
-                        useMediaCacheStore.getState().cacheTrack(resolved);
+                        resolved = { ...resolved, url: streamUrl, sourceFetchedAt: Date.now() };
+                        useMediaCacheStore.getState().cacheTrack(resolved, { track: { sourceFetchedAt: resolved.sourceFetchedAt } });
                     }
                 } catch (e) {
                     console.error("[TrackResolver] Stream resolution failed:", e);

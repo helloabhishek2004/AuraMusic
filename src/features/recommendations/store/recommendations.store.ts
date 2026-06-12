@@ -11,7 +11,9 @@ import {
   generateRecentlyLoved,
   generateMadeForYou,
   generateTrendingForYou,
-  buildTasteClusters
+  buildTasteClusters,
+  generateHiddenGems,
+  generateForgottenFavorites
 } from '../services/recommendation-engine';
 import {
   ListeningDNA,
@@ -108,6 +110,9 @@ export interface RecommendationsState {
   trendingForYou: RecommendationSeed | null;
   topSongs: RecommendationSeed[];
   topArtists: RecommendationSeed[];
+  hiddenGems: RecommendationSeed[];
+  forgottenFavorites: RecommendationSeed[];
+  forgottenFavoritesShownAt: Record<string, number>;
   
   // Taste Evolution State
   listeningDNA: ListeningDNA | null;
@@ -153,6 +158,9 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
       trendingForYou: null,
       topSongs: [],
       topArtists: [],
+      hiddenGems: [],
+      forgottenFavorites: [],
+      forgottenFavoritesShownAt: {},
       
       listeningDNA: null,
       tasteSnapshots: [],
@@ -245,6 +253,8 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           let trendingForYou: RecommendationSeed | null = null;
           let topSongs: RecommendationSeed[] = [];
           let topArtists: RecommendationSeed[] = [];
+          let hiddenGems: RecommendationSeed[] = [];
+          let forgottenFavorites: RecommendationSeed[] = [];
 
           // Standard fallback seeds (reference for Tier 2 fallbacks if needed)
           const fallbackDailyMixes: RecommendationSeed[] = [
@@ -425,6 +435,15 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               madeForYou = generateMadeForYou(artistAffinities, history, artistCache, listeningDNA.sessionProfile);
               trendingForYou = generateTrendingForYou(listeningDNA.tasteConfidence, listeningDNA.primarySession);
             }
+
+            // Generate Hidden Gems & Forgotten Favorites
+            const excludeTrackIds = new Set<string>();
+            topSongs.forEach(s => excludeTrackIds.add(s.id));
+            recentlyLoved.forEach(s => excludeTrackIds.add(s.id));
+            rediscover.forEach(s => excludeTrackIds.add(s.id));
+
+            hiddenGems = generateHiddenGems(trackAffinities, history, excludeTrackIds);
+            forgottenFavorites = generateForgottenFavorites(trackAffinities, history, state.forgottenFavoritesShownAt || {});
           }
 
           // Caching trending playlist seeds
@@ -456,6 +475,8 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           madeForYou = madeForYou.filter(filterConfidence);
           topSongs = topSongs.filter(filterConfidence);
           topArtists = topArtists.filter(filterConfidence);
+          hiddenGems = hiddenGems.filter(filterConfidence);
+          forgottenFavorites = forgottenFavorites.filter(filterConfidence);
           
           if (trendingForYou && trendingForYou.confidence !== undefined && trendingForYou.confidence < 50) {
             trendingForYou = null;
@@ -484,6 +505,8 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           madeForYou = await resolveListArtworks(madeForYou);
           topSongs = await resolveListArtworks(topSongs);
           topArtists = await resolveListArtworks(topArtists);
+          hiddenGems = await resolveListArtworks(hiddenGems);
+          forgottenFavorites = await resolveListArtworks(forgottenFavorites);
 
           // Resolve Trending For You artwork from top ranked track
           if (trendingForYou) {
@@ -519,6 +542,8 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             becauseYouLike: becauseYouLike.filter(filterFatigue),
             rediscover: rediscover.filter(filterFatigue),
             recentlyLoved: recentlyLoved.filter(filterFatigue),
+            hiddenGems: hiddenGems.filter(filterFatigue),
+            forgottenFavorites: forgottenFavorites.filter(filterFatigue),
             trendingSeeds,
             trendingForYou,
             topSongs,
@@ -549,6 +574,9 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           trendingForYou: null,
           topSongs: [],
           topArtists: [],
+          hiddenGems: [],
+          forgottenFavorites: [],
+          forgottenFavoritesShownAt: {},
           listeningDNA: null,
           tasteSnapshots: [],
           tasteDriftLevel: 'none',
@@ -620,7 +648,16 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             }
           }
 
-          return { fatigueTracker: fatigue };
+          const shownAt = { ...(state.forgottenFavoritesShownAt || {}) };
+          const isForgottenFavorite = state.forgottenFavorites?.some((s) => s.id === seedId);
+          if (isForgottenFavorite) {
+            shownAt[seedId] = Date.now();
+          }
+
+          return {
+            fatigueTracker: fatigue,
+            forgottenFavoritesShownAt: shownAt,
+          };
         });
       },
 
@@ -729,6 +766,9 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
         trendingForYou: state.trendingForYou,
         topSongs: state.topSongs,
         topArtists: state.topArtists,
+        hiddenGems: state.hiddenGems,
+        forgottenFavorites: state.forgottenFavorites,
+        forgottenFavoritesShownAt: state.forgottenFavoritesShownAt || {},
         listeningDNA: state.listeningDNA,
         tasteSnapshots: state.tasteSnapshots,
         tasteDriftLevel: state.tasteDriftLevel,

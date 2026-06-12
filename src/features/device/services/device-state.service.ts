@@ -10,8 +10,8 @@ class DeviceStateService {
     if (this.initialized) return;
     this.initialized = true;
 
-    // 1. Monitor Network
     NetInfo.addEventListener(state => {
+      const prevType = useDeviceStateStore.getState().connectionType;
       let type: ConnectionType = 'unknown';
       if (!state.isConnected) type = 'none';
       else if (state.type === 'wifi') type = 'wifi';
@@ -21,6 +21,12 @@ class DeviceStateService {
       
       if (typeof __DEV__ !== "undefined" && __DEV__) {
         console.info(`[DeviceState] Connection changed: ${type}`);
+      }
+
+      if (prevType === 'none' && type !== 'none') {
+        import('../../player/services/queue-repair.service').then(({ QueueRepairService }) => {
+          QueueRepairService.repairQueue().catch(err => console.error(err));
+        }).catch(err => console.warn(err));
       }
     });
 

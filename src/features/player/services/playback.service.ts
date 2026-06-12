@@ -18,17 +18,16 @@ function validateQueue(queue: PlayerTrack[]): boolean {
 
 function isPlayableUri(uri?: string): boolean {
   if (!uri) return false;
-  if (uri.startsWith('data:audio')) return true; // Allow dummy data URIs
+  const { isPlaceholderSource } = require("./source-validator");
+  if (isPlaceholderSource(uri)) return false;
   const scheme = getUriScheme(normalizePlaybackUri(uri));
   return scheme === "file" || scheme === "content" || scheme === "http" || scheme === "https";
 }
 
-const DUMMY_SILENCE_URI = "data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIwBRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVF////////+7gQAAAAAAAAAAAAAAAAAAAAAAAWLhA==";
-
-function toMediaItem(track: PlayerTrack, isDummy: boolean = false) {
+function toMediaItem(track: PlayerTrack) {
   return {
     mediaId: track.id,
-    url: isDummy ? DUMMY_SILENCE_URI : normalizePlaybackUri(track.url),
+    url: normalizePlaybackUri(track.url),
     title: track.title,
     artist: track.artist || "Local",
     type: "default" as const,
@@ -168,29 +167,81 @@ export class PlaybackService {
 
       // 1. Resolve queue to playable URIs
       const { resolveTrack } = await import("../utils/track-resolver");
+      const { ensurePlayableTrack } = await import("./source-authority");
       const queueContainsTrack = queue.some(t => t.id === normalizedTrack.id);
       const queueForNative = queueContainsTrack ? queue : [normalizedTrack];
 
-      // We resolve the target track immediately, others can be resolved as needed 
-      // but for setMediaItems we try to have a usable queue.
-      const resolvedQueue = await Promise.all(
-        queueForNative.map(t => t.id === normalizedTrack.id ? Promise.resolve(normalizedTrack) : resolveTrack(t))
-      );
+      const targetIdxInNative = queueForNative.findIndex(t => t.id === normalizedTrack.id);
+      const resolvedQueue = [...queueForNative];
+      const N = queueForNative.length;
+
+      // Proactively resolve targetIdxInNative (must succeed or throw)
+      if (targetIdxInNative !== -1) {
+        const resolvedActive = await ensurePlayableTrack(queueForNative[targetIdxInNative]);
+        resolvedQueue[targetIdxInNative] = resolvedActive;
+        normalizedTrack.url = normalizePlaybackUri(resolvedActive.url);
+        normalizedTrack.art = resolvedActive.art;
+      }
+
+      // Proactively resolve next 2 tracks
+      if (N > 1 && targetIdxInNative !== -1) {
+        const nextIdx = (targetIdxInNative + 1) % N;
+        const nextTrack = queueForNative[nextIdx];
+        if (nextTrack) {
+          const { useSourceHealthStore } = await import("../store/source-health.store");
+          if (!useSourceHealthStore.getState().isCooldownActive(nextTrack.id)) {
+            try {
+              resolvedQueue[nextIdx] = await ensurePlayableTrack(nextTrack);
+            } catch (err) {
+              console.warn(`[PlaybackService.loadTrack] Proactive resolution failed for next track at index ${nextIdx}:`, err);
+            }
+          } else {
+            console.info(`[PlaybackService.loadTrack] Skipped proactive resolution: track in cooldown (id: ${nextTrack.id})`);
+          }
+        }
+      }
+      if (N > 2 && targetIdxInNative !== -1) {
+        const nextNextIdx = (targetIdxInNative + 2) % N;
+        const nextNextTrack = queueForNative[nextNextIdx];
+        if (nextNextTrack) {
+          const { useSourceHealthStore } = await import("../store/source-health.store");
+          if (!useSourceHealthStore.getState().isCooldownActive(nextNextTrack.id)) {
+            try {
+              resolvedQueue[nextNextIdx] = await ensurePlayableTrack(nextNextTrack);
+            } catch (err) {
+              console.warn(`[PlaybackService.loadTrack] Proactive resolution failed for next+1 track at index ${nextNextIdx}:`, err);
+            }
+          } else {
+            console.info(`[PlaybackService.loadTrack] Skipped proactive resolution: track in cooldown (id: ${nextNextTrack.id})`);
+          }
+        }
+      }
+
+      // For all other tracks, do lightweight resolveTrack
+      for (let i = 0; i < N; i++) {
+        if (i !== targetIdxInNative && i !== (targetIdxInNative + 1) % N && i !== (targetIdxInNative + 2) % N) {
+          try {
+            resolvedQueue[i] = await resolveTrack(queueForNative[i]);
+          } catch (err) {
+            // ignore
+          }
+        }
+      }
 
       const playableQueue = resolvedQueue
         .map(t => {
             const cached = transitionManager.getCachedTrack(t.id);
             return cached ? { ...t, url: cached.url } : t;
         })
-        .map(t => ({ ...t, url: normalizePlaybackUri(t.url) }));
-        // Do not filter out unplayable URIs. Map them to dummy items so Native queue size matches JS.
+        .map(t => ({ ...t, url: normalizePlaybackUri(t.url) }))
+        .filter(t => t && t.id && t.title && t.url && isPlayableUri(t.url));
 
-      if (!playableQueue.some(t => t.id === normalizedTrack.id)) {
+      if (!playableQueue.some(t => t.id === normalizedTrack.id) && isPlayableUri(normalizedTrack.url)) {
         playableQueue.unshift(normalizedTrack);
       }
 
       const targetIndex = Math.max(0, playableQueue.findIndex(t => t.id === normalizedTrack.id));
-      const mediaItems = playableQueue.map(t => toMediaItem(t, !isPlayableUri(t.url)));
+      const mediaItems = playableQueue.map(t => toMediaItem(t));
       
       logSourceDiagnostics(normalizedTrack, mediaItems.length, targetIndex);
       
@@ -222,17 +273,91 @@ export class PlaybackService {
     }
 
     try {
+      const { resolveTrack } = await import("../utils/track-resolver");
+      const { ensurePlayableTrack } = await import("./source-authority");
+      const N = queue.length;
+      const resolvedQueue = [...queue];
+
+      if (N > 0 && startIndex >= 0 && startIndex < N) {
+        // Resolve current track
+        try {
+          resolvedQueue[startIndex] = await ensurePlayableTrack(queue[startIndex]);
+        } catch (err) {
+          console.warn(`[PlaybackService.updateQueue] Failed to resolve current track:`, err);
+        }
+        
+        // Resolve next track
+        if (N > 1) {
+          const nextIdx = (startIndex + 1) % N;
+          const nextTrack = queue[nextIdx];
+          if (nextTrack) {
+            const { useSourceHealthStore } = await import("../store/source-health.store");
+            if (!useSourceHealthStore.getState().isCooldownActive(nextTrack.id)) {
+              try {
+                resolvedQueue[nextIdx] = await ensurePlayableTrack(nextTrack);
+              } catch (err) {
+                console.warn(`[PlaybackService.updateQueue] Failed to resolve next track:`, err);
+              }
+            } else {
+              console.info(`[PlaybackService.updateQueue] Skipped proactive resolution: track in cooldown (id: ${nextTrack.id})`);
+            }
+          }
+        }
+        
+        // Resolve next+1 track
+        if (N > 2) {
+          const nextNextIdx = (startIndex + 2) % N;
+          const nextNextTrack = queue[nextNextIdx];
+          if (nextNextTrack) {
+            const { useSourceHealthStore } = await import("../store/source-health.store");
+            if (!useSourceHealthStore.getState().isCooldownActive(nextNextTrack.id)) {
+              try {
+                resolvedQueue[nextNextIdx] = await ensurePlayableTrack(nextNextTrack);
+              } catch (err) {
+                console.warn(`[PlaybackService.updateQueue] Failed to resolve next+1 track:`, err);
+              }
+            } else {
+              console.info(`[PlaybackService.updateQueue] Skipped proactive resolution: track in cooldown (id: ${nextNextTrack.id})`);
+            }
+          }
+        }
+      }
+
+      // For all others, run resolveTrack
+      for (let i = 0; i < N; i++) {
+        if (i !== startIndex && i !== (startIndex + 1) % N && i !== (startIndex + 2) % N) {
+          try {
+            resolvedQueue[i] = await resolveTrack(queue[i]);
+          } catch (err) {
+            // ignore
+          }
+        }
+      }
+
+      const playableQueue = resolvedQueue
+        .map(t => {
+            const cached = transitionManager.getCachedTrack(t.id);
+            return cached ? { ...t, url: cached.url } : t;
+        })
+        .map(t => ({ ...t, url: normalizePlaybackUri(t.url) }))
+        .filter(t => t && t.id && t.title && t.url && isPlayableUri(t.url));
+
+      if (playableQueue.length === 0) return;
+
+      const currentTrack = queue[startIndex];
+      const targetIndex = currentTrack ? Math.max(0, playableQueue.findIndex(t => t.id === currentTrack.id)) : 0;
+
       // [Aura_Stabilization] Deep-equality guard to prevent duplicate queue rebuild storms
       const nativeQueue = await TrackPlayer.getQueue();
       if (typeof __DEV__ !== "undefined" && __DEV__) {
-        console.info(`[FORENSIC QUEUE] JS size: ${queue.length}, Native size: ${nativeQueue?.length || 0}`);
+        console.info(`[FORENSIC QUEUE] JS size: ${queue.length}, Playable size: ${playableQueue.length}, Native size: ${nativeQueue?.length || 0}`);
       }
-      if (nativeQueue && nativeQueue.length === queue.length) {
+      if (nativeQueue && nativeQueue.length === playableQueue.length) {
         let isSame = true;
-        for (let i = 0; i < queue.length; i++) {
+        for (let i = 0; i < playableQueue.length; i++) {
           const nativeItem = nativeQueue[i];
           const nativeId = (nativeItem as any)?.mediaId || (nativeItem as any)?.id;
-          if (nativeItem && nativeId !== queue[i].id) {
+          if (nativeItem && nativeId !== playableQueue[i].id) {
             isSame = false;
             break;
           }
@@ -240,9 +365,9 @@ export class PlaybackService {
         if (isSame) {
           const activeIndex = await TrackPlayer.getActiveMediaItemIndex();
           if (typeof __DEV__ !== "undefined" && __DEV__) {
-            console.info(`[FORENSIC QUEUE] Same IDs. JS index: ${startIndex}, Native index: ${activeIndex}`);
+            console.info(`[FORENSIC QUEUE] Same IDs. JS index: ${startIndex}, targetIndex in playableQueue: ${targetIndex}, Native index: ${activeIndex}`);
           }
-          if (activeIndex === startIndex) {
+          if (activeIndex === targetIndex) {
             if (typeof __DEV__ !== "undefined" && __DEV__) {
               console.info("[Player] [Aura_Stabilization] Skipping updateQueue: Native and JS queues already in sync");
             }
@@ -255,17 +380,7 @@ export class PlaybackService {
       const playState = await TrackPlayer.getPlaybackState();
       const isCurrentlyPlaying = (playState as any).state === 'playing' || playState === ('playing' as any);
       
-      const mediaItems = queue
-        .map(t => {
-            const cached = transitionManager.getCachedTrack(t.id);
-            return cached ? { ...t, url: cached.url } : t;
-        })
-        .map(t => ({ ...t, url: normalizePlaybackUri(t.url) }))
-        .map(t => toMediaItem(t, !isPlayableUri(t.url)));
-      
-      if (mediaItems.length === 0) return;
-
-      const targetIndex = startIndex !== -1 ? startIndex : 0;
+      const mediaItems = playableQueue.map(t => toMediaItem(t));
       
       this.isReordering = true;
       
@@ -296,7 +411,7 @@ export class PlaybackService {
       const item = toMediaItem({
         ...track,
         url: normalizePlaybackUri(track.url)
-      }, !isPlayableUri(track.url));
+      });
       
       await TrackPlayer.replaceMediaItem(index, item);
     } catch (e) {
@@ -347,7 +462,7 @@ export class PlaybackService {
       const item = toMediaItem({
         ...track,
         url: normalizePlaybackUri(track.url)
-      }, !isPlayableUri(track.url));
+      });
       await TrackPlayer.addMediaItem(item);
     } catch (e) {
       console.error("[Player] addTrack failed:", e);
@@ -361,7 +476,7 @@ export class PlaybackService {
         const item = toMediaItem({
           ...track,
           url: normalizePlaybackUri(track.url)
-        }, !isPlayableUri(track.url));
+        });
         await TrackPlayer.addMediaItem(item);
       }
     } catch (e) {
@@ -375,7 +490,7 @@ export class PlaybackService {
       const item = toMediaItem({
         ...track,
         url: normalizePlaybackUri(track.url)
-      }, !isPlayableUri(track.url));
+      });
       await TrackPlayer.insertMediaItem(index, item);
     } catch (e) {
       console.error("[Player] insertTrack failed:", e);

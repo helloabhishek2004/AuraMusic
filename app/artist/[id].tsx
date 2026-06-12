@@ -134,6 +134,7 @@ import {
 import { useMusicActions, usePlaybackState } from "@/src/context/MusicContext";
 import { useReducedMotionPreference } from "@/src/hooks/use-accessibility-preferences";
 import { useResponsiveMetrics } from "@/src/hooks/use-responsive-metrics";
+import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
 import { musicService } from "@/src/services/api/music";
 
@@ -424,10 +425,7 @@ function ArtistPage() {
   const handlePlayArtist = useCallback(async () => {
     if (!artist?.songs?.length) return;
     const tracks = artist.songs.map((track) => ({
-      id: track.id,
-      title: track.title,
-      artist: track.artist,
-      art: track.art,
+      ...track,
       url: "",
       duration: parseDuration(track.duration),
     }));
@@ -443,10 +441,7 @@ function ArtistPage() {
     if (!artist?.songs?.length) return;
     const shuffled = [...artist.songs].sort(() => Math.random() - 0.5);
     const tracks = shuffled.map((track) => ({
-      id: track.id,
-      title: track.title,
-      artist: track.artist,
-      art: track.art,
+      ...track,
       url: "",
       duration: parseDuration(track.duration),
     }));
@@ -459,26 +454,44 @@ function ArtistPage() {
   }, [artist, setQueue]);
 
   const handleTrackPress = useCallback(
-    async (track: MusicTrack) => {
+    async (track: MusicTrack, customTracks?: MusicTrack[]) => {
       if (!artist) return;
-      const index = artist.songs.findIndex((t) => t.id === track.id) ?? 0;
-      await setQueue(
-        artist.songs.map((t) => ({
-          id: t.id,
-          title: t.title,
-          artist: t.artist,
-          art: t.art,
-          url: "",
-          duration: parseDuration(t.duration),
-        })) ?? [],
-        index,
-        {
-          sourceId: artist.id,
-          sourceType: "manual",
-          seedArtists: [artist.name],
-          generatedAt: Date.now()
-        }
-      );
+      const trackList = customTracks || artist.songs || [];
+      let index = trackList.findIndex((t) => t.id === track.id);
+      if (index === -1) {
+        const mutableList = [...trackList];
+        mutableList.unshift(track);
+        index = 0;
+        await setQueue(
+          mutableList.map((t) => ({
+            ...t,
+            url: "",
+            duration: parseDuration(t.duration),
+          })),
+          index,
+          {
+            sourceId: artist.id,
+            sourceType: "manual",
+            seedArtists: [artist.name],
+            generatedAt: Date.now()
+          }
+        );
+      } else {
+        await setQueue(
+          trackList.map((t) => ({
+            ...t,
+            url: "",
+            duration: parseDuration(t.duration),
+          })),
+          index,
+          {
+            sourceId: artist.id,
+            sourceType: "manual",
+            seedArtists: [artist.name],
+            generatedAt: Date.now()
+          }
+        );
+      }
     },
     [artist, setQueue],
   );
@@ -846,7 +859,7 @@ function ArtistPage() {
         onScroll={handleModalScroll}
         onTrackPress={(track) => {
           setBottomSheetVisible(false);
-          handleTrackPress(track);
+          handleTrackPress(track, bottomSheetData);
         }}
         onAlbumPress={(albumId) => {
           setBottomSheetVisible(false);
@@ -1254,7 +1267,7 @@ const TopTracksSection = memo(
             key={track.id}
             title={track.title}
             subtitle={track.artist}
-            image={track.art}
+            image={getTrackArtwork(track)}
             meta={track.duration}
             active={currentTrack?.id === track.id}
             onPress={() => onTrackPress(track)}
@@ -1263,7 +1276,7 @@ const TopTracksSection = memo(
               id: track.id,
               title: track.title,
               artist: track.artist,
-              art: track.art,
+              art: getTrackArtwork(track),
               url: "",
               duration: parseDuration(track.duration),
             }}
@@ -1625,7 +1638,7 @@ const SeeAllBottomSheet = memo(
             <MediaListItem
               title={item.title}
               subtitle={item.artist}
-              image={item.art}
+              image={getTrackArtwork(item)}
               meta={item.duration}
               active={currentTrack?.id === item.id}
               onPress={() => onTrackPress(item)}
@@ -1634,7 +1647,7 @@ const SeeAllBottomSheet = memo(
                 id: item.id,
                 title: item.title,
                 artist: item.artist,
-                art: item.art,
+                art: getTrackArtwork(item),
                 url: "",
                 duration: parseDuration(item.duration),
               }}

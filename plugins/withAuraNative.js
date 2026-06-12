@@ -91,6 +91,78 @@ class AuraAudioSessionModule(reactContext: ReactApplicationContext) : ReactConte
         }
     }
 
+    @ReactMethod
+    fun getDisplaySpecs(promise: Promise) {
+        UiThreadUtil.runOnUiThread {
+            try {
+                val activity = getCurrentActivity()
+                if (activity == null) {
+                    promise.reject("ERR_ACTIVITY", "No activity")
+                    return@runOnUiThread
+                }
+
+                val window = activity.window
+                val layoutParams = window.attributes
+
+                val display = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    activity.display
+                } else {
+                    @Suppress("DEPRECATION")
+                    activity.windowManager.defaultDisplay
+                }
+
+                if (display == null) {
+                    promise.reject("ERR_DISPLAY", "No display found")
+                    return@runOnUiThread
+                }
+
+                val currentMode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    display.mode
+                } else {
+                    null
+                }
+
+                val map = Arguments.createMap()
+                
+                // Get current refresh rate
+                val currentRefreshRate = @Suppress("DEPRECATION") display.refreshRate.toDouble()
+                map.putDouble("currentRefreshRate", currentRefreshRate)
+
+                // Get current mode specs
+                if (currentMode != null) {
+                    map.putInt("modeId", currentMode.modeId)
+                    map.putDouble("modeRefreshRate", currentMode.refreshRate.toDouble())
+                    map.putInt("modeWidth", currentMode.physicalWidth)
+                    map.putInt("modeHeight", currentMode.physicalHeight)
+                }
+
+                // Window preferred settings
+                map.putDouble("preferredRefreshRate", layoutParams.preferredRefreshRate.toDouble())
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    map.putInt("preferredDisplayModeId", layoutParams.preferredDisplayModeId)
+                }
+
+                val supportedModesArray = Arguments.createArray()
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    val modes = display.supportedModes
+                    for (mode in modes) {
+                        val m = Arguments.createMap()
+                        m.putInt("modeId", mode.modeId)
+                        m.putDouble("refreshRate", mode.refreshRate.toDouble())
+                        m.putInt("width", mode.physicalWidth)
+                        m.putInt("height", mode.physicalHeight)
+                        supportedModesArray.pushMap(m)
+                    }
+                }
+                map.putArray("supportedModes", supportedModesArray)
+
+                promise.resolve(map)
+            } catch (e: Exception) {
+                promise.reject("ERR_DISPLAY_SPECS", e.message)
+            }
+        }
+    }
+
     private fun attemptOEMEqualizers(promise: Promise) {
         val activity = getCurrentActivity() ?: return
         val oemIntents = listOf(

@@ -35,6 +35,7 @@ import { usePlayerStore } from '../features/player/store/player.store';
 import { impact } from '@/src/utils/haptics';
 import { openNowPlaying } from '@/src/navigation/music-navigation';
 import { playbackProgress } from '@/src/features/player/services/playback-progress';
+import { getTrackArtwork } from '@/src/features/player/utils/track-identity';
 
 const DEFAULT_ACCENT = '#BF5AF2';
 
@@ -195,7 +196,7 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
     const renderInnerContent = () => (
       <>
         <Reanimated.View style={[styles.artWrap, miniArtStyle]}>
-          <Image source={{ uri: track.art }} style={styles.art} contentFit="cover" transition={180} />
+          <Image source={{ uri: getTrackArtwork(track) }} style={styles.art} contentFit="cover" transition={180} />
           {isBuffering && <View style={[StyleSheet.absoluteFill, styles.bufferingOverlay]}><ActivityIndicator size="small" color={accent} /></View>}
           {status === 'error' && <View style={[StyleSheet.absoluteFill, styles.errorOverlay]}><Ionicons name="alert-circle" size={20} color="#FFF" /></View>}
           <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.artRim]} />

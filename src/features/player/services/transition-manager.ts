@@ -55,20 +55,8 @@ class TransitionManager {
     this.lastPreloadTime = now;
     
     try {
-      let resolvedTrack: PlayerTrack;
-      
-      if (nextTrack.isLocal || (nextTrack.url && nextTrack.url.startsWith('http'))) {
-        resolvedTrack = nextTrack;
-      } else {
-        const { streamUrl } = await musicService.resolveStream(nextTrack.id);
-        resolvedTrack = { ...nextTrack, url: streamUrl };
-      }
-
-      if (!resolvedTrack.url) {
-        this.isPreloading = false;
-        this.currentPreloadTrackId = null;
-        return null;
-      }
+      const { ensurePlayableTrack } = await import("./source-authority");
+      const resolvedTrack = await ensurePlayableTrack(nextTrack);
 
       this.preloadedTracks.set(nextTrack.id, {
         track: resolvedTrack,
@@ -94,21 +82,13 @@ class TransitionManager {
     if (this.getCachedTrack(track.id)) return;
 
     try {
-      let resolvedTrack: PlayerTrack;
-      
-      if (track.isLocal || (track.url && track.url.startsWith('http'))) {
-        resolvedTrack = track;
-      } else {
-        const { streamUrl } = await musicService.resolveStream(track.id);
-        resolvedTrack = { ...track, url: streamUrl };
-      }
+      const { ensurePlayableTrack } = await import("./source-authority");
+      const resolvedTrack = await ensurePlayableTrack(track);
 
-      if (resolvedTrack.url) {
-        this.preloadedTracks.set(track.id, {
-          track: resolvedTrack,
-          timestamp: Date.now()
-        });
-      }
+      this.preloadedTracks.set(track.id, {
+        track: resolvedTrack,
+        timestamp: Date.now()
+      });
     } catch (e) {}
   }
 

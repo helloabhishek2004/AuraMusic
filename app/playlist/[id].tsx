@@ -47,6 +47,7 @@ import PlaylistArtwork from "@/src/features/playlist/components/PlaylistArtwork"
 import { usePlaylistStore } from "@/src/features/playlist/store/playlist.store";
 import { useRecommendationsStore } from "@/src/features/recommendations/store/recommendations.store";
 import { openArtistByName } from "@/src/navigation/music-navigation";
+import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
 import { useNetInfo } from "@react-native-community/netinfo";
 
 const { width, height } = Dimensions.get("window");
@@ -1240,7 +1241,7 @@ const TrackRowItem = React.memo(
 
           {/* Artwork */}
           <View style={styles.trackArtWrapper}>
-            <Image source={{ uri: item.art }} style={styles.trackArt} />
+            <Image source={{ uri: getTrackArtwork(item) }} style={styles.trackArt} />
             {isTrackActive && (
               <View style={styles.trackArtPlayOverlay}>
                 <BlurView
@@ -3871,7 +3872,7 @@ const TrackRow = ({ item, index, router, onPlay }: any) => {
           )}
         </View>
         <View style={styles.trackArtWrapper}>
-          <Image source={{ uri: item.art }} style={styles.trackArt} />
+          <Image source={{ uri: getTrackArtwork(item) }} style={styles.trackArt} />
         </View>
         <View style={styles.trackInfo}>
           <Text

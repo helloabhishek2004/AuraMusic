@@ -28,6 +28,9 @@ interface ExtendedPlayerStore extends PlayerStore {
   restoreSession: () => Promise<void>;
   resolveAutoAdvance: () => Promise<void>;
   injectAutoplayQueue: (tracks: PlayerTrack[]) => Promise<void>;
+  selectedTrackId?: string | null;
+  selectedTrackIndex?: number | null;
+  sourceArtistId?: string | null;
 }
 
 export const usePlayerStore = create<ExtendedPlayerStore>()(
@@ -50,6 +53,9 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       error: null,
       _hasHydrated: false,
       queueContext: null,
+      selectedTrackId: null,
+      selectedTrackIndex: null,
+      sourceArtistId: null,
 
       // Lyrics State
       lyrics: null as any,
@@ -179,6 +185,12 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
       // Actions
       setTrack: async (track: PlayerTrack) => {
+        if (!track) {
+          return;
+        }
+        if (!track.id) {
+          throw new Error("Queue target track missing");
+        }
 
         const resolutionId = ++get().lastResolutionId;
         const currentTrack = get().currentTrack;
@@ -202,12 +214,19 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           error: null
         });
 
+        // Immediately pause native playback so the old track stops playing while we resolve the new source
         try {
-          const { resolveAudioOnly } = await import("../utils/track-resolver");
+          PlaybackService.pause();
+        } catch (e) {
+          console.warn("[PlayerStore] Failed to pause native player on track change:", e);
+        }
+
+        try {
+          const { ensurePlayableTrack } = await import("../services/source-authority");
           const { HydrationScheduler } = await import("../services/hydration.service");
           const { MetadataCache } = await import("../../cache/services/metadata-cache.service");
 
-          const resolvedTrack = await resolveAudioOnly(track, null, true);
+          const resolvedTrack = await ensurePlayableTrack(track);
 
           if (!resolvedTrack.url) {
             throw new Error(`Track "${resolvedTrack.title}" has no playable stream URL.`);
@@ -277,8 +296,8 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
         set({ isPreloading: true });
         try {
-          const { resolveTrack } = await import("../utils/track-resolver");
-          const resolved = await resolveTrack(track);
+          const { ensurePlayableTrack } = await import("../services/source-authority");
+          const resolved = await ensurePlayableTrack(track);
 
           set({
             preloadedTrack: resolved,
@@ -407,7 +426,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
           // [Aura_Preload_Fix] Preload multiple tracks ahead for skip resilience
           const secondIndex = QueueEngine.resolvePreloadIndex(nextIndex, queue.length, repeatMode);
-          if (secondIndex !== -1 && secondIndex !== nextIndex && queue[secondIndex]) {
+          if (secondIndex !== -1 && secondIndex !== nextIndex && secondIndex >= 0 && secondIndex < queue.length && queue[secondIndex]) {
             const secondTrack = queue[secondIndex];
             transitionManager.preloadSecondaryTrack(secondTrack, currentTrack.id);
             // Push second track's cached URL to native if already resolved
@@ -420,7 +439,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           const thirdIndex = secondIndex !== -1
             ? QueueEngine.resolvePreloadIndex(secondIndex, queue.length, repeatMode)
             : -1;
-          if (thirdIndex !== -1 && thirdIndex !== secondIndex && thirdIndex !== nextIndex && queue[thirdIndex]) {
+          if (thirdIndex !== -1 && thirdIndex !== secondIndex && thirdIndex !== nextIndex && thirdIndex >= 0 && thirdIndex < queue.length && queue[thirdIndex]) {
             const thirdTrack = queue[thirdIndex];
             transitionManager.preloadSecondaryTrack(thirdTrack, currentTrack.id);
             const cachedThird = transitionManager.getCachedTrack(thirdTrack.id);
@@ -438,9 +457,15 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       },
 
       setQueue: async (tracks: PlayerTrack[], startIndex: number = 0, context?: QueueContext) => {
+        const validTracks = (tracks || []).filter(t => t && t.id && t.title);
+        if (validTracks.length === 0) {
+          console.warn("[PlayerStore] setQueue: No valid tracks provided.");
+          return;
+        }
+
         // Hydrate from cache immediately for responsive UI
         const cacheStore = useMediaCacheStore.getState();
-        const hydratedTracks = tracks.map(t => {
+        const hydratedTracks = validTracks.map(t => {
             const cached = cacheStore.getCachedTrack(t.id);
             return cached ? { ...t, ...cached.track } : t;
         });
@@ -449,7 +474,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         const isShuffle = get().isShuffle;
 
         let activeQueue = [...original];
-        let targetIndex = startIndex;
+        let targetIndex = Math.max(0, Math.min(startIndex, activeQueue.length - 1));
 
         if (isShuffle && original.length > 0) {
           const startingTrack = original[startIndex];
@@ -468,17 +493,32 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           }
         }
 
+        const selectedTrack = original[startIndex];
+        const selectedTrackId = selectedTrack?.id || null;
+        const selectedTrackIndex = startIndex;
+        const sourceArtistId = context?.seedArtists ? context.sourceId : null;
+
+        // Resolve actual queue position from ID instead of relying on startIndex/targetIndex
+        const actualIndex = selectedTrackId ? activeQueue.findIndex(t => t.id === selectedTrackId) : -1;
+        const finalIndex = actualIndex !== -1 ? actualIndex : targetIndex;
+
         // [Aura_Queue_Fix] Invalidate and clean up unused preloaded track cache entries when queue changes
         transitionManager.clearCache();
 
         set({
           queue: activeQueue,
           originalQueue: original,
-          currentIndex: targetIndex,
+          currentIndex: finalIndex,
           queueContext: context || null,
+          selectedTrackId,
+          selectedTrackIndex,
+          sourceArtistId,
         });
 
-        await get().setTrack(activeQueue[targetIndex]);
+        const trackToPlay = activeQueue[finalIndex];
+        if (trackToPlay) {
+          await get().setTrack(trackToPlay);
+        }
       },
 
       injectAutoplayQueue: async (tracks: PlayerTrack[]) => {
@@ -682,17 +722,22 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         const { queue, _transitionGuard } = get();
         if (index < 0 || index >= queue.length) return;
 
+        const track = queue[index];
+        if (!track) return;
+
         set({
           currentIndex: index,
-          currentTrack: queue[index],
+          currentTrack: track,
           lyrics: null,
           isLyricsLoading: false,
           isTransitioning: true,
           status: "buffering",
           isBuffering: true,
-          _transitionGuard: { ..._transitionGuard, inProgress: true, owner: "jump", destinationId: queue[index].id, operationId: _transitionGuard.operationId + 1 }
+          selectedTrackId: track.id,
+          selectedTrackIndex: index,
+          _transitionGuard: { ..._transitionGuard, inProgress: true, owner: "jump", destinationId: track.id, operationId: _transitionGuard.operationId + 1 }
         });
-        await get().setTrack(queue[index]);
+        await get().setTrack(track);
       },
 
       play: async () => {
@@ -741,12 +786,17 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         // Calculate next index based on the store's current (possibly optimistic) index
         const currentIndex = get().currentIndex;
         const nextIndex = QueueEngine.getNextIndex(currentIndex, queue.length, repeatMode);
-        if (nextIndex === -1) {
+        if (nextIndex === -1 || nextIndex < 0 || nextIndex >= queue.length) {
           await get().stop();
           return;
         }
 
         const nextTrack = queue[nextIndex];
+        if (!nextTrack) {
+          console.warn("[PlayerStore] next: nextTrack is undefined at index", nextIndex);
+          await get().stop();
+          return;
+        }
         const guard = get()._transitionGuard;
 
         // Optimistically update the store state immediately to reflect the skip in UI
@@ -759,6 +809,8 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           position: 0,
           lyrics: null,
           error: null,
+          selectedTrackId: nextTrack.id,
+          selectedTrackIndex: nextIndex,
           _transitionGuard: { 
             ...guard, 
             inProgress: true, 
@@ -868,13 +920,19 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         // Calculate previous index based on the store's current (possibly optimistic) index
         const currentIndex = get().currentIndex;
         const prevIndex = QueueEngine.getPreviousIndex(currentIndex, queue.length, repeatMode);
-        if (prevIndex === -1) {
+        if (prevIndex === -1 || prevIndex < 0 || prevIndex >= queue.length) {
           await get().seek(0);
           await get().play();
           return;
         }
 
         const prevTrack = queue[prevIndex];
+        if (!prevTrack) {
+          console.warn("[PlayerStore] previous: prevTrack is undefined at index", prevIndex);
+          await get().seek(0);
+          await get().play();
+          return;
+        }
         const guard = get()._transitionGuard;
 
         // Optimistically update the store state immediately to reflect the skip in UI
@@ -887,6 +945,8 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           position: 0,
           lyrics: null,
           error: null,
+          selectedTrackId: prevTrack.id,
+          selectedTrackIndex: prevIndex,
           _transitionGuard: { 
             ...guard, 
             inProgress: true, 
@@ -983,7 +1043,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
         const nextIndex = QueueEngine.resolveAutoAdvance(currentIndex, queue.length, repeatMode);
         console.info(`[AutoAdvance] nextIndex=${nextIndex} mode=${repeatMode === 'track' ? 'RELOAD' : repeatMode === 'queue' ? 'WRAP' : 'ADVANCE'}`);
-        if (nextIndex === -1) {
+        if (nextIndex === -1 || nextIndex < 0 || nextIndex >= queue.length) {
           await get().stop();
           return;
         }
@@ -992,6 +1052,8 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           set({
             isTransitioning: true,
             position: 0,
+            selectedTrackId: currentTrack.id,
+            selectedTrackIndex: currentIndex,
             _transitionGuard: { ..._transitionGuard, inProgress: true, owner: "autoAdvance", destinationId: currentTrack.id, operationId: _transitionGuard.operationId + 1 }
           });
           try {
@@ -1005,8 +1067,14 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         }
 
         const nextTrack = queue[nextIndex];
+        if (!nextTrack) {
+          await get().stop();
+          return;
+        }
         set({
           isTransitioning: true,
+          selectedTrackId: nextTrack.id,
+          selectedTrackIndex: nextIndex,
           _transitionGuard: { ..._transitionGuard, inProgress: true, owner: "autoAdvance", destinationId: nextTrack.id, operationId: _transitionGuard.operationId + 1 }
         });
         try {
@@ -1189,11 +1257,34 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
         if (currentTrack && queue.length > 0) {
            console.info("[PlayerStore] Restoring session natively...");
            try {
-             // Let PlaybackService handle the silent queue injection
+             const { ensurePlayableTrack } = await import("../services/source-authority");
              const { PlaybackService } = await import("../services/playback.service");
-             
-             // Use updateQueue instead of loadTrack so it doesn't auto-play
-             await PlaybackService.updateQueue(queue, currentIndex);
+             const { validateTrackSource } = await import("../services/source-validator");
+             const { isSourceStale } = await import("../services/source-freshness-policy");
+             const { useTelemetryStore } = await import("./telemetry.store");
+
+             // 1. Validate and repair current track immediately
+             let freshCurrent = currentTrack;
+             try {
+               freshCurrent = await ensurePlayableTrack(currentTrack);
+               if (freshCurrent.url !== currentTrack.url) {
+                 useTelemetryStore.getState().incrementMetric("streamRecoveryCount");
+                 const newQueue = [...queue];
+                 if (currentIndex >= 0 && currentIndex < newQueue.length) {
+                   newQueue[currentIndex] = freshCurrent;
+                   set({
+                     currentTrack: freshCurrent,
+                     queue: newQueue
+                   });
+                 }
+               }
+             } catch (validationErr) {
+               console.warn("[PlayerStore] Startup validation failed for current track:", validationErr);
+               useTelemetryStore.getState().incrementMetric("sourceErrorCount");
+             }
+
+             // 2. Inject playable queue natively (uses filtered playable queue inside updateQueue)
+             await PlaybackService.updateQueue(get().queue, currentIndex);
              
              if (position > 0) {
                await PlaybackService.seek(position);
@@ -1211,6 +1302,62 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
              set({ isPlaying: false, status: "paused" });
              
              console.info("[PlayerStore] Session restored in paused state at position:", position);
+
+             // 3. Lazy repair of next 3 tracks asynchronously (after 3 seconds)
+             setTimeout(async () => {
+               try {
+                 const latestStore = usePlayerStore.getState();
+                 const next3Queue = [];
+                 const N = latestStore.queue.length;
+                 for (let i = 1; i <= 3; i++) {
+                   const nextIdx = (latestStore.currentIndex + i) % N;
+                   const nextTrack = latestStore.queue[nextIdx];
+                   if (nextTrack && nextTrack.id !== freshCurrent.id) {
+                     next3Queue.push(nextTrack);
+                   }
+                 }
+
+                 for (const track of next3Queue) {
+                   const { useSourceHealthStore } = await import("./source-health.store");
+                   if (useSourceHealthStore.getState().isCooldownActive(track.id)) {
+                     console.info(`Skipped repair: track currently in cooldown (id: ${track.id}, title: "${track.title}")`);
+                     continue;
+                   }
+                   const validation = await validateTrackSource(track);
+                   const stale = isSourceStale(track);
+                   if (!validation.valid || stale) {
+                     try {
+                       const repaired = await ensurePlayableTrack(track);
+                       const storeInstance = usePlayerStore.getState();
+                       const newQ = [...storeInstance.queue];
+                       const idx = newQ.findIndex(t => t.id === track.id);
+                        if (idx !== -1) {
+                          const merged = { ...track, ...repaired };
+                          newQ[idx] = merged;
+                          usePlayerStore.setState({ queue: newQ });
+                          await PlaybackService.updateMediaItem(idx, merged);
+                        }
+                     } catch (err) {
+                       console.warn(`[StartupLazyRepair] Failed to repair track "${track.title}":`, err);
+                     }
+                   }
+                 }
+               } catch (lazyErr) {
+                 console.warn("[StartupLazyRepair] Lazy repair failed:", lazyErr);
+               }
+             }, 3000);
+
+             // 4. Start maintenance worker and run initial sliding window queue repair (after 10 seconds)
+             setTimeout(async () => {
+               try {
+                 const { QueueRepairService } = await import("../services/queue-repair.service");
+                 QueueRepairService.startMaintenanceWorker();
+                 await QueueRepairService.repairQueue(true);
+               } catch (workerErr) {
+                 console.warn("[PlayerStore] Failed to initialize queue repair service:", workerErr);
+               }
+             }, 10000);
+
            } catch (e) {
              console.error("[PlayerStore] Failed to restore session", e);
            }

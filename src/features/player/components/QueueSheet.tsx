@@ -38,6 +38,7 @@ import { usePlayerStore } from "../store/player.store";
 import { PlayerTrack } from "../types/player";
 import { QueueActionSheet } from "./QueueActionSheet";
 import AddToPlaylistSheet from "@/src/features/playlist/components/AddToPlaylistSheet";
+import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
 
 type AnimatedPanGestureEvent = {
   nativeEvent: {
@@ -537,7 +538,7 @@ const QueueRow = React.memo(
               >
                 <View style={s.artWrap}>
                   <Image
-                    source={{ uri: item.art }}
+                    source={{ uri: getTrackArtwork(item) }}
                     style={s.art}
                     contentFit="cover"
                     transition={200}

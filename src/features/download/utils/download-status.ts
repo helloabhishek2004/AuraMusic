@@ -13,7 +13,7 @@ export const useDownloadState = (trackId: string): DownloadState => {
     }
     if (activeTasks[trackId]) {
       const status = activeTasks[trackId].status;
-      if (status === 'downloading') return 'downloading';
+      if (status === 'downloading' || status === 'preparing' || status === 'verifying') return 'downloading';
       if (status === 'paused') return 'paused';
       if (status === 'failed') return 'failed';
       if (status === 'queued') return 'downloading';
@@ -64,7 +64,7 @@ export const useMultipleDownloadStates = (trackIds: string[]): Record<string, Do
         result[trackId] = 'downloaded';
       } else if (activeTasks[trackId]) {
         const status = activeTasks[trackId].status;
-        if (status === 'downloading' || status === 'queued') result[trackId] = 'downloading';
+        if (status === 'downloading' || status === 'queued' || status === 'preparing' || status === 'verifying') result[trackId] = 'downloading';
         else if (status === 'paused') result[trackId] = 'paused';
         else if (status === 'failed') result[trackId] = 'failed';
       } else {

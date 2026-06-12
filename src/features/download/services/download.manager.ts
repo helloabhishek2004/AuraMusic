@@ -19,85 +19,25 @@ export class DownloadManager {
     string,
     FileSystem.DownloadResumable
   > = {};
-  private static downloadMeta: Record<string, { lastReported: number }> = {};
+  private static downloadMeta: Record<
+    string,
+    { lastReported: number; lastTimeReported: number; startedAt: number }
+  > = {};
 
   static async initialize() {
-    if (this.isInitialized) return;
-
-    await StorageService.initialize();
-
-    const store = useDownloadStore.getState();
-    const downloadedTracks = { ...store.downloadedTracks };
-    let hasChanges = false;
-
-    // Reconcile downloadedTracks with physical files on disk
-    for (const trackId of Object.keys(downloadedTracks)) {
-      const track = downloadedTracks[trackId];
-      const audioExists = await StorageService.fileExists(track.localAudioPath);
-      if (!audioExists) {
-        delete downloadedTracks[trackId];
-        hasChanges = true;
-        logger.info(`[DownloadManager] Reconciled missing local track: ${track.title} (${trackId})`);
-      }
-    }
-
-    if (hasChanges) {
-      useDownloadStore.setState({ downloadedTracks });
-    }
-
-    // Force clear transient active tasks and download queue on startup to prevent auto-starting legacy downloads restored from backup
-    useDownloadStore.setState({
-      activeTasks: {},
-      downloadQueue: [],
-    });
-
-    this.isInitialized = true;
-
-    // Listen for store changes to process queue
-    useDownloadStore.subscribe((state, prevState) => {
-      if (
-        state.downloadQueue.length > prevState.downloadQueue.length ||
-        state.activeTasks !== prevState.activeTasks
-      ) {
-        this.processQueue();
-      }
-    });
+    const { DownloadQueueManager } = await import("./download-queue-manager");
+    await DownloadQueueManager.initialize();
   }
 
   private static async processQueue() {
-    if (this.activeDownloadCount >= MAX_CONCURRENT_DOWNLOADS) return;
-
-    const { downloadQueue, activeTasks } = useDownloadStore.getState();
-
-    if (downloadQueue.length === 0 && this.activeDownloadCount === 0) {
-      DownloadNotificationService.clear();
-      return;
-    }
-
-    // Check if download is allowed (Wi-Fi restriction)
-    const { isDownloadAllowed } = await import("../../player/utils/audio-quality");
-    const allowed = await isDownloadAllowed();
-    
-    if (!allowed && downloadQueue.some(id => activeTasks[id]?.status === 'queued')) {
-      if (typeof __DEV__ !== "undefined" && __DEV__) {
-        console.info("[DownloadManager] Queue processing paused: Network restriction");
-      }
-      return;
-    }
-
-    for (const trackId of downloadQueue) {
-      if (this.activeDownloadCount >= MAX_CONCURRENT_DOWNLOADS) break;
-
-      const task = activeTasks[trackId];
-      if (task && task.status === "queued") {
-        this.startDownload(task);
-      }
-    }
+    const { DownloadQueueManager } = await import("./download-queue-manager");
+    DownloadQueueManager.processQueue();
   }
 
-  private static async startDownload(task: DownloadTask) {
+  public static async startDownload(task: DownloadTask) {
     const trackId = task.track.id;
     const store = useDownloadStore.getState();
+    const downloadStartTime = Date.now();
 
     // Ensure notifications permission dynamically when starting download
     try {
@@ -110,14 +50,19 @@ export class DownloadManager {
       console.warn("[DownloadManager] Failed to request notification permission:", e);
     }
 
-    this.activeDownloadCount++;
     store.updateStatus(trackId, "downloading");
+    store.updateTelemetry("started");
+    DownloadNotificationService.showStarted(task.track.title);
 
     const audioPath = StorageService.getAudioPath(trackId);
     const tempAudioPath = audioPath + ".tmp";
 
     // meta tracking per-download to throttle progress updates
-    this.downloadMeta[trackId] = { lastReported: 0 };
+    this.downloadMeta[trackId] = {
+      lastReported: 0,
+      lastTimeReported: Date.now(),
+      startedAt: Date.now(),
+    };
 
     try {
       // 1. Resolve stream URL if not present (with in-memory cache)
@@ -125,20 +70,20 @@ export class DownloadManager {
 
       // [Aura_Ownership] If the track URL is already a local file, import it
       // to the downloads directory instead of entering the HTTP download pipeline.
-      // This handles cached streaming tracks, device-local files, and re-downloads.
       if (streamUrl) {
         const { getUriScheme } = await import("../../player/utils/track-resolver");
         const scheme = getUriScheme(streamUrl);
         if (scheme === 'file' || scheme === 'content') {
           logger.info(`[Download] Importing local file for ${task.track.title} (${trackId})`);
 
-          const sourcePath = streamUrl.replace(/^file:\/\//, '');
+          const localSourceUri = streamUrl.startsWith('file://') ? streamUrl : `file://${streamUrl}`;
           const audioPath = StorageService.getAudioPath(trackId);
 
           try {
-            await FileSystem.copyAsync({ from: sourcePath, to: audioPath });
-          } catch {
-            await FileSystem.moveAsync({ from: sourcePath, to: audioPath });
+            await FileSystem.copyAsync({ from: localSourceUri, to: audioPath });
+          } catch (copyErr) {
+            logger.warn(`[Download] Copy failed for local source, trying move...`, copyErr);
+            await FileSystem.moveAsync({ from: localSourceUri, to: audioPath });
           }
 
           const localUri = audioPath.startsWith('file://') ? audioPath : `file://${audioPath}`;
@@ -154,17 +99,31 @@ export class DownloadManager {
             }
           }
 
+          // Verifying
+          store.updateStatus(trackId, "verifying");
+          const fileExists = await StorageService.fileExists(audioPath);
+          const fileSize = await StorageService.getFileSize(audioPath);
+          if (!fileExists || fileSize <= 0) {
+            throw new Error("Verification failed: Audio file is missing or empty.");
+          }
+
           const downloadedTrack: DownloadedTrack = {
             ...task.track,
             url: localUri,
             localAudioPath: localUri,
             localArtPath: localArtPath,
             downloadedAt: Date.now(),
-            fileSize: await StorageService.getFileSize(audioPath),
+            fileSize,
             isLocal: true,
           };
 
           useDownloadStore.getState().setDownloaded(downloadedTrack);
+          
+          // Telemetry
+          const elapsed = (Date.now() - downloadStartTime) / 1000;
+          const speed = elapsed > 0 ? fileSize / elapsed : 0;
+          useDownloadStore.getState().updateTelemetry("completed", speed, elapsed);
+
           DownloadNotificationService.showCompleted(1);
           logger.info(`[Download] Imported local file: ${task.track.title} (${trackId})`);
           return;
@@ -191,21 +150,36 @@ export class DownloadManager {
         tempAudioPath,
         {},
         (progress) => {
-          const p =
-            progress.totalBytesWritten / progress.totalBytesExpectedToWrite;
+          const p = progress.totalBytesWritten / progress.totalBytesExpectedToWrite;
           const meta = this.downloadMeta[trackId];
 
-          // Throttle updates to every 5% to reduce bridge overhead and UI lag
           if (!meta) return;
-          if (p - meta.lastReported >= 0.05 || p === 1) {
+
+          const now = Date.now();
+          const elapsedSeconds = (now - meta.startedAt) / 1000;
+          const speed = elapsedSeconds > 0 ? progress.totalBytesWritten / elapsedSeconds : 0;
+          const remainingBytes = progress.totalBytesExpectedToWrite - progress.totalBytesWritten;
+          const eta = speed > 0 ? remainingBytes / speed : 0;
+
+          // Throttling to 250ms minimum
+          if (now - meta.lastTimeReported >= 250 || p === 1) {
+            meta.lastTimeReported = now;
             meta.lastReported = p;
 
-            // Batch small updates: update store and notification
-            useDownloadStore.getState().updateProgress(trackId, p);
+            // Batch updates
+            useDownloadStore.getState().updateProgress(
+              trackId,
+              p,
+              progress.totalBytesWritten,
+              progress.totalBytesExpectedToWrite,
+              speed,
+              eta
+            );
+
             DownloadNotificationService.updateProgress(
               task.track.title,
               p,
-              useDownloadStore.getState().downloadQueue.length,
+              useDownloadStore.getState().queue.filter(q => q.status === 'queued').length
             );
           }
         },
@@ -240,6 +214,26 @@ export class DownloadManager {
         }
       }
 
+      // Transition to verifying
+      store.updateStatus(trackId, "verifying");
+
+      // Download Verification: size > 0, file exists, readable
+      const fileExists = await StorageService.fileExists(audioPath);
+      const fileSize = await StorageService.getFileSize(audioPath);
+      if (!fileExists || fileSize <= 0) {
+        throw new Error("Verification failed: Audio file is missing or empty.");
+      }
+
+      try {
+        await FileSystem.readAsStringAsync(audioPath, {
+          encoding: FileSystem.EncodingType.Base64,
+          length: 100,
+          position: 0
+        });
+      } catch (e) {
+        throw new Error("Verification failed: Audio file metadata or content is unreadable.");
+      }
+
       // 4. Mark as completed
       const downloadedTrack: DownloadedTrack = {
         ...task.track,
@@ -247,11 +241,16 @@ export class DownloadManager {
         localAudioPath: localUri,
         localArtPath: localArtPath,
         downloadedAt: Date.now(),
-        fileSize: await StorageService.getFileSize(audioPath),
+        fileSize,
         isLocal: true,
       };
 
       useDownloadStore.getState().setDownloaded(downloadedTrack);
+
+      // Telemetry Completed
+      const elapsed = (Date.now() - downloadStartTime) / 1000;
+      const finalSpeed = elapsed > 0 ? fileSize / elapsed : 0;
+      useDownloadStore.getState().updateTelemetry("completed", finalSpeed, elapsed);
 
       DownloadNotificationService.showCompleted(1);
 
@@ -264,28 +263,17 @@ export class DownloadManager {
         await FileSystem.deleteAsync(tempAudioPath);
       } catch (e) {}
 
-      if (task.retryCount < MAX_RETRIES) {
-        useDownloadStore.setState((state) => ({
-          activeTasks: {
-            ...state.activeTasks,
-            [trackId]: {
-              ...task,
-              status: "queued",
-              retryCount: task.retryCount + 1,
-              error: (error as Error).message,
-            },
-          },
-        }));
-      } else {
-        useDownloadStore
-          .getState()
-          .updateStatus(trackId, "failed", (error as Error).message);
-      }
+      // Telemetry and Notification Failures
+      useDownloadStore.getState().updateTelemetry("failed");
+      DownloadNotificationService.showFailed(task.track.title, (error as Error).message);
+
+      const { DownloadQueueManager } = await import("./download-queue-manager");
+      DownloadQueueManager.handleDownloadFailure(trackId, (error as Error).message);
     } finally {
-      this.activeDownloadCount--;
       delete this.downloadResumables[trackId];
       delete this.downloadMeta[trackId];
-      this.processQueue();
+      const { DownloadQueueManager } = await import("./download-queue-manager");
+      DownloadQueueManager.processQueue();
     }
   }
 
@@ -295,6 +283,7 @@ export class DownloadManager {
       try {
         await resumable.pauseAsync();
         useDownloadStore.getState().updateStatus(trackId, "paused");
+        DownloadNotificationService.clear();
       } catch (e) {}
     }
   }
@@ -315,6 +304,9 @@ export class DownloadManager {
     // Cleanup partial file
     const audioPath = StorageService.getAudioPath(trackId);
     await StorageService.deleteFile(audioPath);
+
+    // Dismiss notification
+    DownloadNotificationService.clear();
   }
 
   static async removeDownload(trackId: string) {

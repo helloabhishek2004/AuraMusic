@@ -847,6 +847,192 @@ const StorageCard = ({ storage }: { storage: SInfo }) => {
   );
 };
 
+// ── QUEUE SUMMARY CARD ────────────────────────────────────────────────────────
+const QueueSummaryCard = React.memo(() => {
+  const queue = useDownloadStore((s) => s.queue);
+  const isQueuePaused = useDownloadStore((s) => s.isQueuePaused);
+  const pauseQueue = useDownloadStore((s) => s.pauseQueue);
+  const resumeQueue = useDownloadStore((s) => s.resumeQueue);
+  const clearCompleted = useDownloadStore((s) => s.clearCompleted);
+  const clearFailed = useDownloadStore((s) => s.clearFailed);
+  const router = useRouter();
+
+  const downloadingCount = queue.filter((item) => item.status === "downloading" || item.status === "preparing" || item.status === "verifying").length;
+  const queuedCount = queue.filter((item) => item.status === "queued").length;
+  const completedCount = queue.filter((item) => item.status === "completed").length;
+  const failedCount = queue.filter((item) => item.status === "failed").length;
+
+  return (
+    <Glass style={summaryStyles.card} r={28}>
+      <View style={summaryStyles.container}>
+        <View style={summaryStyles.headerRow}>
+          <Text style={summaryStyles.title}>Queue Summary</Text>
+          <TouchableOpacity
+            style={summaryStyles.detailBtn}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              router.push("/download-queue");
+            }}
+          >
+            <Text style={summaryStyles.detailBtnText}>View Detailed Queue</Text>
+            <Ionicons name="chevron-forward" size={14} color={C.primary} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={summaryStyles.statsRow}>
+          <View style={summaryStyles.statBox}>
+            <Text style={[summaryStyles.statVal, { color: C.accent }]}>{downloadingCount}</Text>
+            <Text style={summaryStyles.statLabel}>Active</Text>
+          </View>
+          <View style={summaryStyles.statBox}>
+            <Text style={[summaryStyles.statVal, { color: C.text }]}>{queuedCount}</Text>
+            <Text style={summaryStyles.statLabel}>Queued</Text>
+          </View>
+          <View style={summaryStyles.statBox}>
+            <Text style={[summaryStyles.statVal, { color: "#30D158" }]}>{completedCount}</Text>
+            <Text style={summaryStyles.statLabel}>Success</Text>
+          </View>
+          <View style={summaryStyles.statBox}>
+            <Text style={[summaryStyles.statVal, { color: C.danger }]}>{failedCount}</Text>
+            <Text style={summaryStyles.statLabel}>Failed</Text>
+          </View>
+        </View>
+
+        <View style={summaryStyles.btnGroup}>
+          <TouchableOpacity
+            style={summaryStyles.actionBtn}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              if (isQueuePaused) {
+                resumeQueue();
+              } else {
+                pauseQueue();
+              }
+            }}
+          >
+            <Ionicons
+              name={isQueuePaused ? "play-circle-outline" : "pause-circle-outline"}
+              size={18}
+              color={C.text}
+            />
+            <Text style={summaryStyles.actionBtnText}>
+              {isQueuePaused ? "Resume" : "Pause"}
+            </Text>
+          </TouchableOpacity>
+
+          <View style={{ width: 8 }} />
+
+          <TouchableOpacity
+            style={[summaryStyles.actionBtn, { backgroundColor: "rgba(255,255,255,0.03)" }]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              clearCompleted();
+            }}
+          >
+            <Ionicons name="checkmark-done" size={16} color={C.muted} />
+            <Text style={summaryStyles.actionBtnText}>Clear Done</Text>
+          </TouchableOpacity>
+
+          <View style={{ width: 8 }} />
+
+          <TouchableOpacity
+            style={[summaryStyles.actionBtn, { backgroundColor: "rgba(255,255,255,0.03)" }]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              clearFailed();
+            }}
+          >
+            <Ionicons name="trash-outline" size={16} color={C.danger} />
+            <Text style={[summaryStyles.actionBtnText, { color: C.danger }]}>Clear Failed</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Glass>
+  );
+});
+
+const summaryStyles = StyleSheet.create({
+  card: {
+    marginBottom: 20,
+    marginHorizontal: PAD,
+  },
+  container: {
+    padding: 16,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFF',
+    letterSpacing: -0.2,
+  },
+  detailBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  detailBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: C.primary,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  statBox: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statVal: {
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+  },
+  statLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: C.muted,
+    marginTop: 2,
+    letterSpacing: 0.2,
+  },
+  btnGroup: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(191,90,242,0.12)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(191,90,242,0.22)',
+    borderRadius: 16,
+    height: 38,
+    flex: 1,
+  },
+  actionBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+});
+
 // ── MAIN SCREEN ───────────────────────────────────────────────────────────────
 export default function DownloadsScreen() {
   const flashListRef = useRef<any>(null);
@@ -1139,6 +1325,8 @@ export default function DownloadsScreen() {
                 style={{ marginBottom: 20 }}
               />
             </Animated.View>
+
+            {activeTab === "Downloading" && <QueueSummaryCard />}
 
             {/* Section title + count */}
             <Animated.View

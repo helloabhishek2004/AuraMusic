@@ -42,13 +42,44 @@ export const useMediaCacheStore = create<MediaCacheState & MediaCacheActions>()(
             cacheTrack: (track, extra) => {
                 set((state) => {
                     const existing = state.metadata[track.id] || { lastUpdated: 0, track: {} };
+                    
+                    const trackUpdates: Partial<PlayerTrack> = {};
+                    const metadataUpdates: Partial<CachedMetadata> = {};
+                    
+                    if (extra) {
+                        if (extra.track) {
+                            Object.assign(trackUpdates, extra.track);
+                        }
+                        
+                        if (extra.lyrics) metadataUpdates.lyrics = extra.lyrics;
+                        if (extra.dominantColors) {
+                            metadataUpdates.dominantColors = extra.dominantColors;
+                            trackUpdates.dominantColors = extra.dominantColors;
+                        }
+                        if (extra.albumDetails) metadataUpdates.albumDetails = extra.albumDetails;
+                        if (extra.artistDetails) metadataUpdates.artistDetails = extra.artistDetails;
+                        
+                        const extraAny = extra as any;
+                        if (extraAny.title) trackUpdates.title = extraAny.title;
+                        if (extraAny.artist) trackUpdates.artist = extraAny.artist;
+                        if (extraAny.art) trackUpdates.art = extraAny.art;
+                        if (extraAny.album) trackUpdates.album = extraAny.album;
+                        if (extraAny.duration) trackUpdates.duration = extraAny.duration;
+                        if (extraAny.mimeType) trackUpdates.mimeType = extraAny.mimeType;
+                        if (extraAny.isLocal !== undefined) trackUpdates.isLocal = extraAny.isLocal;
+                    }
+
                     return {
                         metadata: {
                             ...state.metadata,
                             [track.id]: {
                                 ...existing,
-                                ...extra,
-                                track: { ...existing.track, ...track },
+                                ...metadataUpdates,
+                                track: {
+                                    ...existing.track,
+                                    ...track,
+                                    ...trackUpdates,
+                                },
                                 lastUpdated: Date.now(),
                             },
                         },

@@ -57,6 +57,10 @@ class HydrationService {
      * Safe to call on every track play/load. Runs at idle priority.
      */
     scheduleHydration(track: PlayerTrack) {
+        if (!track) return;
+        const isLocal = track.isLocal || track.url?.startsWith("file://") || track.url?.startsWith("content://");
+        if (isLocal) return;
+
         const id = getCanonicalTrackId(track);
 
         // Cancel any pending task for this exact track identity

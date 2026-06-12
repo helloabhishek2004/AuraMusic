@@ -17,8 +17,11 @@ Notifications.setNotificationHandler({
 
 export class DownloadNotificationService {
   private static lastUpdate = 0;
-  private static UPDATE_THROTTLE = 1000; // 1-second throttle is perfect for system notifications
+  private static UPDATE_THROTTLE = 1000;
   private static categoryRegistered = false;
+
+  private static completedCountAccumulator = 0;
+  private static completedTimeout: NodeJS.Timeout | null = null;
 
   private static async registerCategory() {
     if (this.categoryRegistered) return;
@@ -56,11 +59,84 @@ export class DownloadNotificationService {
     }
   }
 
+  static async showStarted(title: string) {
+    try {
+      useDownloadStore.getState().setDownloadNotification({
+        isVisible: true,
+        title: title,
+        progress: 0,
+        activeCount: 1,
+        remaining: useDownloadStore.getState().queue.filter(q => q.status === 'queued').length,
+        isComplete: false,
+      });
+    } catch {}
+
+    try {
+      await Notifications.scheduleNotificationAsync({
+        identifier: 'aura-download-noti',
+        content: {
+          title: 'Aura Music',
+          body: `Started downloading: ${title}`,
+          sound: false,
+          vibrate: [],
+          sticky: true,
+          priority: Notifications.AndroidNotificationPriority.DEFAULT,
+        },
+        trigger: null,
+      });
+    } catch (e) {
+      console.warn("[DownloadNotification] Failed to show started", e);
+    }
+  }
+
+  static async showFailed(title: string, reason: string) {
+    try {
+      await Notifications.dismissNotificationAsync('aura-download-noti');
+    } catch {}
+
+    try {
+      useDownloadStore.getState().setDownloadNotification(null);
+    } catch {}
+
+    try {
+      const notiId = `aura-download-failed-${Date.now()}`;
+      await Notifications.scheduleNotificationAsync({
+        identifier: notiId,
+        content: {
+          title: 'Aura Music',
+          body: `Download failed: ${title}`,
+          sound: true,
+          priority: Notifications.AndroidNotificationPriority.DEFAULT,
+        },
+        trigger: null,
+      });
+
+      // Auto-expire the failure notification after 6 seconds
+      setTimeout(async () => {
+        try {
+          await Notifications.dismissNotificationAsync(notiId);
+        } catch {}
+      }, 6000);
+    } catch (e) {
+      console.warn("[DownloadNotification] Failed to show failed", e);
+    }
+  }
+
   static async updateProgress(title: string, progress: number, remaining: number) {
     const now = Date.now();
     const pct = Math.round(progress * 100);
 
-    // Throttle progress triggers to not overload the phone notification thread
+    try {
+      useDownloadStore.getState().setDownloadNotification({
+        isVisible: true,
+        title: title,
+        progress: pct,
+        activeCount: 1,
+        remaining: remaining,
+        isComplete: false,
+      });
+    } catch {}
+
     if (now - this.lastUpdate < this.UPDATE_THROTTLE && pct < 100 && pct % 10 !== 0) {
       return;
     }
@@ -70,7 +146,7 @@ export class DownloadNotificationService {
 
     try {
       await Notifications.scheduleNotificationAsync({
-        identifier: 'aura-download-noti', // Static ID overwrites previous frame smoothly
+        identifier: 'aura-download-noti',
         content: {
           title: 'Aura Music',
           body: `Downloading: ${title} (${pct}%) · ${remaining} remaining`,
@@ -89,6 +165,9 @@ export class DownloadNotificationService {
 
   static async clear() {
     try {
+      useDownloadStore.getState().setDownloadNotification(null);
+    } catch {}
+    try {
       await Notifications.dismissNotificationAsync('aura-download-noti');
     } catch (e) {
       console.warn("[DownloadNotification] Failed to clear", e);
@@ -96,26 +175,58 @@ export class DownloadNotificationService {
   }
 
   static async showCompleted(count: number) {
-    try {
-      await Notifications.scheduleNotificationAsync({
-        identifier: 'aura-download-noti',
-        content: {
-          title: 'Aura Music',
-          body: `${count} track${count > 1 ? 's' : ''} downloaded successfully`,
-          sound: true,
-          priority: Notifications.AndroidNotificationPriority.DEFAULT,
-        },
-        trigger: null,
-      });
-      
-      // Auto-clear success banner after 4 seconds
-      setTimeout(async () => {
-        try {
-          await Notifications.dismissNotificationAsync('aura-download-noti');
-        } catch {}
-      }, 4000);
-    } catch (e) {
-      console.warn("[DownloadNotification] Failed to show completed", e);
+    this.completedCountAccumulator += count;
+
+    if (this.completedTimeout) {
+      clearTimeout(this.completedTimeout);
     }
+
+    this.completedTimeout = setTimeout(async () => {
+      const finalCount = this.completedCountAccumulator;
+      this.completedCountAccumulator = 0;
+      this.completedTimeout = null;
+
+      try {
+        try {
+          useDownloadStore.getState().setDownloadNotification({
+            isVisible: true,
+            title: finalCount > 1 
+              ? `${finalCount} tracks downloaded` 
+              : 'Download complete',
+            progress: 100,
+            activeCount: 0,
+            remaining: 0,
+            isComplete: true,
+          });
+        } catch {}
+
+        await Notifications.scheduleNotificationAsync({
+          identifier: 'aura-download-noti',
+          content: {
+            title: 'Aura Music',
+            body: finalCount > 1 
+              ? `${finalCount} tracks downloaded successfully` 
+              : 'Download complete',
+            sound: true,
+            vibrate: [0, 250, 250, 250],
+            sticky: false,
+            priority: Notifications.AndroidNotificationPriority.DEFAULT,
+          },
+          trigger: null,
+        });
+        
+        setTimeout(async () => {
+          try {
+            const currentNoti = useDownloadStore.getState().notification;
+            if (currentNoti && currentNoti.isComplete) {
+              useDownloadStore.getState().setDownloadNotification(null);
+            }
+            await Notifications.dismissNotificationAsync('aura-download-noti');
+          } catch {}
+        }, 6000);
+      } catch (e) {
+        console.warn("[DownloadNotification] Failed to show completed", e);
+      }
+    }, 1000);
   }
 }

@@ -40,9 +40,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
+import { useMediaCacheStore } from "@/src/features/cache/store/media-cache.store";
 import { LocalMusicService } from "@/src/services/local-music.service";
 import { MusicTrack } from "@/src/types/music";
 import { PlayerTrack } from "@/src/features/player/types/player";
+import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { PressScale } from "@/src/components/ui/press-scale";
 import { palette, radius, spacing } from "@/src/design/tokens";
@@ -333,6 +335,12 @@ const LocalTrackRow = React.memo(
         const formatExt = (mime?: string) =>
             mime?.split("/")[1]?.toUpperCase().replace("MPEG", "MP3") ?? null;
 
+        const cached = useMediaCacheStore((s) => s.metadata[track.id]?.track);
+        const displayTitle = cached?.title || track.title;
+        const displayArtist = (cached?.artist && cached.artist !== "Local Artist" && cached.artist !== "Local") ? cached.artist : (track.artist || "Local Audio");
+        const cachedAny = cached as any;
+        const displayArt = (cachedAny?.art || cachedAny?.artwork || cachedAny?.artworkUrl || cachedAny?.thumbnail || cachedAny?.image) ? getTrackArtwork(cached) : getTrackArtwork(track);
+
         const isLiked = useLikesStore((s) => !!s.likedTrackIds[track.id]);
         const toggleLike = useLikesStore((s) => s.toggleLike);
 
@@ -366,7 +374,7 @@ const LocalTrackRow = React.memo(
                     onPress={() => onPlay(track)}
                     haptic={Haptics.ImpactFeedbackStyle.Light}
                     accessibilityRole="button"
-                    accessibilityLabel={`Play ${track.title}${isActive ? ", currently playing" : ""}`}
+                    accessibilityLabel={`Play ${displayTitle}${isActive ? ", currently playing" : ""}`}
                 >
                     <LiquidGlass
                         borderRadius={20}
@@ -390,9 +398,9 @@ const LocalTrackRow = React.memo(
                         <View style={s.trackInner}>
                             {/* Artwork / fallback */}
                             <View style={s.trackArtWrap}>
-                                {track.art ? (
+                                {displayArt ? (
                                     <Image
-                                        source={{ uri: track.art }}
+                                        source={{ uri: displayArt }}
                                         style={s.trackArt}
                                         contentFit="cover"
                                         transition={250}
@@ -428,11 +436,11 @@ const LocalTrackRow = React.memo(
                                     style={[s.trackTitle, isActive && s.trackTitleActive]}
                                     numberOfLines={1}
                                 >
-                                    {track.title}
+                                    {displayTitle}
                                 </Text>
                                 <View style={s.trackMeta}>
                                     <Text style={s.trackArtist} numberOfLines={1}>
-                                        {track.artist || "Local Audio"}
+                                        {displayArtist}
                                     </Text>
                                     {formatExt(track.mimeType) && (
                                         <View style={s.mimeBadge}>
@@ -450,9 +458,9 @@ const LocalTrackRow = React.memo(
                                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                                             toggleLike({
                                                 id: track.id,
-                                                title: track.title,
-                                                artist: track.artist || "Local Audio",
-                                                art: track.album || "",
+                                                title: displayTitle,
+                                                artist: displayArtist,
+                                                art: displayArt || "",
                                                 url: track.url || "",
                                                 duration: 0,
                                                 isLocal: true,
@@ -900,7 +908,9 @@ const HeroCard = ({
 export default function LocalLibraryScreen() {
     const insets = useSafeAreaInsets();
     const router = useRouter();
-    const { setQueue, currentTrack, setActiveContext } = usePlayerStore();
+    const setQueue = usePlayerStore(s => s.setQueue);
+    const currentTrack = usePlayerStore(s => s.currentTrack);
+    const setActiveContext = usePlayerStore(s => s.setActiveContext);
 
     const [activeTab, setActiveTab] = useState<Tab>("Songs");
     const [isLoading, setIsLoading] = useState(true);
@@ -943,8 +953,24 @@ export default function LocalLibraryScreen() {
             if (hasPerm) {
                 setGrantedFolders(["Device Storage"]);
                 const localTracks = await LocalMusicService.getLocalTracks();
-                setTracks(localTracks);
-                setFolders(LocalMusicService.groupByFolder(localTracks));
+                
+                const cacheStore = useMediaCacheStore.getState();
+                const decoratedTracks = localTracks.map(track => {
+                    const cached = cacheStore.getCachedTrack(track.id);
+                    if (cached && cached.track) {
+                        return {
+                            ...track,
+                            title: cached.track.title || track.title,
+                            artist: cached.track.artist || track.artist,
+                            art: cached.track.art || track.art,
+                            album: cached.track.album || track.album,
+                        };
+                    }
+                    return track;
+                });
+
+                setTracks(decoratedTracks);
+                setFolders(LocalMusicService.groupByFolder(decoratedTracks));
             } else {
                 setGrantedFolders([]);
                 setTracks([]);
@@ -1022,16 +1048,20 @@ export default function LocalLibraryScreen() {
 
     const handlePlayTrack = useCallback(
         (track: MusicTrack, list: MusicTrack[] = tracks) => {
-            const playerTracks: PlayerTrack[] = list.map((t) => ({
-                id: t.id,
-                title: t.title,
-                artist: t.artist || "Local",
-                art: t.art || "",
-                url: t.url || t.localUri || "",
-                isLocal: true,
-                duration: 0,
-                mimeType: t.mimeType,
-            }));
+            const cacheStore = useMediaCacheStore.getState();
+            const playerTracks: PlayerTrack[] = list.map((t) => {
+                const cached = cacheStore.getCachedTrack(t.id);
+                return {
+                    id: t.id,
+                    title: cached?.track?.title || t.title,
+                    artist: (cached?.track?.artist && cached.track.artist !== "Local Artist" && cached.track.artist !== "Local") ? cached.track.artist : (t.artist || "Local"),
+                    art: cached?.track?.art || t.art || "",
+                    url: t.url || t.localUri || "",
+                    isLocal: true,
+                    duration: 0,
+                    mimeType: t.mimeType,
+                };
+            });
             const startIndex = playerTracks.findIndex((t) => t.id === track.id);
 
             setActiveContext({ type: "local", id: "local" });

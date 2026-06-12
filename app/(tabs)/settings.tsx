@@ -49,6 +49,8 @@ import { downloadCleanupService } from "../../src/features/download/services/dow
 import { useAnalyticsStore, getRecentHistory, getTopArtists, getTopAlbums, getTopTracks } from "../../src/features/analytics/store/analytics.store";
 import { useRecommendationsStore } from "../../src/features/recommendations/store/recommendations.store";
 import { useScrollToTopOnTabPress } from "../../src/hooks/use-scroll-to-top";
+import { useTelemetryStore } from "../../src/features/player/store/telemetry.store";
+import { RenderDiagnostics } from "../../src/utils/render-diagnostics";
 
 const { width: SW } = Dimensions.get("window");
 
@@ -449,10 +451,56 @@ export default function SettingsScreen() {
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTopOnTabPress(scrollRef);
   const downloadedTracks = useDownloadStore(s => s.downloadedTracks);
+  const telemetry = useTelemetryStore();
 
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [modalType, setModalType] = useState<null | "streamingWifi" | "streamingCellular" | "downloadWifi" | "downloadCellular">(null);
   const [devOpen, setDevOpen] = useState(false);
+  const [displayRefreshStats, setDisplayRefreshStats] = useState<any>(null);
+  const [telemetryStats, setTelemetryStats] = useState<any>({
+    uiLongFrames: 0,
+    uiJankyFrames: 0,
+    uiFrozenFrames: 0,
+    uiAvgFrameTime: 0,
+    uiFps: 0,
+    jsLongFrames: 0,
+    jsJankyFrames: 0,
+    jsFrozenFrames: 0,
+    jsAvgFrameTime: 0,
+    jsFps: 0,
+  });
+
+  useEffect(() => {
+    if (!devOpen) return;
+
+    let active = true;
+    const update = async () => {
+      if (!active) return;
+      const specs = await RenderDiagnostics.getCurrentRefreshRate();
+      if (active) {
+        setDisplayRefreshStats(specs);
+        setTelemetryStats({
+          uiLongFrames: RenderDiagnostics.uiLongFrames.value,
+          uiJankyFrames: RenderDiagnostics.uiJankyFrames.value,
+          uiFrozenFrames: RenderDiagnostics.uiFrozenFrames.value,
+          uiAvgFrameTime: RenderDiagnostics.uiAvgFrameTime.value,
+          uiFps: RenderDiagnostics.uiFps.value,
+          jsLongFrames: RenderDiagnostics.jsLongFrames.value,
+          jsJankyFrames: RenderDiagnostics.jsJankyFrames.value,
+          jsFrozenFrames: RenderDiagnostics.jsFrozenFrames.value,
+          jsAvgFrameTime: RenderDiagnostics.jsAvgFrameTime.value,
+          jsFps: RenderDiagnostics.jsFps.value,
+        });
+      }
+    };
+
+    update();
+    const interval = setInterval(update, 500);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [devOpen]);
   const [isClearing, setIsClearing] = useState(false);
 
   const analyticsHistory = useAnalyticsStore(s => s.history);
@@ -904,6 +952,118 @@ export default function SettingsScreen() {
               <View style={{ paddingHorizontal: 20, paddingBottom: 24 }}>
                 <Divider />
                 
+                {/* Rendering & Refresh Rate Telemetry */}
+                <Text style={st.devSectionHeader}>Rendering & Refresh Rate Telemetry</Text>
+                
+                <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' }}>
+                  <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Display Mode Spec</Text>
+                  <Text style={{ fontSize: 14, color: '#FFF', fontWeight: 'bold', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
+                    {displayRefreshStats?.displayMode || 'Loading...'}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
+                    Preferred Mode ID: {displayRefreshStats?.preferredDisplayModeId ?? 0} | Preferred Rate: {displayRefreshStats?.preferredRefreshRate ?? 0} Hz
+                  </Text>
+                </View>
+
+                <View style={st.devOverviewGrid}>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{displayRefreshStats?.currentRefreshRate?.toFixed(1) ?? '60.0'} Hz</Text>
+                    <Text style={st.devOverviewLabel}>Current Refresh Rate</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{displayRefreshStats?.frameInterval?.toFixed(2) ?? '16.67'} ms</Text>
+                    <Text style={st.devOverviewLabel}>Frame Interval</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetryStats.uiFps} / {telemetryStats.jsFps}</Text>
+                    <Text style={st.devOverviewLabel}>FPS (UI / JS)</Text>
+                  </View>
+                </View>
+
+                <View style={st.devOverviewGrid}>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetryStats.uiAvgFrameTime.toFixed(1)} ms</Text>
+                    <Text style={st.devOverviewLabel}>UI Avg Frame Time</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetryStats.jsAvgFrameTime.toFixed(1)} ms</Text>
+                    <Text style={st.devOverviewLabel}>JS Avg Frame Time</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetryStats.uiLongFrames} / {telemetryStats.jsLongFrames}</Text>
+                    <Text style={st.devOverviewLabel}>Long (UI / JS)</Text>
+                  </View>
+                </View>
+
+                <View style={st.devOverviewGrid}>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetryStats.uiJankyFrames} / {telemetryStats.jsJankyFrames}</Text>
+                    <Text style={st.devOverviewLabel}>Janky (UI / JS)</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetryStats.uiFrozenFrames} / {telemetryStats.jsFrozenFrames}</Text>
+                    <Text style={st.devOverviewLabel}>Frozen (UI / JS)</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      RenderDiagnostics.resetTelemetry();
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      Alert.alert("Success", "Rendering telemetry reset.");
+                    }}
+                    activeOpacity={0.78}
+                    style={[st.devOverviewItem, { backgroundColor: "rgba(239,68,68,0.06)", borderColor: "rgba(239,68,68,0.18)" }]}
+                  >
+                    <MaterialIcons name="refresh" size={18} color="#f87171" style={{ marginBottom: 2 }} />
+                    <Text style={[st.devOverviewLabel, { color: "#f87171" }]}>Reset Render Stats</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Divider />
+                
+                {/* 0. Resolver Diagnostics */}
+                <Text style={st.devSectionHeader}>Resolver Telemetry</Text>
+                <View style={st.devOverviewGrid}>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetry.sourceErrorCount}</Text>
+                    <Text style={st.devOverviewLabel}>Source Errors</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetry.localRecoveryCount}</Text>
+                    <Text style={st.devOverviewLabel}>Local Recoveries</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetry.streamRecoveryCount}</Text>
+                    <Text style={st.devOverviewLabel}>Stream Recoveries</Text>
+                  </View>
+                </View>
+
+                <View style={st.devOverviewGrid}>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetry.queueRepairCount}</Text>
+                    <Text style={st.devOverviewLabel}>Queue Repairs</Text>
+                  </View>
+                  <View style={st.devOverviewItem}>
+                    <Text style={st.devOverviewVal}>{telemetry.resolverCooldownHits}</Text>
+                    <Text style={st.devOverviewLabel}>Cooldown Hits</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      telemetry.resetTelemetry();
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      Alert.alert("Success", "Resolver telemetry cleared.");
+                    }}
+                    activeOpacity={0.78}
+                    style={[st.devOverviewItem, { backgroundColor: "rgba(239,68,68,0.06)", borderColor: "rgba(239,68,68,0.18)" }]}
+                  >
+                    <MaterialIcons name="refresh" size={18} color="#f87171" style={{ marginBottom: 2 }} />
+                    <Text style={[st.devOverviewLabel, { color: "#f87171" }]}>Reset Telemetry</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Divider />
+
                 {/* 1. Analytics Overview */}
                 <Text style={st.devSectionHeader}>Analytics Overview</Text>
                 <View style={st.devOverviewGrid}>

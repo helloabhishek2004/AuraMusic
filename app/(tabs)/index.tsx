@@ -29,12 +29,39 @@ import { useLikesStore } from '@/src/features/likes/store/likes.store';
 import { DownloadManager } from '@/src/features/download/services/download.manager';
 import { useAnalyticsStore, getContinueListeningCandidates, getRecentlyPlayedCandidates, getTopArtists, getTopAlbums, getRecentHistory, splitArtistNames } from '@/src/features/analytics/store/analytics.store';
 import { useRecommendationsStore } from '@/src/features/recommendations/store/recommendations.store';
+import { useLibraryHealthStore } from '@/src/features/library-health/store/library-health.store';
 import { hydrateRecommendationSeed } from '@/src/features/recommendations/services/recommendation-hydrator';
 import { getCanonicalTrackId } from '@/src/features/player/utils/track-identity';
 import { useScrollToTopOnTabPress } from '@/src/hooks/use-scroll-to-top';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const PAD = 24;
+
+// ── ROTATION HELPERS ────────────────────────────────────────────────────────
+function getDayOfYear(date: Date): number {
+  const start = new Date(date.getFullYear(), 0, 0);
+  const diff = date.getTime() - start.getTime();
+  const oneDay = 1000 * 60 * 60 * 24;
+  return Math.floor(diff / oneDay);
+}
+
+function getStringHash(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return Math.abs(hash);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
 
 // ── DESIGN TOKENS ──────────────────────────────────────────────────────────
 const C = {
@@ -526,7 +553,10 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 // ── CONTINUE LISTENING CARD (REDESIGNED LIKE PAGE.HTML) ───────────────────
-const ContinueListeningCard = React.memo(({ track, isPlaying, isPaused, onPress }: any) => {
+const ContinueListeningCard = React.memo(({ track, onPress }: any) => {
+  const candidateCanonical = getCanonicalTrackId({ id: track.id, title: track.title, artist: track.artist });
+  const isPlaying = usePlayerStore(s => s.isPlaying && s.currentTrack && getCanonicalTrackId(s.currentTrack) === candidateCanonical);
+  const isPaused = usePlayerStore(s => !s.isPlaying && s.currentTrack && getCanonicalTrackId(s.currentTrack) === candidateCanonical);
   const progressPercent = Math.round(track.completionRatio * 100);
   return (
     <TouchableOpacity
@@ -566,7 +596,9 @@ const ContinueListeningCard = React.memo(({ track, isPlaying, isPaused, onPress 
 });
 
 // ── RECENTLY PLAYED CARD (EDITORIAL GLASS DESIGN) ─────────────────────────
-const RecentlyPlayedCard = React.memo(({ track, isPlaying, onPress }: any) => {
+const RecentlyPlayedCard = React.memo(({ track, onPress }: any) => {
+  const candidateCanonical = getCanonicalTrackId({ id: track.id, title: track.title, artist: track.artist });
+  const isPlaying = usePlayerStore(s => s.isPlaying && s.currentTrack && getCanonicalTrackId(s.currentTrack) === candidateCanonical);
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -734,7 +766,7 @@ const SeedTrackCard = React.memo(({ seed, onPress }: any) => {
 });
 
 // ── SWIPEABLE HERO CARD ────────────────────────────────────────────────────
-const SwipeableHeroCard = ({ albums, onPlay }: any) => {
+const SwipeableHeroCard = ({ albums, onPlay, onPressCard }: any) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const cardWidth = SW - PAD * 2;
 
@@ -755,7 +787,15 @@ const SwipeableHeroCard = ({ albums, onPlay }: any) => {
         }}
       >
         {albums.map((album: any) => (
-          <View key={album.id} style={[s.heroSlide, { width: cardWidth }]}>
+          <TouchableOpacity
+            key={album.id}
+            activeOpacity={0.95}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              onPressCard?.(album.id);
+            }}
+            style={[s.heroSlide, { width: cardWidth }]}
+          >
             <Image source={{ uri: album.artwork || album.image }} style={s.heroImage} contentFit="cover" contentPosition="center" />
             <LinearGradient
               colors={['rgba(0,0,0,0.12)', 'rgba(0,0,0,0.28)', 'rgba(0,0,0,0.82)']}
@@ -810,7 +850,7 @@ const SwipeableHeroCard = ({ albums, onPlay }: any) => {
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
+          </TouchableOpacity>
         ))}
       </ScrollView>
     </View>
@@ -1013,10 +1053,15 @@ export default function HomeScreen() {
   const rawRediscover = useRecommendationsStore(s => s.rediscover || []);
   const rawBecauseYouLike = useRecommendationsStore(s => s.becauseYouLike || []);
   const rawRecentlyLoved = useRecommendationsStore(s => s.recentlyLoved || []);
+  const rawHiddenGems = useRecommendationsStore(s => s.hiddenGems || []);
+  const rawForgottenFavorites = useRecommendationsStore(s => s.forgottenFavorites || []);
   const trendingSeeds = useRecommendationsStore(s => s.trendingSeeds || []);
   const rawTrendingForYou = useRecommendationsStore(s => s.trendingForYou);
   const rawTopSongs = useRecommendationsStore(s => s.topSongs || []);
   const rawRecoTopArtists = useRecommendationsStore(s => s.topArtists || []);
+
+  const healthReport = useLibraryHealthStore(s => s.healthReport);
+  const duplicateGroups = useLibraryHealthStore(s => s.duplicateGroups);
 
   const isStale = useMemo(() => {
     if (!lastRecommendationBuild) return true;
@@ -1049,6 +1094,16 @@ export default function HomeScreen() {
     return rawRecentlyLoved.filter(item => item.image && !item.image.includes('placeholder') && !item.image.includes('picsum.photos'));
   }, [rawRecentlyLoved, isStale]);
 
+  const hiddenGems = useMemo(() => {
+    if (isStale) return [];
+    return rawHiddenGems.filter(item => item.image && !item.image.includes('placeholder') && !item.image.includes('picsum.photos'));
+  }, [rawHiddenGems, isStale]);
+
+  const forgottenFavorites = useMemo(() => {
+    if (isStale) return [];
+    return rawForgottenFavorites.filter(item => item.image && !item.image.includes('placeholder') && !item.image.includes('picsum.photos'));
+  }, [rawForgottenFavorites, isStale]);
+
   const trendingForYou = useMemo(() => {
     if (isStale || !rawTrendingForYou) return null;
     if (rawTrendingForYou.image && !rawTrendingForYou.image.includes('placeholder') && !rawTrendingForYou.image.includes('picsum.photos')) {
@@ -1070,6 +1125,41 @@ export default function HomeScreen() {
   const tasteDriftLevel = useRecommendationsStore(s => s.tasteDriftLevel);
   const registerRecommendationShown = useRecommendationsStore(s => s.registerRecommendationShown);
 
+  const [rowType, setRowType] = useState<'gems' | 'favorites' | null>(null);
+
+  useEffect(() => {
+    const hasGems = hiddenGems.length > 0;
+    const hasFavorites = forgottenFavorites.length > 0;
+
+    if (hasGems && hasFavorites) {
+      const topArtistName = topArtists[0]?.title || 'Aura';
+      const dayOfYear = getDayOfYear(new Date());
+      const seedString = `${topArtistName}-${dayOfYear}`;
+      const userHash = getStringHash(seedString);
+      const normalizedScore = (userHash % 1000) / 1000;
+
+      const listenerType = listeningDNA?.listenerType || 'Balanced';
+      let gemsThreshold = 0.50;
+      if (listenerType === 'Explorer') {
+        gemsThreshold = 0.70;
+      } else if (listenerType === 'Loyalist') {
+        gemsThreshold = 0.30;
+      }
+
+      if (normalizedScore < gemsThreshold) {
+        setRowType('gems');
+      } else {
+        setRowType('favorites');
+      }
+    } else if (hasGems) {
+      setRowType('gems');
+    } else if (hasFavorites) {
+      setRowType('favorites');
+    } else {
+      setRowType(null);
+    }
+  }, [hiddenGems, forgottenFavorites, topArtists, listeningDNA]);
+
   // Fatigue protection registration on feed visibility/load
   useEffect(() => {
     dailyMixes.forEach(s => registerRecommendationShown(s.id));
@@ -1080,7 +1170,12 @@ export default function HomeScreen() {
     if (trendingForYou) {
       registerRecommendationShown(trendingForYou.id);
     }
-  }, [dailyMixes, madeForYou, becauseYouLike, rediscover, recentlyLoved, trendingForYou, registerRecommendationShown]);
+    if (rowType === 'gems') {
+      hiddenGems.forEach(s => registerRecommendationShown(s.id));
+    } else if (rowType === 'favorites') {
+      forgottenFavorites.forEach(s => registerRecommendationShown(s.id));
+    }
+  }, [dailyMixes, madeForYou, becauseYouLike, rediscover, recentlyLoved, trendingForYou, registerRecommendationShown, rowType, hiddenGems, forgottenFavorites]);
   const favoriteArtists = useMemo(() => {
     return rawTopArtists
       .filter((artist) => artist.score > 0)
@@ -1373,18 +1468,11 @@ export default function HomeScreen() {
       .slice(0, 10);
   }, [rawTopAlbums, history]);
 
-  const currentTrack = usePlayerStore(s => s.currentTrack);
-  const isPlaying = usePlayerStore(s => s.isPlaying);
-
   const handlePlayPress = useCallback((item: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     
     if (item.isSeed && item.seed) {
-      if (item.seed.type === 'radio' || item.seed.type === 'playlist' || item.seed.type === 'artist') {
-        goPlaylist(item.seed.id);
-      } else {
-        handlePlaySeed(item.seed);
-      }
+      handlePlaySeed(item.seed);
       return;
     }
 
@@ -1431,7 +1519,7 @@ export default function HomeScreen() {
         {/* Swipeable Hero Featured Cards or Onboarding */}
         {heroSlides.length > 0 ? (
           <MaterialEntrance delay={100}>
-            <SwipeableHeroCard albums={heroSlides} onPlay={handlePlayPress} />
+            <SwipeableHeroCard albums={heroSlides} onPlay={handlePlayPress} onPressCard={(id: string) => goPlaylist(id)} />
           </MaterialEntrance>
         ) : (
           <MaterialEntrance delay={100}>
@@ -1474,21 +1562,13 @@ export default function HomeScreen() {
               style={s.hzScroll}
               contentContainerStyle={s.hzScrollContent}
             >
-              {continueListeningTracks.map((track) => {
-                const candidateCanonical = getCanonicalTrackId({ id: track.id, title: track.title, artist: track.artist });
-                const isPlayingNow = isPlaying && currentTrack && getCanonicalTrackId(currentTrack) === candidateCanonical;
-                const isPausedNow = !isPlaying && currentTrack && getCanonicalTrackId(currentTrack) === candidateCanonical;
-
-                return (
-                  <ContinueListeningCard
-                    key={track.id}
-                    track={track}
-                    isPlaying={isPlayingNow}
-                    isPaused={isPausedNow}
-                    onPress={() => handlePlayCLTrack(track)}
-                  />
-                );
-              })}
+              {continueListeningTracks.map((track) => (
+                <ContinueListeningCard
+                  key={track.id}
+                  track={track}
+                  onPress={() => handlePlayCLTrack(track)}
+                />
+              ))}
             </ScrollView>
           </MaterialEntrance>
         )}
@@ -1506,19 +1586,13 @@ export default function HomeScreen() {
               style={s.hzScroll}
               contentContainerStyle={s.hzScrollContent}
             >
-              {recentlyPlayedTracks.map((track) => {
-                const candidateCanonical = getCanonicalTrackId({ id: track.id, title: track.title, artist: track.artist });
-                const isPlayingNow = isPlaying && currentTrack && getCanonicalTrackId(currentTrack) === candidateCanonical;
-
-                return (
-                  <RecentlyPlayedCard
-                    key={track.playedAt}
-                    track={track}
-                    isPlaying={isPlayingNow}
-                    onPress={() => handlePlayRPTrack(track)}
-                  />
-                );
-              })}
+              {recentlyPlayedTracks.map((track) => (
+                <RecentlyPlayedCard
+                  key={track.playedAt}
+                  track={track}
+                  onPress={() => handlePlayRPTrack(track)}
+                />
+              ))}
             </ScrollView>
           </MaterialEntrance>
         )}
@@ -1545,25 +1619,6 @@ export default function HomeScreen() {
           </MaterialEntrance>
         )}
 
-        {/* Made For You */}
-        {madeForYou && madeForYou.length > 0 && (
-          <MaterialEntrance delay={300}>
-            <View style={s.madeForYouSection}>
-              <SectionHeader title="Made For You" />
-              {madeForYou.map((seed, idx) => (
-                <BentoCard
-                  key={`${seed.id}-${idx}`}
-                  image={seed.image}
-                  tag={seed.type === 'playlist' ? 'PERSONALIZED' : 'RECOMMENDED'}
-                  title={seed.title}
-                  subtitle={seed.reason || 'Personalized mix based on your taste profile.'}
-                  onPress={() => goPlaylist(seed.id)}
-                />
-              ))}
-            </View>
-          </MaterialEntrance>
-        )}
-
         {/* Daily Mixes */}
         {dailyMixes && dailyMixes.length > 0 && (
           <MaterialEntrance delay={310}>
@@ -1583,6 +1638,83 @@ export default function HomeScreen() {
                 />
               ))}
             </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Hidden Gems OR Forgotten Favorites */}
+        {rowType !== null && (rowType === 'gems' ? hiddenGems.length > 0 : forgottenFavorites.length > 0) && (
+          <MaterialEntrance delay={315}>
+            <SectionHeader title={rowType === 'gems' ? "Hidden Gems" : "Forgotten Favorites"} />
+            <ScrollView
+              horizontal
+              contentInsetAdjustmentBehavior="automatic"
+              showsHorizontalScrollIndicator={false}
+              style={s.hzScroll}
+              contentContainerStyle={s.hzScrollContent}
+            >
+              {(rowType === 'gems' ? hiddenGems : forgottenFavorites).map((item, idx) => (
+                <SeedTrackCard
+                  key={`${item.id}-${idx}`}
+                  seed={item}
+                  onPress={() => handlePlaySeed(item)}
+                />
+              ))}
+            </ScrollView>
+          </MaterialEntrance>
+        )}
+
+        {/* Library Cleanup Card */}
+        {healthReport && healthReport.storageWasteBytes > 250 * 1024 * 1024 && (
+          <MaterialEntrance delay={305}>
+            <View style={s.cleanupContainer}>
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  router.push('/library-health');
+                }}
+                activeOpacity={0.9}
+              >
+                <PremiumGlass r={28} blur={50} gloss gradient style={s.cleanupGlass}>
+                  <View style={s.cleanupContent}>
+                    <View style={s.cleanupTextSection}>
+                      <Text style={s.cleanupTag}>LIBRARY CLEANUP</Text>
+                      <Text style={s.cleanupTitle}>
+                        Recover {formatBytes(healthReport.storageWasteBytes)}
+                      </Text>
+                      <Text style={s.cleanupSub}>
+                        {duplicateGroups.length} duplicate songs detected
+                      </Text>
+                    </View>
+
+                    {/* Circular Progress Ring for Health Score */}
+                    <View style={s.cleanupScoreContainer}>
+                      <View style={s.scoreCircle}>
+                        <Text style={s.scoreText}>{healthReport.healthScore}</Text>
+                      </View>
+                    </View>
+                  </View>
+                </PremiumGlass>
+              </TouchableOpacity>
+            </View>
+          </MaterialEntrance>
+        )}
+
+        {/* Made For You */}
+        {madeForYou && madeForYou.length > 0 && (
+          <MaterialEntrance delay={300}>
+            <View style={s.madeForYouSection}>
+              <SectionHeader title="Made For You" />
+              {madeForYou.map((seed, idx) => (
+                <BentoCard
+                  key={`${seed.id}-${idx}`}
+                  image={seed.image}
+                  tag={seed.type === 'playlist' ? 'PERSONALIZED' : 'RECOMMENDED'}
+                  title={seed.title}
+                  subtitle={seed.reason || 'Personalized mix based on your taste profile.'}
+                  onPress={() => goPlaylist(seed.id)}
+                />
+              ))}
+            </View>
           </MaterialEntrance>
         )}
 
@@ -2481,5 +2613,68 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: -0.1,
+  },
+
+  // Library Cleanup Card Styles
+  cleanupContainer: {
+    marginHorizontal: PAD,
+    marginBottom: 28,
+    marginTop: 12,
+  },
+  cleanupGlass: {
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  cleanupContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 22,
+  },
+  cleanupTextSection: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  cleanupTag: {
+    color: C.primary,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    marginBottom: 6,
+  },
+  cleanupTitle: {
+    color: C.text,
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+    marginBottom: 4,
+  },
+  cleanupSub: {
+    color: C.textSecondary,
+    fontSize: 13,
+    fontWeight: '500',
+    opacity: 0.6,
+  },
+  cleanupScoreContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 3,
+    borderColor: 'rgba(191,90,242,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scoreCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(191,90,242,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scoreText: {
+    color: C.primary,
+    fontSize: 20,
+    fontWeight: '800',
   },
 });

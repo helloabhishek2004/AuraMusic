@@ -21,6 +21,7 @@ export interface MusicTrack {
   source?: string;
   artistId?: string;
   albumId?: string;
+  sourceFetchedAt?: number;
 }
 
 export interface ArtistDetails {

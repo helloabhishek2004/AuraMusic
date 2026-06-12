@@ -15,6 +15,7 @@ export class PlaybackController {
   private static isInitialized = false;
   private static lastState: PlaybackState | null = null;
   private static healingInProgress = new Set<string>();
+  private static consecutiveFailures = 0;
 
   // Analytics Session State
   private static sessionTrackId: string | null = null;
@@ -315,6 +316,10 @@ export class PlaybackController {
       const store = usePlayerStore.getState();
       const playing = data.playing;
       
+      if (playing) {
+        PlaybackController.consecutiveFailures = 0;
+      }
+      
       if (store.isPlaying !== playing) {
         store.setStatus(playing ? "playing" : "paused");
       }
@@ -326,8 +331,13 @@ export class PlaybackController {
       const store = usePlayerStore.getState();
       const currentTrack = store.currentTrack;
 
+      try {
+        const { useTelemetryStore } = require("../store/telemetry.store");
+        useTelemetryStore.getState().incrementMetric("sourceErrorCount");
+      } catch (e) {}
+
       // Self-healing: If this is an online streaming track, attempt to re-resolve the stream URL and resume
-      if (currentTrack && !currentTrack.isLocal && currentTrack.id) {
+      if (currentTrack && currentTrack.id && !currentTrack.isLocal) {
         if (PlaybackController.healingInProgress.has(currentTrack.id)) {
           if (typeof __DEV__ !== "undefined" && __DEV__) {
             console.info(`[PlayerController] Healing already in progress for ${currentTrack.id}, ignoring duplicate.`);
@@ -355,8 +365,8 @@ export class PlaybackController {
           usePlayerStore.setState({ isTransitioning: false, isBuffering: true });
 
           // 4. Resolve a fresh signed stream URL from the backend (bypassing caches)
-          const { resolveAudioOnly } = require("../utils/track-resolver");
-          const resolvedTrack = await resolveAudioOnly({ ...currentTrack, url: "" }, null, true);
+          const { ensurePlayableTrack } = require("./source-authority");
+          const resolvedTrack = await ensurePlayableTrack({ ...currentTrack, url: "" });
           
           if (resolvedTrack && resolvedTrack.url && resolvedTrack.url.startsWith("http")) {
             console.info(`[PlayerController] Successfully resolved fresh stream URL: ${resolvedTrack.url.substring(0, 60)}...`);
@@ -380,9 +390,10 @@ export class PlaybackController {
             // [Aura_Ownership] Reset status to playing after successful self-healing.
             // Without this, the store stays in "error" state even though playback
             // was recovered — causing the UI to show an error banner indefinitely.
-            usePlayerStore.getState().setStatus("playing");
+            usePlayerStore.setState({ status: "playing" });
             
             console.info("[PlayerController] Self-healing completed. Resumed playback successfully!");
+            PlaybackController.consecutiveFailures = 0;
             return; // Recovered successfully!
           }
         } catch (healError: any) {
@@ -393,13 +404,41 @@ export class PlaybackController {
       }
 
       // Default error state fallback if self-healing is not applicable or fails
-      store.setStatus("error");
-      usePlayerStore.setState({ 
-        error: error.message || "Native playback error",
-        isBuffering: false,
-        isTransitioning: false,
-        isPlaying: false
-      });
+      PlaybackController.consecutiveFailures++;
+      const limit = Math.min(store.queue.length || 1, 5);
+      console.warn(`[PlayerController] Playback error on track, consecutive failure count: ${PlaybackController.consecutiveFailures}/${limit}`);
+
+      if (PlaybackController.consecutiveFailures >= limit) {
+        console.error(`[PlayerController] Consecutive failures limit reached (${limit}). Stopping playback.`);
+        PlaybackController.consecutiveFailures = 0; // Reset consecutive failures
+        
+        store.setStatus("error");
+        usePlayerStore.setState({ 
+          error: error.message || "Playback failed: too many consecutive errors",
+          isBuffering: false,
+          isTransitioning: false,
+          isPlaying: false
+        });
+        try {
+          await TrackPlayer.stop();
+        } catch (stopErr) {
+          console.warn("[PlayerController] Failed to stop player on failures limit", stopErr);
+        }
+      } else {
+        // Automatically skip to the next track
+        console.info(`[PlayerController] Auto-skipping to next track (failures: ${PlaybackController.consecutiveFailures}/${limit})`);
+        
+        usePlayerStore.setState({ 
+          isBuffering: false,
+          isTransitioning: false
+        });
+        
+        try {
+          await store.next();
+        } catch (nextErr) {
+          console.error("[PlayerController] Failed to auto-skip to next track", nextErr);
+        }
+      }
     });
 
     // 3. Media Item Transition (Confirmation Layer Only)
@@ -438,8 +477,8 @@ export class PlaybackController {
 
         if (!mediaId) return;
 
-        const newIndex = store.queue.findIndex((t: PlayerTrack) => t.id === mediaId);
-        if (newIndex === -1) return;
+        const newIndex = store.queue.findIndex((t: PlayerTrack) => t && t.id === mediaId);
+        if (newIndex < 0 || newIndex >= store.queue.length) return;
 
         // ── Transition Guard ──────────────────────────────────────────
         // If a JS operation owns the current transition, check whether this MIT
@@ -455,6 +494,8 @@ export class PlaybackController {
             // MIT confirms and clears the guard. Reset progress state atomically
             // so UI never shows stale position/duration from the previous track.
             const validTrack = store.queue[newIndex];
+            if (!validTrack || !validTrack.id) return;
+            
             usePlayerStore.setState({
               currentIndex: newIndex,
               currentTrack: validTrack,
@@ -484,7 +525,7 @@ export class PlaybackController {
 
         if (isDifferentIndex || isDifferentTrack) {
           const nextTrack = store.queue[newIndex];
-          if (!nextTrack) return;
+          if (!nextTrack || !nextTrack.id) return;
 
           const preloaded = store.preloadedTrack;
           const cachedFromManager = transitionManager.getCachedTrack(nextTrack.id);
@@ -493,13 +534,17 @@ export class PlaybackController {
             preloaded : (cachedFromManager || nextTrack);
 
           const validTrack = transitionManager.validatePreload(trackToUse) ? trackToUse : nextTrack;
+          if (!validTrack || !validTrack.id) return;
 
           // Eagerly resolve unresolved URLs in-place instead of replacing the full queue
-          const { isResolvedUrl, resolveAudioOnly } = require('../utils/track-resolver');
-          if (!validTrack.isLocal && !isResolvedUrl(validTrack.url)) {
+          const { isResolvedUrl } = require('../utils/track-resolver');
+          const { isPlaceholderSource } = require('./source-validator');
+          const isLocal = validTrack.isLocal || validTrack.url?.startsWith("file://") || validTrack.url?.startsWith("content://");
+          if (!isLocal && (!isResolvedUrl(validTrack.url) || isPlaceholderSource(validTrack.url))) {
               try {
-                const resolved = await resolveAudioOnly(nextTrack, null, true);
-                if (resolved && resolved.url && isResolvedUrl(resolved.url)) {
+                const { ensurePlayableTrack } = require('./source-authority');
+                const resolved = await ensurePlayableTrack(nextTrack);
+                if (resolved && resolved.url && isResolvedUrl(resolved.url) && resolved.id) {
                   await PlaybackService.updateMediaItem(newIndex, resolved);
                   const newQueue = [...store.queue];
                   newQueue[newIndex] = resolved;
@@ -629,6 +674,40 @@ export class PlaybackController {
           await TrackPlayer.play();
           store.setStatus("playing");
         }
+      }
+    });
+
+    TrackPlayer.addEventListener(Event.MetadataReceived, (data) => {
+      try {
+        const store = usePlayerStore.getState();
+        const currentTrack = store.currentTrack;
+        if (!currentTrack || !currentTrack.id) return;
+
+        console.log("[MetadataReceived] event payload received:", data);
+
+        const updates: Partial<PlayerTrack> = {};
+        if (data.title && data.title !== currentTrack.title && data.title.trim().length > 0) {
+          updates.title = data.title;
+        }
+        if (data.artist && data.artist !== currentTrack.artist && data.artist.trim().length > 0 && data.artist !== "Local Artist" && data.artist !== "Local") {
+          updates.artist = data.artist;
+        }
+        if (data.artworkUrl && data.artworkUrl !== currentTrack.art && data.artworkUrl.trim().length > 0) {
+          updates.art = data.artworkUrl;
+        }
+        if (data.albumTitle && data.albumTitle !== currentTrack.album && data.albumTitle.trim().length > 0) {
+          updates.album = data.albumTitle;
+        }
+
+        if (Object.keys(updates).length > 0) {
+          console.log(`[PlaybackController] Updating metadata for track ${currentTrack.id}:`, updates);
+          store.updateTrackMetadata(currentTrack.id, updates);
+          
+          const { useMediaCacheStore } = require("../../cache/store/media-cache.store");
+          useMediaCacheStore.getState().cacheTrack(currentTrack, updates);
+        }
+      } catch (e) {
+        console.error("[PlaybackController] Error in MetadataReceived listener:", e);
       }
     });
 

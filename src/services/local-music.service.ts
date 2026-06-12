@@ -206,6 +206,10 @@ export class LocalMusicService {
         const s = durSec % 60;
         const timeStr = `${m}:${s.toString().padStart(2, "0")}`;
 
+        const albumArtUri = asset.albumId && Platform.OS === "android"
+          ? `content://media/external/audio/albumart/${asset.albumId}`
+          : "";
+
         const playbackUri = Platform.OS === "android"
           ? `content://media/external/audio/media/${asset.id}`
           : asset.uri;
@@ -214,7 +218,7 @@ export class LocalMusicService {
           id: asset.uri,
           title: title || filename,
           artist: "Local Artist",
-          art: "",
+          art: albumArtUri,
           isLocal: true,
           localUri: playbackUri,
           url: playbackUri,
@@ -252,11 +256,29 @@ export class LocalMusicService {
       try {
         const files = await SAF.readDirectoryAsync(currentUri);
         
+        // Pre-scan for directory-level artwork
+        let folderArt = "";
+        const commonArtworkNames = [
+          "cover.jpg", "cover.png", "cover.jpeg", 
+          "folder.jpg", "folder.png", "folder.jpeg", 
+          "albumart.jpg", "albumart.png", "albumart.jpeg", 
+          "front.jpg", "front.png", "front.jpeg"
+        ];
+        
+        for (const fileUri of files) {
+          const decoded = decodeURIComponent(fileUri).toLowerCase();
+          const filename = decoded.split("/").pop() || "";
+          if (commonArtworkNames.includes(filename)) {
+            folderArt = fileUri;
+            break;
+          }
+        }
+        
         for (const fileUri of files) {
           if (this.isHiddenFile(fileUri)) continue;
 
           if (this.isAudioFile(fileUri)) {
-            tracks.push(this.normalizeSafFile(fileUri, currentUri));
+            tracks.push(this.normalizeSafFile(fileUri, currentUri, folderArt));
           } else if (this.isDirectoryHeuristic(fileUri)) {
             queue.push(fileUri);
           }
@@ -301,6 +323,7 @@ export class LocalMusicService {
   private static normalizeSafFile(
     fileUri: string,
     parentUri: string,
+    folderArt?: string,
   ): MusicTrack {
     let decoded = "";
     try {
@@ -326,7 +349,7 @@ export class LocalMusicService {
       id: fileUri,
       title: title || filename,
       artist: "Local",
-      art: "",
+      art: folderArt || "",
       isLocal: true,
       localUri: fileUri,
       url: fileUri,

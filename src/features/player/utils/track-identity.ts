@@ -54,3 +54,9 @@ export function verifyTrackIdentity(
 ): boolean {
   return selectedId === resolvedId && resolvedId === nativeId;
 }
+
+export function getTrackArtwork(track: any): string {
+  if (!track) return "";
+  return track.art || track.artwork || track.artworkUrl || track.thumbnail || track.image || "";
+}
+

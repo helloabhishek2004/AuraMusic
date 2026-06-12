@@ -6,13 +6,14 @@ import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { MusicProvider, useNowPlayingTrack } from '../src/context/MusicContext';
 import { palette } from '../src/design/tokens';
 import { StyleSheet } from 'react-native';
-import Animated, { useSharedValue, useAnimatedStyle, interpolate, Extrapolate } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, interpolate, Extrapolate, withSpring, withTiming, runOnJS, useFrameCallback } from 'react-native-reanimated';
+import { RenderDiagnostics } from '../src/utils/render-diagnostics';
 
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts, Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
 import { Manrope_700Bold } from '@expo-google-fonts/manrope';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { GestureHandlerRootView, Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { enableFreeze } from 'react-native-screens';
 
 
@@ -38,7 +39,7 @@ import { LiquidGlass } from '../src/components/ui/liquid-glass';
 import * as Haptics from 'expo-haptics';
 
 function GlobalDownloadNotification() {
-  const notification = useDownloadStore(s => s.notification);
+  const storeNotification = useDownloadStore(s => s.notification);
   const activeTasks = useDownloadStore(s => s.activeTasks);
   const insets = useSafeAreaInsets();
 
@@ -55,49 +56,216 @@ function GlobalDownloadNotification() {
     }
   };
 
-  if (!notification || !notification.isVisible) return null;
+  // React State for Toast display
+  const [currentToast, setCurrentToast] = React.useState<any | null>(null);
+  const [queue, setQueue] = React.useState<any[]>([]);
+  const autoDismissTimer = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Shared values for animations
+  const translateY = useSharedValue(-100);
+  const opacity = useSharedValue(0);
+  const scale = useSharedValue(0.95);
+  const dragX = useSharedValue(0);
+  const dragY = useSharedValue(0);
+
+  // Reanimated style
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      opacity: opacity.value,
+      transform: [
+        { translateY: translateY.value + dragY.value },
+        { translateX: dragX.value },
+        { scale: scale.value },
+      ],
+    };
+  });
+
+  const triggerHaptic = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const handleDismissComplete = () => {
+    if (autoDismissTimer.current) {
+      clearTimeout(autoDismissTimer.current);
+      autoDismissTimer.current = null;
+    }
+    setCurrentToast(null);
+
+    // Reset shared values
+    dragX.value = 0;
+    dragY.value = 0;
+    opacity.value = 0;
+    scale.value = 0.95;
+    translateY.value = -100;
+
+    // Process next item in queue
+    setQueue(prev => {
+      if (prev.length > 0) {
+        const [next, ...rest] = prev;
+        setTimeout(() => {
+          presentToast(next);
+        }, 100);
+        return rest;
+      }
+      return [];
+    });
+  };
+
+  const presentToast = (toast: any) => {
+    if (autoDismissTimer.current) {
+      clearTimeout(autoDismissTimer.current);
+      autoDismissTimer.current = null;
+    }
+    
+    setCurrentToast(toast);
+    
+    // Reset positions
+    dragX.value = 0;
+    dragY.value = 0;
+    opacity.value = 0;
+    scale.value = 0.95;
+    translateY.value = -20; // Animate from 20px above target
+    
+    opacity.value = withTiming(1, { duration: 300 });
+    scale.value = withSpring(1, { damping: 15, stiffness: 150 });
+    translateY.value = withSpring(0, { damping: 15, stiffness: 150 }, (finished) => {
+      if (finished && toast.isComplete) {
+        runOnJS(scheduleAutoDismiss)();
+      }
+    });
+  };
+
+  const scheduleAutoDismiss = () => {
+    if (autoDismissTimer.current) {
+      clearTimeout(autoDismissTimer.current);
+    }
+    autoDismissTimer.current = setTimeout(() => {
+      triggerExitAnimation();
+    }, 3500);
+  };
+
+  const triggerExitAnimation = () => {
+    opacity.value = withTiming(0, { duration: 250 });
+    scale.value = withTiming(0.96, { duration: 250 });
+    translateY.value = withTiming(-30, { duration: 250 }, (finished) => {
+      if (finished) {
+        runOnJS(handleDismissComplete)();
+      }
+    });
+  };
+
+  const dismissToastGesture = (direction: 'up' | 'left') => {
+    'worklet';
+    runOnJS(triggerHaptic)();
+    
+    opacity.value = withTiming(0, { duration: 250 });
+    scale.value = withTiming(0.96, { duration: 250 });
+    const targetY = direction === 'up' ? -50 : 0;
+    const targetX = direction === 'left' ? -200 : 0;
+    
+    translateY.value = withTiming(targetY, { duration: 250 });
+    dragX.value = withTiming(targetX, { duration: 250 }, () => {
+      runOnJS(handleDismissComplete)();
+    });
+  };
+
+  // Gesture definition
+  const panGesture = Gesture.Pan()
+    .onUpdate((event) => {
+      // Only allow swipe left (dragX < 0) and swipe up (dragY < 0)
+      if (event.translationX < 0) {
+        dragX.value = event.translationX;
+      }
+      if (event.translationY < 0) {
+        dragY.value = event.translationY;
+      }
+    })
+    .onEnd((event) => {
+      const isSwipeUp = event.translationY < -80 || event.velocityY < -1000;
+      const isSwipeLeft = event.translationX < -80 || event.velocityX < -1000;
+      
+      if (isSwipeUp) {
+        dismissToastGesture('up');
+      } else if (isSwipeLeft) {
+        dismissToastGesture('left');
+      } else {
+        dragX.value = withSpring(0);
+        dragY.value = withSpring(0);
+      }
+    });
+
+  // Watch store notifications
+  useEffect(() => {
+    if (!storeNotification || !storeNotification.isVisible) {
+      return;
+    }
+
+    if (currentToast) {
+      if (currentToast.title === storeNotification.title) {
+        // Update in place smoothly without restarting animations
+        setCurrentToast(storeNotification);
+        if (storeNotification.isComplete && !currentToast.isComplete) {
+          scheduleAutoDismiss();
+        }
+      } else {
+        // Add to queue
+        setQueue(prev => {
+          if (prev.some(item => item.title === storeNotification.title)) {
+            return prev.map(item => item.title === storeNotification.title ? storeNotification : item);
+          }
+          return [...prev, storeNotification];
+        });
+      }
+    } else {
+      presentToast(storeNotification);
+    }
+  }, [storeNotification]);
+
+  if (!currentToast) return null;
 
   return (
-    <View style={[notiStyles.container, { top: insets.top + 10 }]}>
-      <LiquidGlass borderRadius={20} intensity={30} style={notiStyles.glass}>
-        <LinearGradient
-          colors={['rgba(26, 20, 38, 0.95)', 'rgba(12, 8, 20, 0.98)']}
-          style={StyleSheet.absoluteFill}
-        />
-        <View style={notiStyles.specular} pointerEvents="none" />
-
-        <View style={notiStyles.content}>
-          <Ionicons 
-            name={notification.isComplete ? "checkmark-circle" : "cloud-download"} 
-            size={22} 
-            color={notification.isComplete ? "#30D158" : "#BF5AF2"} 
+    <GestureDetector gesture={panGesture}>
+      <Animated.View style={[notiStyles.container, { top: insets.top + 10 }, animatedStyle]}>
+        <LiquidGlass borderRadius={20} intensity={30} style={notiStyles.glass}>
+          <LinearGradient
+            colors={['rgba(26, 20, 38, 0.95)', 'rgba(12, 8, 20, 0.98)']}
+            style={StyleSheet.absoluteFill}
           />
-          <View style={notiStyles.textWrap}>
-            <Text style={notiStyles.title} numberOfLines={1}>
-              {notification.title}
-            </Text>
-            <Text style={notiStyles.subtitle}>
-              {notification.isComplete 
-                ? "Aura Music · Finished" 
-                : `Aura Music · ${notification.progress}% · ${notification.remaining} remaining`}
-            </Text>
-          </View>
-          
-          {!notification.isComplete && (
-            <TouchableOpacity style={notiStyles.cancelBtn} onPress={handleCancel} activeOpacity={0.7}>
-              <Text style={notiStyles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+          <View style={notiStyles.specular} pointerEvents="none" />
 
-        {/* Progress Bar Line */}
-        {!notification.isComplete && (
-          <View style={notiStyles.progressTrack}>
-            <View style={[notiStyles.progressBar, { width: `${notification.progress}%` }]} />
+          <View style={notiStyles.content}>
+            <Ionicons 
+              name={currentToast.isComplete ? "checkmark-circle" : "cloud-download"} 
+              size={22} 
+              color={currentToast.isComplete ? "#30D158" : "#BF5AF2"} 
+            />
+            <View style={notiStyles.textWrap}>
+              <Text style={notiStyles.title} numberOfLines={1}>
+                {currentToast.title}
+              </Text>
+              <Text style={notiStyles.subtitle}>
+                {currentToast.isComplete 
+                  ? "Aura Music · Finished" 
+                  : `Aura Music · ${currentToast.progress}% · ${currentToast.remaining} remaining`}
+              </Text>
+            </View>
+            
+            {!currentToast.isComplete && (
+              <TouchableOpacity style={notiStyles.cancelBtn} onPress={handleCancel} activeOpacity={0.7}>
+                <Text style={notiStyles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+            )}
           </View>
-        )}
-      </LiquidGlass>
-    </View>
+
+          {/* Progress Bar Line */}
+          {!currentToast.isComplete && (
+            <View style={notiStyles.progressTrack}>
+              <View style={[notiStyles.progressBar, { width: `${currentToast.progress}%` }]} />
+            </View>
+          )}
+        </LiquidGlass>
+      </Animated.View>
+    </GestureDetector>
   );
 }
 
@@ -223,7 +391,25 @@ export default function RootLayout() {
     import('../src/features/download/services/download.manager').then(({ DownloadManager }) => {
       DownloadManager.initialize();
     });
+
+    // Initialize Library Health Center (Startup Fast Scan with 8s Delay)
+    import('../src/services/library-health.service').then(({ LibraryHealthService }) => {
+      LibraryHealthService.scheduleStartupScan();
+    });
+
+    // Start diagnostics monitoring loop
+    RenderDiagnostics.startMonitoring();
+    return () => {
+      RenderDiagnostics.stopMonitoring();
+    };
   }, []);
+
+  useFrameCallback((frameInfo) => {
+    'worklet';
+    if (frameInfo.timeSincePreviousFrame !== null && frameInfo.timeSincePreviousFrame !== undefined) {
+      RenderDiagnostics.recordUIFrame(frameInfo.timeSincePreviousFrame, frameInfo.timestamp);
+    }
+  });
 
   const [fontsLoaded, error] = useFonts({
     Inter_400Regular,
@@ -305,10 +491,13 @@ export default function RootLayout() {
                   }} 
                 />
                 <Stack.Screen name="downloads" />
+                <Stack.Screen name="download-queue" />
                 <Stack.Screen name="local_library" />
+                <Stack.Screen name="library-health" />
               </Stack>
             </Animated.View>
             <PlayerOverlay expandProgress={expandProgress} />
+            <GlobalDownloadNotification />
             </BackPriorityProvider>
           </GestureHandlerRootView>
         </MusicProvider>

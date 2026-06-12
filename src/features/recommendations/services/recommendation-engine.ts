@@ -1,4 +1,5 @@
 import { HistoryEntry, AffinityMetric, splitArtistNames } from '../../analytics/store/analytics.store';
+import { catalogTracks, catalogAlbums } from '../../../data/music-catalog';
 
 export interface RecommendationSeed {
   type: 'artist' | 'album' | 'track' | 'radio' | 'playlist';
@@ -367,3 +368,198 @@ export function generateTrendingForYou(
     confidence: Math.max(50, tasteConfidence),
   };
 }
+
+/**
+ * Generate "Hidden Gems" seeds
+ */
+export function generateHiddenGems(
+  trackAffinities: Record<string, AffinityMetric>,
+  history: HistoryEntry[],
+  excludeTrackIds: Set<string>
+): RecommendationSeed[] {
+  const candidates: RecommendationSeed[] = [];
+
+  for (const trackId of Object.keys(trackAffinities)) {
+    if (excludeTrackIds.has(trackId)) continue;
+
+    const affinity = trackAffinities[trackId];
+    if (!affinity) continue;
+
+    const playCount = affinity.playCount || 0;
+    const completionCount = affinity.completionCount || 0;
+    const completionRate = playCount > 0 ? completionCount / playCount : 0;
+
+    // Qualification: completionRate >= 0.80 and playCount >= 2
+    if (completionRate >= 0.80 && playCount >= 2) {
+      const match = history.find((h) => h.id === trackId) || catalogTracks.find((t) => t.id === trackId);
+      const title = match?.title || trackId;
+      const artistName = match?.artist || 'Unknown Artist';
+      const image = match?.art || undefined;
+
+      const liked = (affinity.likedCount || 0) > 0;
+
+      // Calculate recentPlayPenalty
+      const lastPlayedEntry = history.find((h) => h.id === trackId);
+      let recentPlayPenalty = 0;
+      if (lastPlayedEntry) {
+        const daysSinceLastPlay = (Date.now() - lastPlayedEntry.playedAt) / (24 * 60 * 60 * 1000);
+        if (daysSinceLastPlay <= 1) {
+          recentPlayPenalty = 10;
+        } else if (daysSinceLastPlay <= 3) {
+          recentPlayPenalty = 5;
+        } else if (daysSinceLastPlay <= 7) {
+          recentPlayPenalty = 3;
+        } else if (daysSinceLastPlay <= 14) {
+          recentPlayPenalty = 1;
+        }
+      }
+
+      const score = (completionRate * 8) + (liked ? 10 : 0) + Math.min(playCount, 15) - recentPlayPenalty;
+      const confidence = Math.min(100, Math.round((completionRate * 60) + (Math.min(playCount, 20) * 2)));
+
+      candidates.push({
+        type: 'track',
+        id: trackId,
+        title,
+        artistName,
+        image,
+        score,
+        reason: 'One of your most loved overlooked tracks',
+        confidence,
+        seedArtists: splitArtistNames(artistName),
+      });
+    }
+  }
+
+  // Sort candidates by score descending
+  candidates.sort((a, b) => b.score - a.score);
+
+  // Apply Diversity Cap during selection: MAX_ARTIST_SHARE = 2, MAX_ALBUM_SHARE = 2
+  const selected: RecommendationSeed[] = [];
+  const artistCounts = new Map<string, number>();
+  const albumCounts = new Map<string, number>();
+
+  for (const candidate of candidates) {
+    if (selected.length >= 25) break;
+
+    const artistKey = candidate.artistName?.toLowerCase().trim() || '';
+    // Let's resolve the album name from catalog or history to apply album diversity caps
+    const match = history.find((h) => h.id === candidate.id) || catalogTracks.find((t) => t.id === candidate.id);
+    const albumKey = (match && 'album' in match ? match.album : (match?.albumId ? catalogAlbums.find((a) => a.id === match.albumId)?.title : ''))?.toLowerCase().trim() || '';
+
+    // Check artist cap
+    const artistShare = artistCounts.get(artistKey) || 0;
+    if (artistShare >= 2) continue;
+
+    // Check album cap
+    if (albumKey) {
+      const albumShare = albumCounts.get(albumKey) || 0;
+      if (albumShare >= 2) continue;
+    }
+
+    selected.push(candidate);
+    artistCounts.set(artistKey, artistShare + 1);
+    if (albumKey) {
+      albumCounts.set(albumKey, (albumCounts.get(albumKey) || 0) + 1);
+    }
+  }
+
+  return selected;
+}
+
+/**
+ * Generate "Forgotten Favorites" seeds
+ */
+export function generateForgottenFavorites(
+  trackAffinities: Record<string, AffinityMetric>,
+  history: HistoryEntry[],
+  forgottenFavoritesShownAt: Record<string, number> = {}
+): RecommendationSeed[] {
+  const candidates: RecommendationSeed[] = [];
+  const cooldownPeriodMs = 14 * 24 * 60 * 60 * 1000; // 14 days
+
+  for (const trackId of Object.keys(trackAffinities)) {
+    // 14-day cooldown protection
+    const lastSurfaced = forgottenFavoritesShownAt[trackId] || 0;
+    if (Date.now() - lastSurfaced < cooldownPeriodMs) continue;
+
+    const affinity = trackAffinities[trackId];
+    if (!affinity) continue;
+
+    const playCount = affinity.playCount || 0;
+
+    // Qualification: playCount >= 10
+    if (playCount >= 10) {
+      const lastPlayedEntry = history.find((h) => h.id === trackId);
+      let lastPlayedTime = 0;
+      if (lastPlayedEntry) {
+        lastPlayedTime = lastPlayedEntry.playedAt;
+      }
+
+      const daysSinceLastPlayed = (Date.now() - lastPlayedTime) / (24 * 60 * 60 * 1000);
+
+      // Qualification: lastPlayed > 30 days (if history is non-empty and it is not found, treat as Infinity days ago)
+      const lastPlayedQualified = lastPlayedEntry ? daysSinceLastPlayed > 30 : history.length > 0;
+
+      if (lastPlayedQualified) {
+        const match = history.find((h) => h.id === trackId) || catalogTracks.find((t) => t.id === trackId);
+        const title = match?.title || trackId;
+        const artistName = match?.artist || 'Unknown Artist';
+        const image = match?.art || undefined;
+
+        const completionCount = affinity.completionCount || 0;
+        const completionRate = playCount > 0 ? completionCount / playCount : 0;
+
+        const score = (playCount * 2) + (completionRate * 10) + (daysSinceLastPlayed / 10);
+        const confidence = Math.min(100, Math.round((completionRate * 60) + (Math.min(playCount, 20) * 2)));
+
+        candidates.push({
+          type: 'track',
+          id: trackId,
+          title,
+          artistName,
+          image,
+          score,
+          reason: 'You used to play this a lot',
+          confidence,
+          seedArtists: splitArtistNames(artistName),
+        });
+      }
+    }
+  }
+
+  // Sort candidates by score descending
+  candidates.sort((a, b) => b.score - a.score);
+
+  // Apply Diversity Cap during selection: MAX_ARTIST_SHARE = 2, MAX_ALBUM_SHARE = 2
+  const selected: RecommendationSeed[] = [];
+  const artistCounts = new Map<string, number>();
+  const albumCounts = new Map<string, number>();
+
+  for (const candidate of candidates) {
+    if (selected.length >= 25) break;
+
+    const artistKey = candidate.artistName?.toLowerCase().trim() || '';
+    const match = history.find((h) => h.id === candidate.id) || catalogTracks.find((t) => t.id === candidate.id);
+    const albumKey = (match && 'album' in match ? match.album : (match?.albumId ? catalogAlbums.find((a) => a.id === match.albumId)?.title : ''))?.toLowerCase().trim() || '';
+
+    // Check artist cap
+    const artistShare = artistCounts.get(artistKey) || 0;
+    if (artistShare >= 2) continue;
+
+    // Check album cap
+    if (albumKey) {
+      const albumShare = albumCounts.get(albumKey) || 0;
+      if (albumShare >= 2) continue;
+    }
+
+    selected.push(candidate);
+    artistCounts.set(artistKey, artistShare + 1);
+    if (albumKey) {
+      albumCounts.set(albumKey, (albumCounts.get(albumKey) || 0) + 1);
+    }
+  }
+
+  return selected;
+}
+

@@ -38,6 +38,7 @@ import { glass, motion, palette, radius, spacing } from "@/src/design/tokens";
 
 // Utils
 import { parseDuration } from "@/src/utils/time";
+import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
 
 // Components
 import { AtmosphericBackground } from "@/src/components/ui/atmospheric-background";
@@ -297,7 +298,7 @@ function AlbumScreen() {
       <MediaListItem
         title={item.title}
         subtitle={item.artist}
-        image={item.art}
+        image={getTrackArtwork(item)}
         meta={item.duration}
         active={currentTrack?.id === item.id}
         onPress={() => handleTrackPress(item)}

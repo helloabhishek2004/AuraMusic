@@ -20,6 +20,7 @@
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
 import { useMusic } from "@/src/context/MusicContext";
 import { PlayerTrack } from "@/src/features/player/types/player";
+import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { useRecentSearchStore } from "@/src/features/search/store/recent-search.store";
 import { RecentSearchItem } from "@/src/features/search/types/recent-search";
@@ -451,9 +452,9 @@ const SongRow = ({
             accessibilityLabel={`Play ${song.title} by ${song.artist}`}
           >
             {/* Artwork */}
-            {song.art ? (
+            {getTrackArtwork(song) ? (
               <Image
-                source={{ uri: song.art }}
+                source={{ uri: getTrackArtwork(song) }}
                 style={s.songArt}
                 contentFit="cover"
                 transition={200}
@@ -806,7 +807,7 @@ const TopResultCard = ({
               {/* Artwork */}
               <View style={s.topArtWrap}>
                 <Image
-                  source={{ uri: song.art || song.thumbnail }}
+                  source={{ uri: getTrackArtwork(song) }}
                   style={s.topArt}
                   contentFit="cover"
                   transition={300}

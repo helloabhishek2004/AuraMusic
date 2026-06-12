@@ -19,6 +19,11 @@ export class TrackOrchestrator {
         forceRefresh?: boolean,
         prefetchNext?: boolean 
     } = {}): Promise<PlayerTrack> {
+        const isLocal = track.isLocal || track.url?.startsWith("file://") || track.url?.startsWith("content://");
+        if (isLocal) {
+            return track;
+        }
+
         const cacheStore = useMediaCacheStore.getState();
         const cached = cacheStore.getCachedTrack(track.id);
 
@@ -57,6 +62,8 @@ export class TrackOrchestrator {
      */
     static async prefetchMetadata(track: PlayerTrack) {
         if (!track) return;
+        const isLocal = track.isLocal || track.url?.startsWith("file://") || track.url?.startsWith("content://");
+        if (isLocal) return;
         
         const cacheStore = useMediaCacheStore.getState();
         const cached = cacheStore.getCachedTrack(track.id);
@@ -91,6 +98,9 @@ export class TrackOrchestrator {
      * Non-blocking background enrichment
      */
     private static async backgroundEnrich(track: PlayerTrack) {
+        const isLocal = track.isLocal || track.url?.startsWith("file://") || track.url?.startsWith("content://");
+        if (isLocal) return;
+
         try {
             const resolved = await resolveAudioOnly(track);
             useMediaCacheStore.getState().cacheTrack(resolved);

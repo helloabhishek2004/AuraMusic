@@ -20,6 +20,7 @@
  */
 
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
+import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
 import { getLikedTracks } from "@/src/features/likes/utils/get-liked-tracks";
 import { useMusic } from "@/src/context/MusicContext";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
@@ -748,7 +749,7 @@ const TrackRow = memo(({
         id: track.id,
         title: track.title,
         artist: track.artist,
-        art: track.image || track.art || "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=400",
+        art: getTrackArtwork(track),
         url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
         duration: 240,
         dominantColors: [C.primary, C.primaryMid],
@@ -1033,7 +1034,7 @@ const DownloadedTrackRow = memo(({
         id: track.id,
         title: track.title,
         artist: track.artist,
-        art: track.art || "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=400",
+        art: getTrackArtwork(track),
         url: track.url,
         duration: track.duration || 0,
         isLocal: true,
@@ -1072,7 +1073,7 @@ const DownloadedTrackRow = memo(({
 
               <View style={s.trackArtWrap}>
                 <Image
-                  source={{ uri: track.art || "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=200" }}
+                  source={{ uri: getTrackArtwork(track) }}
                   style={s.trackArt}
                   contentFit="cover"
                   transition={220}
