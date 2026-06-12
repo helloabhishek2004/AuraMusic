@@ -31,6 +31,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useScrollToTopOnTabPress } from "@/src/hooks/use-scroll-to-top";
+import { FlashList } from "@shopify/flash-list";
 import React, {
   memo,
   useCallback,
@@ -1115,7 +1116,7 @@ const DownloadedTrackRow = memo(({
 // ─── MAIN SCREEN ──────────────────────────────────────────────────────────────
 
 export default function LibraryScreen() {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<any>(null);
   useScrollToTopOnTabPress(scrollRef);
   const insets = useSafeAreaInsets();
   const { bottomPadding } = usePlaybackInsets();
@@ -1143,67 +1144,108 @@ export default function LibraryScreen() {
     return () => clearTimeout(t);
   }, []);
 
+  const listData = useMemo(() => {
+    const list = [];
+    list.push({ id: 'header', type: 'header' });
+    list.push({ id: 'hero', type: 'hero' });
+    list.push({ id: 'bento', type: 'bento' });
+    list.push({ id: 'local_library', type: 'local_library' });
+    list.push({ id: 'recent_downloads_header', type: 'recent_downloads_header' });
+    
+    if (recentDownloads.length > 0) {
+      recentDownloads.forEach((track, idx) => {
+        list.push({ id: `download-${track.id}`, type: 'downloaded_track', track, idx });
+      });
+    } else {
+      list.push({ id: 'empty_downloads', type: 'empty_downloads' });
+    }
+    
+    list.push({ id: 'my_playlists', type: 'my_playlists' });
+    
+    return list;
+  }, [recentDownloads]);
+
+  const renderLibraryItem = useCallback(({ item }: any) => {
+    switch (item.type) {
+      case 'header':
+        return (
+          <View style={[s.header, { paddingTop: insets.top + (isTablet ? 24 : 18) }]}>
+            <WordRevealTitle text="Library" delay={0} />
+            <Animated.Text style={[s.headerSub, { opacity: subOp, transform: [{ translateY: subY }] }]}>
+              Your music, curated.
+            </Animated.Text>
+          </View>
+        );
+      case 'hero':
+        return (
+          <View style={{ paddingHorizontal: PAD, paddingTop: 22, marginBottom: 16 }}>
+            <HeroCard onPress={handlePlayLikedSongs} />
+          </View>
+        );
+      case 'bento':
+        return (
+          <View style={{ paddingHorizontal: PAD, marginBottom: 16 }}>
+            <BentoRow
+              onCreatePlaylist={() => router.push("/create_playlist")}
+              onDownloads={() => router.push("/downloads")}
+            />
+          </View>
+        );
+      case 'local_library':
+        return (
+          <View style={{ paddingHorizontal: PAD, marginBottom: 16 }}>
+            <LocalLibraryCard onPress={() => router.push("/local_library")} />
+          </View>
+        );
+      case 'recent_downloads_header':
+        return (
+          <View style={{ paddingHorizontal: PAD }}>
+            <SectionHeader
+              title="Recent Downloads"
+              accentColor={C.primary}
+              delay={160}
+              action={() => router.push("/downloads")}
+              actionLabel="View All"
+            />
+          </View>
+        );
+      case 'downloaded_track':
+        return (
+          <View style={{ paddingHorizontal: PAD, marginBottom: 10 }}>
+            <DownloadedTrackRow track={item.track} index={item.idx} delay={190 + item.idx * 52} />
+          </View>
+        );
+      case 'empty_downloads':
+        return (
+          <View style={{ paddingHorizontal: PAD }}>
+            <EmptyDownloadsState />
+          </View>
+        );
+      case 'my_playlists':
+        return (
+          <View style={{ paddingHorizontal: PAD }}>
+            <MyPlaylistsSection onOpen={goPlaylist} />
+          </View>
+        );
+      default:
+        return null;
+    }
+  }, [insets.top, subOp, subY, handlePlayLikedSongs, router, goPlaylist]);
+
   return (
     <View style={s.root}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       <AmbientBG />
 
-      <ScrollView
+      <FlashList
         ref={scrollRef}
-        showsVerticalScrollIndicator={false}
+        data={listData}
+        renderItem={renderLibraryItem}
+        keyExtractor={(item) => item.id}
         contentContainerStyle={{ paddingBottom: bottomPadding + 40 }}
-        scrollIndicatorInsets={{ bottom: bottomPadding + 40 }}
-        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
         overScrollMode="never"
-      >
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <View style={[s.header, { paddingTop: insets.top + (isTablet ? 24 : 18) }]}>
-          {/* Word-by-word title */}
-          <WordRevealTitle text="Library" delay={0} />
-
-          {/* Subtitle slides in after title */}
-          <Animated.Text style={[s.headerSub, { opacity: subOp, transform: [{ translateY: subY }] }]}>
-            Your music, curated.
-          </Animated.Text>
-        </View>
-
-        {/* ── Page content ────────────────────────────────────────────────── */}
-        <View style={s.content}>
-          {/* Hero */}
-          <HeroCard onPress={handlePlayLikedSongs} />
-
-          {/* Bento */}
-          <BentoRow
-            onCreatePlaylist={() => router.push("/create_playlist")}
-            onDownloads={() => router.push("/downloads")}
-          />
-
-          {/* Local Library */}
-          <LocalLibraryCard onPress={() => router.push("/local_library")} />
-
-          {/* Recent Downloads */}
-          <SectionHeader
-            title="Recent Downloads"
-            accentColor={C.primary}
-            delay={160}
-            action={() => router.push("/downloads")}
-            actionLabel="View All"
-          />
-
-          {recentDownloads.length > 0 ? (
-            <View style={{ gap: 10, marginBottom: 6 }}>
-              {recentDownloads.map((track, idx) => (
-                <DownloadedTrackRow key={track.id} track={track} index={idx} delay={190 + idx * 52} />
-              ))}
-            </View>
-          ) : (
-            <EmptyDownloadsState />
-          )}
-
-          {/* My Playlists */}
-          <MyPlaylistsSection onOpen={goPlaylist} />
-        </View>
-      </ScrollView>
+      />
     </View>
   );
 }

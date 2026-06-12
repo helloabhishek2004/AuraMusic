@@ -3,6 +3,9 @@ import { useWindowDimensions } from 'react-native';
 
 export function useResponsiveMetrics() {
   const { width, height, fontScale } = useWindowDimensions();
+  if (typeof __DEV__ !== "undefined" && __DEV__) {
+    console.info(`[useResponsiveMetrics] Hook evaluated: width=${width}, height=${height}, fontScale=${fontScale}`);
+  }
 
   return useMemo(() => {
     const isLandscape = width > height;

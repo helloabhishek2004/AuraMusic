@@ -28,7 +28,7 @@ const activeRefreshRate = makeMutable(60.0);
 let jsLastFrameTime = 0;
 let jsFrameCounter = 0;
 let jsFpsLastTime = 0;
-let isMonitoring = false;
+const isMonitoringShared = makeMutable(false);
 
 export const RenderDiagnostics = {
   // Shared values exposed for UI consumption
@@ -47,8 +47,8 @@ export const RenderDiagnostics = {
   activeRefreshRate,
 
   startMonitoring() {
-    if (isMonitoring) return;
-    isMonitoring = true;
+    if (isMonitoringShared.value) return;
+    isMonitoringShared.value = true;
 
     // Start JS Thread frame pacing loop
     jsLastFrameTime = performance.now();
@@ -58,7 +58,7 @@ export const RenderDiagnostics = {
     jsTotalFramesRecorded.value = 0;
 
     const jsLoop = (now: number) => {
-      if (!isMonitoring) return;
+      if (!isMonitoringShared.value) return;
       
       const delta = now - jsLastFrameTime;
       jsLastFrameTime = now;
@@ -101,7 +101,7 @@ export const RenderDiagnostics = {
   },
 
   stopMonitoring() {
-    isMonitoring = false;
+    isMonitoringShared.value = false;
   },
 
   resetTelemetry() {
@@ -131,6 +131,7 @@ export const RenderDiagnostics = {
   // Record UI-thread frame durations (called from useFrameCallback worklet)
   recordUIFrame(timeSinceLastFrameMs: number, timestampMs: number) {
     "worklet";
+    if (!isMonitoringShared.value) return;
     // Prevent double-counting if the callback triggers multiple times in the same frame tick
     if (timestampMs === uiLastTimestamp.value) return;
     uiLastTimestamp.value = timestampMs;

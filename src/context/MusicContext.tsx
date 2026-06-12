@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useEffect, useRef } from "react";
 import { SharedValue } from "react-native-reanimated";
 import { usePlayerStore } from "../features/player/store/player.store";
 import { PlayerTrack, RepeatMode } from "../features/player/types/player";
@@ -71,9 +71,17 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setVolumeStore = usePlayerStore((s) => s.setVolume);
   const preloadTrackStore = usePlayerStore((s) => s.preloadTrack);
 
+  const memoizedTrack = useMemo(() => {
+    if (!currentTrack) return null;
+    return {
+      ...currentTrack,
+      dominantColors: currentTrack.dominantColors || ["#bf5af2", "#7b2fbe"]
+    };
+  }, [currentTrack]);
+
   const playbackValue = useMemo<PlaybackStateContextType>(
     () => ({
-      currentTrack: currentTrack ? { ...currentTrack, dominantColors: currentTrack.dominantColors || ["#bf5af2", "#7b2fbe"] } : null,
+      currentTrack: memoizedTrack,
       isPlaying,
       isBuffering,
       isLoading: status === "loading",
@@ -81,7 +89,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       isShuffle,
       isPlayerReady: true,
     }),
-    [currentTrack, isPlaying, isBuffering, status, repeatMode, isShuffle],
+    [memoizedTrack, isPlaying, isBuffering, status, repeatMode, isShuffle],
   );
 
   const progressValue = useMemo<MusicProgressContextType>(
@@ -95,35 +103,49 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const toggleRepeat = useCallback(async () => {
+    const currentRepeatMode = usePlayerStore.getState().repeatMode;
     let nextMode: RepeatMode = "off";
-    if (repeatMode === "off") nextMode = "queue";
-    else if (repeatMode === "queue") nextMode = "track";
-    else if (repeatMode === "track") nextMode = "off";
+    if (currentRepeatMode === "off") nextMode = "queue";
+    else if (currentRepeatMode === "queue") nextMode = "track";
+    else if (currentRepeatMode === "track") nextMode = "off";
 
     setRepeatModeStore(nextMode);
-  }, [repeatMode, setRepeatModeStore]);
+  }, [setRepeatModeStore]);
 
   const actionsValue = useMemo<MusicActionsContextType>(
-    () => ({
-      play: async (track?: Track) => track ? setTrackStore(track) : playStore(),
-      pause: pauseStore,
-      next: nextStore,
-      prev: previousStore,
-      seek: async (p: number) => {
-        const duration = usePlayerStore.getState().duration;
-        await seekStore(p * duration);
-      },
-      setTrack: setTrackStore,
-      setQueue: setQueueStore,
-      playNext: playNextStore,
-      addToQueue: addToQueueStore,
-      toggleRepeat,
-      toggleShuffle: async () => { toggleShuffleStore(); },
-      setVolume: setVolumeStore,
-      preloadTrack: preloadTrackStore,
-    }),
+    () => {
+      if (typeof __DEV__ !== "undefined" && __DEV__) {
+        console.info("[MusicProvider] actionsValue recreated");
+      }
+      return {
+        play: async (track?: Track) => track ? setTrackStore(track) : playStore(),
+        pause: pauseStore,
+        next: nextStore,
+        prev: previousStore,
+        seek: async (p: number) => {
+          const duration = usePlayerStore.getState().duration;
+          await seekStore(p * duration);
+        },
+        setTrack: setTrackStore,
+        setQueue: setQueueStore,
+        playNext: playNextStore,
+        addToQueue: addToQueueStore,
+        toggleRepeat,
+        toggleShuffle: async () => { toggleShuffleStore(); },
+        setVolume: setVolumeStore,
+        preloadTrack: preloadTrackStore,
+      };
+    },
     [setTrackStore, playStore, pauseStore, nextStore, previousStore, seekStore, setQueueStore, toggleRepeat, toggleShuffleStore, setVolumeStore, preloadTrackStore],
   );
+
+  const providerRenderCount = useRef(0);
+  providerRenderCount.current += 1;
+  useEffect(() => {
+    if (typeof __DEV__ !== "undefined" && __DEV__) {
+      console.info(`[MusicProvider] Rendered: count = ${providerRenderCount.current}, currentTrackId = ${currentTrack?.id}, isPlaying = ${isPlaying}`);
+    }
+  });
 
   return (
     <PlaybackStateContext.Provider value={playbackValue}>

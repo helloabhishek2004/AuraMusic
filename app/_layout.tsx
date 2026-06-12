@@ -374,6 +374,12 @@ function StartupPermissionGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout() {
+  const rootRenderCount = React.useRef(0);
+  rootRenderCount.current += 1;
+  if (typeof __DEV__ !== "undefined" && __DEV__) {
+    console.info(`[RootLayout] Rendered: count = ${rootRenderCount.current}`);
+  }
+
   useEffect(() => {
     // Initialize audio engine and bridge
     PlaybackService.setupPlayer();
@@ -398,7 +404,9 @@ export default function RootLayout() {
     });
 
     // Start diagnostics monitoring loop
-    RenderDiagnostics.startMonitoring();
+    if (__DEV__) {
+      RenderDiagnostics.startMonitoring();
+    }
     return () => {
       RenderDiagnostics.stopMonitoring();
     };

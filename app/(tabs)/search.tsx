@@ -35,6 +35,7 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams } from "expo-router";
+import { FlashList } from "@shopify/flash-list";
 import React, {
   useCallback,
   useEffect,
@@ -1337,7 +1338,7 @@ const AnimatedBg = () => {
 const SEARCH_CATEGORIES = ["All", "Songs", "Artists", "Albums"];
 
 export default function SearchScreen() {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<any>(null);
   useScrollToTopOnTabPress(scrollRef);
   const insets = useSafeAreaInsets();
   const { bottomPadding } = usePlaybackInsets();
@@ -1559,6 +1560,241 @@ export default function SearchScreen() {
   // Bottom safe zone — where thumb reaches. Keep interactive elements above insets.bottom + 80
   const scrollBottom = bottomPadding;
 
+  const chunkedAlbums = useMemo(() => {
+    const chunks = [];
+    for (let i = 0; i < categoryFilteredAlbums.length; i += 2) {
+      chunks.push(categoryFilteredAlbums.slice(i, i + 2));
+    }
+    return chunks;
+  }, [categoryFilteredAlbums]);
+
+  const listData = useMemo(() => {
+    const list = [];
+    
+    if (query.length === 0) {
+      if (recentSearches.length > 0) {
+        list.push({ id: 'recent_searches', type: 'recent_searches', data: recentSearches });
+      } else {
+        list.push({ id: 'empty_recent', type: 'empty_recent' });
+      }
+    } else {
+      if (isLoading) {
+        list.push({ id: 'loading_skeleton', type: 'loading_skeleton' });
+      } else if (error) {
+        list.push({ id: 'error_state', type: 'error_state', error });
+      } else if (!hasResults) {
+        list.push({ id: 'no_results', type: 'no_results', query });
+      } else {
+        list.push({ id: 'results_label', type: 'results_label', query });
+        
+        if (showTopResult && topResult) {
+          list.push({ id: 'top_result', type: 'top_result', data: topResult });
+        }
+        
+        if (showSongs && categoryFilteredSongs.length > 0) {
+          list.push({
+            id: 'songs_header',
+            type: 'section_header',
+            title: showTopResult && topResult?.type === "song" ? "Related Songs" : "Songs"
+          });
+          categoryFilteredSongs.forEach((song, idx) => {
+            list.push({ id: `song-${song.id}-${idx}`, type: 'song_row', song, idx });
+          });
+        }
+        
+        if (showArtists && categoryFilteredArtists.length > 0) {
+          list.push({ id: 'artists_header', type: 'section_header', title: 'Artists', accent: true });
+          categoryFilteredArtists.forEach((artist, idx) => {
+            list.push({ id: `artist-${artist.id}-${idx}`, type: 'artist_row', artist, idx });
+          });
+        }
+        
+        if (showAlbums && categoryFilteredAlbums.length > 0) {
+          list.push({ id: 'albums_header', type: 'section_header', title: 'Albums' });
+          chunkedAlbums.forEach((chunk, idx) => {
+            list.push({ id: `album-row-${idx}`, type: 'album_row', albums: chunk, idx });
+          });
+        }
+      }
+    }
+    
+    return list;
+  }, [
+    query,
+    recentSearches,
+    isLoading,
+    error,
+    hasResults,
+    showTopResult,
+    topResult,
+    showSongs,
+    categoryFilteredSongs,
+    showArtists,
+    categoryFilteredArtists,
+    showAlbums,
+    chunkedAlbums
+  ]);
+
+  const renderSearchItem = useCallback(({ item }: any) => {
+    switch (item.type) {
+      case 'recent_searches':
+        return (
+          <Mat delay={100}>
+            <View style={s.section}>
+              <SectionHead
+                title="Recently Searched"
+                rightEl={
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      clearRecentSearches();
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear all recent searches"
+                  >
+                    <Text style={s.clearAllText}>Clear All</Text>
+                  </TouchableOpacity>
+                }
+              />
+              <View style={s.recentGrid}>
+                {item.data.map((recentItem: any) => (
+                  <RecentItem
+                    key={recentItem.id}
+                    item={recentItem}
+                    onPress={handleRecentPress}
+                    onDelete={handleDeleteRecent}
+                  />
+                ))}
+              </View>
+            </View>
+          </Mat>
+        );
+      case 'empty_recent':
+        return <EmptyRecent />;
+      case 'loading_skeleton':
+        return (
+          <View style={[s.section, { marginTop: 12 }]}>
+            <SkeletonTopCard />
+            <SectionHead title="Searching…" />
+            {Array.from({ length: 5 }).map((_, i) => (
+              <View key={i} style={{ marginBottom: 10 }}>
+                <SkeletonRow delay={80 + i * 55} />
+              </View>
+            ))}
+          </View>
+        );
+      case 'error_state':
+        return <ErrorState message={item.error} onRetry={() => setQuery(query)} />;
+      case 'no_results':
+        return <NoResults query={item.query} />;
+      case 'results_label':
+        return (
+          <Mat delay={0}>
+            <Text style={s.resultsFor}>
+              Results for{" "}
+              <Text style={{ color: C.primary, fontWeight: "700" }}>
+                "{item.query}"
+              </Text>
+            </Text>
+          </Mat>
+        );
+      case 'top_result':
+        return (
+          <TopResultCard
+            song={item.data}
+            onPlay={handlePlaySong}
+            goArtistByName={goArtistByName}
+            delay={40}
+          />
+        );
+      case 'section_header':
+        return (
+          <Mat delay={60}>
+            <SectionHead title={item.title} accent={item.accent} />
+          </Mat>
+        );
+      case 'song_row':
+        return (
+          <View style={{ marginBottom: 10 }}>
+            <SongRow
+              song={{
+                id: item.song.id,
+                title: item.song.title,
+                artist: item.song.artist || "",
+                time: item.song.duration || "",
+                art: item.song.art || "",
+              }}
+              onPlay={handlePlaySong}
+              onPlayNext={() => {
+                const pTrack = createPlayerTrack(item.song);
+                playNext(pTrack);
+                Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Success,
+                );
+              }}
+              onAddToQueue={() => {
+                const pTrack = createPlayerTrack(item.song);
+                addToQueue(pTrack);
+                Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Success,
+                );
+              }}
+              delay={80 + item.idx * 32}
+            />
+          </View>
+        );
+      case 'artist_row':
+        return (
+          <View style={{ marginBottom: 10 }}>
+            <ArtistRow
+              artist={{
+                id: item.artist.id,
+                name: item.artist.title,
+                art: item.artist.art || "",
+                followers: item.artist.subscribers || "",
+              }}
+              delay={100 + item.idx * 45}
+              onPress={() => handlePressArtist(item.artist)}
+            />
+          </View>
+        );
+      case 'album_row':
+        return (
+          <View style={s.albumGrid}>
+            {item.albums.map((album: any) => (
+              <AlbumCard
+                key={album.id}
+                album={{
+                  id: album.id,
+                  title: album.title,
+                  art: album.art || "",
+                  artist: album.artist,
+                }}
+                delay={140 + item.idx * 45}
+                onPress={() => handlePressAlbum(album)}
+              />
+            ))}
+          </View>
+        );
+      default:
+        return null;
+    }
+  }, [
+    clearRecentSearches,
+    handleRecentPress,
+    handleDeleteRecent,
+    handlePlaySong,
+    goArtistByName,
+    createPlayerTrack,
+    playNext,
+    addToQueue,
+    handlePressArtist,
+    handlePressAlbum,
+    query,
+    setQuery
+  ]);
+
   return (
     <View style={s.root}>
       <StatusBar
@@ -1569,24 +1805,9 @@ export default function SearchScreen() {
 
       <AnimatedBg />
 
-      <ScrollView
-        ref={scrollRef}
-        onScrollBeginDrag={Keyboard.dismiss}
-        contentContainerStyle={[
-          s.scroll,
-          {
-            paddingTop: insets.top + 20,
-            paddingBottom: scrollBottom,
-          },
-        ]}
-        scrollIndicatorInsets={{ bottom: scrollBottom }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-      >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-          <View style={{ flex: 1 }}>
-        {/* ── HEADER ──────────────────────────────────────────────── */}
+      {/* Sticky Header, Search Bar, and Filter Bar */}
+      <View style={{ paddingTop: insets.top + 20, paddingHorizontal: PAD, zIndex: 10 }}>
+        {/* Header */}
         <Mat delay={0}>
           <View style={s.header}>
             <View style={s.headerRow}>
@@ -1610,7 +1831,7 @@ export default function SearchScreen() {
           </View>
         </Mat>
 
-        {/* ── SEARCH BAR ──────────────────────────────────────────── */}
+        {/* Search Bar */}
         <Mat delay={50}>
           <Glass r={28} blur={65} style={s.searchBar}>
             <Ionicons
@@ -1655,7 +1876,7 @@ export default function SearchScreen() {
           </Glass>
         </Mat>
 
-        {/* ── CATEGORY FILTER BAR ─────────────────────────────────── */}
+        {/* Category Filter Bar */}
         {query.trim().length > 0 && (
           <Mat delay={60}>
             <FilterBar
@@ -1665,193 +1886,23 @@ export default function SearchScreen() {
             />
           </Mat>
         )}
+      </View>
 
-        {/* ══════════════════════════════════════════════════════════
-                    EMPTY STATE — no query
-                ══════════════════════════════════════════════════════════ */}
-        {query.length === 0 && (
-          <>
-            {recentSearches.length > 0 ? (
-              <Mat delay={100}>
-                <View style={s.section}>
-                  <SectionHead
-                    title="Recently Searched"
-                    rightEl={
-                      <TouchableOpacity
-                        onPress={() => {
-                          Haptics.selectionAsync();
-                          clearRecentSearches();
-                        }}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        accessibilityRole="button"
-                        accessibilityLabel="Clear all recent searches"
-                      >
-                        <Text style={s.clearAllText}>Clear All</Text>
-                      </TouchableOpacity>
-                    }
-                  />
-                  <View style={s.recentGrid}>
-                    {recentSearches.map((item) => (
-                      <RecentItem
-                        key={item.id}
-                        item={item}
-                        onPress={handleRecentPress}
-                        onDelete={handleDeleteRecent}
-                      />
-                    ))}
-                  </View>
-                </View>
-              </Mat>
-            ) : (
-              <EmptyRecent />
-            )}
-          </>
-        )}
-
-        {/* ══════════════════════════════════════════════════════════
-                    RESULTS STATE — has query
-                ══════════════════════════════════════════════════════════ */}
-        {query.length > 0 && (
-          <>
-            {isLoading ? (
-              /* Loading skeletons */
-              <View style={[s.section, { marginTop: 12 }]}>
-                {/* Top card skeleton */}
-                <SkeletonTopCard />
-                {/* Row skeletons */}
-                <SectionHead title="Searching…" />
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <View key={i} style={{ marginBottom: 10 }}>
-                    <SkeletonRow delay={80 + i * 55} />
-                  </View>
-                ))}
-              </View>
-            ) : error ? (
-              <ErrorState message={error} onRetry={() => setQuery(query)} />
-            ) : !hasResults ? (
-              <NoResults query={query} />
-            ) : (
-              <>
-                {/* Results label */}
-                <Mat delay={0}>
-                  <Text style={s.resultsFor}>
-                    Results for{" "}
-                    <Text style={{ color: C.primary, fontWeight: "700" }}>
-                      "{query}"
-                    </Text>
-                  </Text>
-                </Mat>
-
-                {/* Top Result */}
-                {showTopResult && (
-                  <TopResultCard
-                    song={topResult}
-                    onPlay={handlePlaySong}
-                    goArtistByName={goArtistByName}
-                    delay={40}
-                  />
-                )}
-
-                {/* Songs */}
-                {showSongs && categoryFilteredSongs.length > 0 && (
-                  <View style={s.section}>
-                    <Mat delay={60}>
-                      <SectionHead
-                        title={
-                          showTopResult && topResult?.type === "song"
-                            ? "Related Songs"
-                            : "Songs"
-                        }
-                      />
-                    </Mat>
-                    {categoryFilteredSongs.map((song, idx) => (
-                      <View
-                        key={`song-${song.id}-${idx}`}
-                        style={{ marginBottom: 10 }}
-                      >
-                        <SongRow
-                          song={{
-                            id: song.id,
-                            title: song.title,
-                            artist: song.artist || "",
-                            time: song.duration || "",
-                            art: song.art || "",
-                          }}
-                          onPlay={handlePlaySong}
-                          onPlayNext={() => {
-                            const pTrack = createPlayerTrack(song);
-                            playNext(pTrack);
-                            Haptics.notificationAsync(
-                              Haptics.NotificationFeedbackType.Success,
-                            );
-                          }}
-                          onAddToQueue={() => {
-                            const pTrack = createPlayerTrack(song);
-                            addToQueue(pTrack);
-                            Haptics.notificationAsync(
-                              Haptics.NotificationFeedbackType.Success,
-                            );
-                          }}
-                          delay={80 + idx * 32}
-                        />
-                      </View>
-                    ))}
-                  </View>
-                )}
-
-                {/* Artists */}
-                {showArtists && categoryFilteredArtists.length > 0 && (
-                  <View style={s.section}>
-                    <Mat delay={80}>
-                      <SectionHead title="Artists" accent />
-                    </Mat>
-                    {categoryFilteredArtists.map((artist, idx) => (
-                      <View key={artist.id} style={{ marginBottom: 10 }}>
-                        <ArtistRow
-                          artist={{
-                            id: artist.id,
-                            name: artist.title,
-                            art: artist.art || "",
-                            followers: artist.subscribers || "",
-                          }}
-                          delay={100 + idx * 45}
-                          onPress={() => handlePressArtist(artist)}
-                        />
-                      </View>
-                    ))}
-                  </View>
-                )}
-
-                {/* Albums */}
-                {showAlbums && categoryFilteredAlbums.length > 0 && (
-                  <View style={s.section}>
-                    <Mat delay={120}>
-                      <SectionHead title="Albums" />
-                    </Mat>
-                    <View style={s.albumGrid}>
-                      {categoryFilteredAlbums.map((album, idx) => (
-                        <AlbumCard
-                          key={album.id}
-                          album={{
-                            id: album.id,
-                            title: album.title,
-                            art: album.art || "",
-                            artist: album.artist,
-                          }}
-                          delay={140 + idx * 45}
-                          onPress={() => handlePressAlbum(album)}
-                        />
-                      ))}
-                    </View>
-                  </View>
-                )}
-              </>
-            )}
-          </>
-        )}
-          </View>
-        </TouchableWithoutFeedback>
-      </ScrollView>
+      {/* Results List */}
+      <FlashList
+        ref={scrollRef}
+        data={listData}
+        renderItem={renderSearchItem}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={{
+          paddingHorizontal: PAD,
+          paddingBottom: scrollBottom + 30,
+        }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        onScrollBeginDrag={Keyboard.dismiss}
+      />
     </View>
   );
 }

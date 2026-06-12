@@ -17,7 +17,10 @@ import {
   TouchableOpacity,
   View,
   LayoutChangeEvent,
+  TextInput,
 } from "react-native";
+
+const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
 import {
   Gesture,
   GestureDetector,
@@ -38,6 +41,7 @@ import Animated, {
   useAnimatedReaction,
   SharedValue,
   useAnimatedScrollHandler,
+  useAnimatedProps,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
@@ -78,74 +82,7 @@ const ART_H = SH * 0.58;
 const ART_BOX = Math.min(SW * 0.85, 360);
 const GESTURE_ZONE = SH * 0.6;
 
-// ── Colour Helpers ───────────────────────────────────────────────────────────
-const hexToHsl = (hex: string) => {
-  const n = hex.replace("#", "");
-  const v = n.length === 3 ? n.split("").map(c => c + c).join("") : n;
-  const r = parseInt(v.slice(0, 2), 16) / 255;
-  const g = parseInt(v.slice(2, 4), 16) / 255;
-  const b = parseInt(v.slice(4, 6), 16) / 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s = 0, l = (max + min) / 2;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-      case g: h = (b - r) / d + 2; break;
-      case b: h = (r - g) / d + 4; break;
-    }
-    h /= 6;
-  }
-  return { h: h * 360, s: s * 100, l: l * 100 };
-};
-
-const hslToHex = (h: number, s: number, l: number) => {
-  h /= 360; s /= 100; l /= 100;
-  const hue2rgb = (p: number, q: number, t: number) => {
-    if (t < 0) t += 1; if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  if (s === 0) { const v = Math.round(l * 255); return `#${v.toString(16).padStart(2, "0").repeat(3)}`; }
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  const toHex = (x: number) => Math.round(x * 255).toString(16).padStart(2, "0");
-  return `#${toHex(hue2rgb(p, q, h + 1 / 3))}${toHex(hue2rgb(p, q, h))}${toHex(hue2rgb(p, q, h - 1 / 3))}`;
-};
-
-const darkenIfBright = (hex: string, maxL = 10) => {
-  try {
-    const clean = hex.startsWith("#") ? hex : "#" + hex;
-    const hsl = hexToHsl(clean);
-    return hsl.l > maxL ? hslToHex(hsl.h, hsl.s, maxL) : clean;
-  } catch { return "#08080D"; }
-};
-
-const getDeterministicPalette = (id?: string) => {
-  const h = (id || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-  const list = [
-    { base: "#0C0101", accent: "#FF8A80" },
-    { base: "#01070C", accent: "#82B1FF" },
-    { base: "#010C03", accent: "#B9F6CA" },
-    { base: "#07010C", accent: "#EA80FC" },
-    { base: "#0C0701", accent: "#FFE082" },
-    { base: "#08080C", accent: "#E0E0E0" },
-  ];
-  const p = list[h % list.length];
-  return { backgroundBase: p.base, backgroundSecondary: p.base, accent: p.accent, textPrimary: "#FFF", textSecondary: "rgba(255,255,255,0.55)" };
-};
-
-const paletteFromDominant = (colors: string[]) => ({
-  backgroundBase: darkenIfBright(colors[0] || "#BF5AF2", 8),
-  backgroundSecondary: darkenIfBright(colors[1] || "#8E8E93", 15),
-  accent: colors[2] || colors[0] || "#BF5AF2",
-  textPrimary: "#FFF",
-  textSecondary: "rgba(255,255,255,0.55)",
-});
-
+// ── Colour Helpers (Optimized Fallback Only) ──────────────────────────────────
 const AURA_ACCENT = "#BF5AF2";
 
 const isLocalDeviceTrack = (track: any) => {
@@ -192,22 +129,43 @@ const formatArtistDisplay = (artistStr?: string): string => {
 };
 
 // ── Playback Scrubber (Optimized) ──────────────────────────────────────────
+const timeLabelStyle = StyleSheet.create({
+  label: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.55)",
+    padding: 0,
+    margin: 0,
+    minHeight: 0,
+    minWidth: 0,
+    backgroundColor: 'transparent',
+    includeFontPadding: false,
+  }
+}).label;
+
+// ── Playback Scrubber (Optimized & Zero Re-renders) ──────────────────────────
 const PlaybackScrubber = memo(({ accentColor, uiPhase }: { accentColor: string; uiPhase: SharedValue<number> }) => {
   const seek = usePlayerStore(s => s.seek);
+
+  // Render counting telemetry to verify zero React re-renders occur during playback progress updates
+  const scrubberRenderCount = useRef(0);
+  scrubberRenderCount.current += 1;
+  if (typeof __DEV__ !== "undefined" && __DEV__) {
+    console.info(`[PlaybackScrubber] Rendered: count = ${scrubberRenderCount.current}`);
+  }
 
   const scrubX = useSharedValue(0);
   const scrubW = useSharedValue(1);
   const isScrub = useSharedValue(false);
   const thumbSc = useSharedValue(0);
 
-  const [elapsedText, setElapsedText] = useState("0:00");
-  const [remainingText, setRemainingText] = useState("-0:00");
-  const [scrubPercent, setScrubPercent] = useState<number | null>(null);
+  // Shared values to hold time label text entirely on the UI thread
+  const elapsedTextVal = useSharedValue("0:00");
+  const remainingTextVal = useSharedValue("-0:00");
 
   const performSeek = useCallback((millis: number) => {
     seek(millis);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setScrubPercent(null);
   }, [seek]);
 
   useAnimatedReaction(
@@ -230,17 +188,29 @@ const PlaybackScrubber = memo(({ accentColor, uiPhase }: { accentColor: string; 
       pos: playbackProgress.positionMs.value,
       dur: playbackProgress.durationMs.value,
       scrubbing: isScrub.value,
+      scrubPct: scrubW.value > 0 ? scrubX.value / scrubW.value : 0,
     }),
     (cur) => {
       "worklet";
-      if (cur.scrubbing || cur.dur <= 0) return;
-      const nowSec = Math.floor(cur.pos / 1000);
+      if (cur.dur <= 0) {
+        elapsedTextVal.value = "0:00";
+        remainingTextVal.value = "-0:00";
+        return;
+      }
+
+      // Calculate time values based on whether the user is actively scrubbing
+      const currentPos = cur.scrubbing ? cur.scrubPct * cur.dur : cur.pos;
+      const nowSec = Math.floor(currentPos / 1000);
       const durSec = Math.floor(cur.dur / 1000);
       const remaining = Math.max(0, durSec - nowSec);
-      const elapsed = `${Math.floor(nowSec / 60)}:${(nowSec % 60).toString().padStart(2, "0")}`;
-      const remain = `-${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, "0")}`;
-      runOnJS(setElapsedText)(elapsed);
-      runOnJS(setRemainingText)(remain);
+
+      const elapsedM = Math.floor(nowSec / 60);
+      const elapsedS = nowSec % 60;
+      elapsedTextVal.value = `${elapsedM}:${elapsedS < 10 ? '0' : ''}${elapsedS}`;
+
+      const remainM = Math.floor(remaining / 60);
+      const remainS = remaining % 60;
+      remainingTextVal.value = `-${remainM}:${remainS < 10 ? '0' : ''}${remainS}`;
     }
   );
 
@@ -251,16 +221,12 @@ const PlaybackScrubber = memo(({ accentColor, uiPhase }: { accentColor: string; 
       isScrub.value = true;
       thumbSc.value = withSpring(1, SPR_THUMB);
       scrubX.value = Math.max(0, Math.min(e.x, scrubW.value));
-      const pct = scrubW.value > 0 ? scrubX.value / scrubW.value : 0;
-      runOnJS(setScrubPercent)(pct);
       runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
     })
     .onUpdate(e => {
       "worklet";
       if (!isScrub.value) return;
       scrubX.value = Math.max(0, Math.min(e.x, scrubW.value));
-      const pct = scrubW.value > 0 ? scrubX.value / scrubW.value : 0;
-      runOnJS(setScrubPercent)(pct);
     })
     .onEnd(() => {
       "worklet";
@@ -278,7 +244,6 @@ const PlaybackScrubber = memo(({ accentColor, uiPhase }: { accentColor: string; 
       const x = Math.max(0, Math.min(e.x, scrubW.value));
       scrubX.value = withTiming(x, { duration: 180 });
       const pct = scrubW.value > 0 ? x / scrubW.value : 0;
-      runOnJS(setScrubPercent)(pct);
       runOnJS(performSeek)(pct * playbackProgress.durationMs.value);
       runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
     }), [performSeek, uiPhase]);
@@ -300,8 +265,13 @@ const PlaybackScrubber = memo(({ accentColor, uiPhase }: { accentColor: string; 
     transform: [{ translateX: scrubX.value - 9 }, { scale: thumbSc.value }],
   }));
 
-  const displayElapsed = scrubPercent !== null ? formatTime(scrubPercent * (playbackProgress.durationMs.value / 1000)) : elapsedText;
-  const displayRemaining = scrubPercent !== null ? `-${formatTime(Math.max(0, (playbackProgress.durationMs.value / 1000) - scrubPercent * (playbackProgress.durationMs.value / 1000)))}` : remainingText;
+  const elapsedProps = useAnimatedProps(() => ({
+    text: elapsedTextVal.value,
+  } as any));
+
+  const remainingProps = useAnimatedProps(() => ({
+    text: remainingTextVal.value,
+  } as any));
 
   return (
     <View style={st.scrubWrap}>
@@ -315,8 +285,22 @@ const PlaybackScrubber = memo(({ accentColor, uiPhase }: { accentColor: string; 
         </Animated.View>
       </GestureDetector>
       <View style={st.timeLabelRow}>
-        <Text style={[st.timeLabel, { textAlign: "left" }]}>{displayElapsed}</Text>
-        <Text style={[st.timeLabel, { textAlign: "right" }]}>{displayRemaining}</Text>
+        <AnimatedTextInput
+          editable={false}
+          pointerEvents="none"
+          underlineColorAndroid="transparent"
+          style={[timeLabelStyle, { textAlign: "left" }]}
+          animatedProps={elapsedProps}
+          defaultValue="0:00"
+        />
+        <AnimatedTextInput
+          editable={false}
+          pointerEvents="none"
+          underlineColorAndroid="transparent"
+          style={[timeLabelStyle, { textAlign: "right" }]}
+          animatedProps={remainingProps}
+          defaultValue="-0:00"
+        />
       </View>
     </View>
   );
@@ -481,11 +465,17 @@ const lnSt = StyleSheet.create({
 const PausedPill = memo(({ visible, accent }: { visible: boolean; accent: string }) => {
   const op = useSharedValue(0);
   const sc = useSharedValue(0.95);
+  
   useEffect(() => {
     op.value = withTiming(visible ? 1 : 0, { duration: 200 });
     sc.value = withTiming(visible ? 1 : 0.95, { duration: 200, easing: REasing.out(REasing.quad) });
   }, [visible]);
-  const pillStyle = useAnimatedStyle(() => ({ opacity: op.value, transform: [{ scale: sc.value }] }));
+
+  const pillStyle = useAnimatedStyle(() => ({
+    opacity: op.value,
+    transform: [{ scale: sc.value }]
+  }));
+
   return (
     <Animated.View pointerEvents="none" style={[{ position: "absolute", top: 8, alignSelf: "center", zIndex: 10 }, pillStyle]}>
       <View style={{ borderRadius: 14, overflow: "hidden", paddingHorizontal: 13, paddingVertical: 6 }}>
@@ -502,32 +492,116 @@ const PausedPill = memo(({ visible, accent }: { visible: boolean; accent: string
 // ── Lyrics Surface ───────────────────────────────────────────────────────────
 const LyricsSurface = memo(({
   visible,
-  lyricsData,
-  isLoading,
   accentColor,
-  activeLineIndex,
-  scrollRef,
-  viewportH,
-  isUserScrolling,
   lyricsStyle,
-  onPressLine,
-  onLayoutLine,
+  isLocked,
 }: any) => {
   const insets = useSafeAreaInsets();
   const [showPaused, setShowPaused] = useState(false);
 
+  // Zustand Store Subscriptions
+  const lyricsData = usePlayerStore(s => s.lyrics);
+  const isLoading = usePlayerStore(s => s.isLyricsLoading);
+  const currentTrack = usePlayerStore(s => s.currentTrack);
+
+  // Fetching logic localized
+  useEffect(() => {
+    if (visible && currentTrack && !lyricsData && !isLoading) {
+      usePlayerStore.getState().fetchLyrics(currentTrack);
+    }
+  }, [visible, currentTrack?.id, lyricsData, isLoading]);
+
   const lyrics: LyricLineType[] = useMemo(() => lyricsData?.lyrics || [], [lyricsData]);
   const isSynced = useMemo(() => lyricsData?.synced ?? false, [lyricsData]);
+
+  // Animated and Ref values for lyrics scrolling
+  const lyricsScrollRef = useRef<any>(null);
+  const isLyricsUserScrolling = useSharedValue(false);
+  const lyricsLineOffsets = useSharedValue<{ y: number; h: number }[]>([]);
+  const offsetsRef = useRef<{ y: number; h: number }[]>([]);
+  const layoutCountRef = useRef(0);
+  const lyricsViewportH = useSharedValue(SH * 0.62);
+
+  // Sync effect
+  useEffect(() => {
+    layoutCountRef.current = 0;
+    offsetsRef.current = new Array(lyrics.length).fill(undefined);
+    lyricsLineOffsets.value = [];
+  }, [lyrics]);
+
+  const lastActiveLineIndex = useSharedValue(-1);
+
+  // activeLineIndex Derived Value (runs timing logic only when visible!)
+  const activeLineIndex = useDerivedValue(() => {
+    "worklet";
+    if (!visible) return -1;
+    if (!isSynced || !lyrics.length) return -1;
+    const t = playbackProgress.positionMs.value;
+    const last = lastActiveLineIndex.value;
+    if (last >= 0 && last < lyrics.length) {
+      const cur = lyrics[last].time;
+      const nxt = last + 1 < lyrics.length ? lyrics[last + 1].time : Infinity;
+      if (t >= cur && t < nxt) return last;
+    }
+    let res = -1;
+    if (last >= 0 && last + 1 < lyrics.length && lyrics[last + 1].time <= t) {
+      let i = last + 1;
+      while (i + 1 < lyrics.length && lyrics[i + 1].time <= t) i++;
+      res = i;
+    } else {
+      let lo = 0, hi = lyrics.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (lyrics[mid].time <= t) { res = mid; lo = mid + 1; }
+        else hi = mid - 1;
+      }
+    }
+    lastActiveLineIndex.value = res;
+    return res;
+  }, [visible, isSynced, lyrics]);
+
+  const scrollToLyric = useCallback((index: number) => {
+    lyricsScrollRef.current?.scrollToIndex({
+      index,
+      animated: true,
+      viewPosition: 0.38,
+    });
+  }, []);
+
+  useAnimatedReaction(() => ({ idx: activeLineIndex.value, scroll: isLyricsUserScrolling.value, canSync: visible }), (cur, prev) => {
+    "worklet";
+    if (!cur.canSync || cur.scroll || cur.idx < 0) return;
+    if (prev && cur.idx === prev.idx) return;
+    runOnJS(scrollToLyric)(cur.idx);
+  });
+
+  const onPressLine = useCallback((idx: number) => {
+    if (isLocked) return;
+    if (!isSynced || !lyrics[idx]) return;
+    
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    isLyricsUserScrolling.value = false;
+    scrollToLyric(idx);
+    usePlayerStore.getState().seek(lyrics[idx].time);
+  }, [isSynced, lyrics, scrollToLyric, isLocked]);
+
+  const onLayoutLine = useCallback((idx: number, y: number, h: number) => {
+    offsetsRef.current[idx] = { y, h };
+    layoutCountRef.current++;
+    if (layoutCountRef.current >= lyrics.length) {
+      lyricsLineOffsets.value = offsetsRef.current.map(v => v ? { y: v.y, h: v.h } : { y: 0, h: 0 });
+    }
+  }, [lyrics.length]);
 
   const resumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelResume = useCallback(() => { if (resumeTimer.current) { clearTimeout(resumeTimer.current); resumeTimer.current = null; } }, []);
   const scheduleResume = useCallback(() => {
     cancelResume();
-    resumeTimer.current = setTimeout(() => { isUserScrolling.value = false; setShowPaused(false); }, 2000);
+    resumeTimer.current = setTimeout(() => { isLyricsUserScrolling.value = false; setShowPaused(false); }, 2000);
   }, [cancelResume]);
 
   const scrollHandler = useAnimatedScrollHandler({
-    onBeginDrag: () => { "worklet"; isUserScrolling.value = true; runOnJS(cancelResume)(); runOnJS(setShowPaused)(true); },
+    onBeginDrag: () => { "worklet"; isLyricsUserScrolling.value = true; runOnJS(cancelResume)(); runOnJS(setShowPaused)(true); },
     onEndDrag: () => { "worklet"; runOnJS(scheduleResume)(); },
     onMomentumEnd: () => { "worklet"; runOnJS(scheduleResume)(); },
   });
@@ -549,7 +623,7 @@ const LyricsSurface = memo(({
 
   return (
     <Animated.View style={[StyleSheet.absoluteFill, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 120, zIndex: 10 }, lyricsStyle]} pointerEvents={visible ? "box-none" : "none"}>
-      <View style={{ flex: 1 }} onLayout={e => { viewportH.value = e.nativeEvent.layout.height; }}>
+      <View style={{ flex: 1 }} onLayout={e => { lyricsViewportH.value = e.nativeEvent.layout.height; }}>
         <PausedPill visible={showPaused} accent={accentColor} />
         {isLoading ? (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><ActivityIndicator size="large" color={accentColor} /></View>
@@ -557,11 +631,10 @@ const LyricsSurface = memo(({
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Text style={{ color: "rgba(255,255,255,0.5)", fontWeight: "600" }}>No lyrics available</Text></View>
         ) : (
           <AnimatedFlashList
-            ref={scrollRef}
+            ref={lyricsScrollRef}
             data={lyrics}
             renderItem={renderItem as any}
             keyExtractor={(_: any, index: number) => index.toString()}
-            estimatedItemSize={58}
             onScroll={scrollHandler}
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
@@ -569,7 +642,6 @@ const LyricsSurface = memo(({
             ListFooterComponent={ListFooter}
             removeClippedSubviews={true}
             drawDistance={250}
-            windowSize={5}
           />
         )}
       </View>
@@ -578,7 +650,10 @@ const LyricsSurface = memo(({
 });
 
 // ── Secondary Sheets ─────────────────────────────────────────────────────────
-const MoreMenuSurface = memo(({ visible, onClose, accentColor, currentTrack, onAddToPlaylist, onShare, isShuffle, toggleShuffle, repeatMode, toggleRepeat }: any) => {
+const MoreMenuSurface = memo(({ visible, onClose, accentColor, currentTrack, onAddToPlaylist, onShare }: any) => {
+  const isShuffle = usePlayerStore(s => s.isShuffle);
+  const repeatMode = usePlayerStore(s => s.repeatMode);
+  const { toggleRepeat, toggleShuffle } = useMusicActions();
   const router = useRouter();
   const menuAnim = useSharedValue(120);
   const menuOpacity = useSharedValue(0);
@@ -648,7 +723,13 @@ interface PlayerOverlayProps {
   expandProgress: SharedValue<number>;
 }
 
-export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
+function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
+  const playerOverlayRenderCount = useRef(0);
+  playerOverlayRenderCount.current += 1;
+  if (typeof __DEV__ !== "undefined" && __DEV__) {
+    console.info(`[PlayerOverlay] Rendered: count = ${playerOverlayRenderCount.current}`);
+  }
+
   const router = useRouter();
   const segments = useSegments();
   const insets = useSafeAreaInsets();
@@ -668,43 +749,78 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   const isTransitioning = usePlayerStore(s => s.isTransitioning);
   const isPreloading = usePlayerStore(s => s.isPreloading);
   const isBuffering = usePlayerStore(s => s.isBuffering);
+
+  const prevIsExpanded = useRef(isExpanded);
+  const prevActiveSurface = useRef(activeSurface);
+  const prevCurrentTrack = useRef(currentTrack);
+  const prevQueue = useRef(queue);
+  const prevCurrentIndex = useRef(currentIndex);
+  const prevIsPlaying = useRef(isPlaying);
+  const prevIsTransitioning = useRef(isTransitioning);
+  const prevIsPreloading = useRef(isPreloading);
+  const prevIsBuffering = useRef(isBuffering);
+
+  useEffect(() => {
+    const changes: any = {};
+    if (prevIsExpanded.current !== isExpanded) changes.isExpanded = { from: prevIsExpanded.current, to: isExpanded };
+    if (prevActiveSurface.current !== activeSurface) changes.activeSurface = { from: prevActiveSurface.current, to: activeSurface };
+    if (prevCurrentTrack.current !== currentTrack) changes.currentTrack = { from: prevCurrentTrack.current?.id, to: currentTrack?.id };
+    if (prevQueue.current !== queue) changes.queue = { from: prevQueue.current?.length, to: queue?.length };
+    if (prevCurrentIndex.current !== currentIndex) changes.currentIndex = { from: prevCurrentIndex.current, to: currentIndex };
+    if (prevIsPlaying.current !== isPlaying) changes.isPlaying = { from: prevIsPlaying.current, to: isPlaying };
+    if (prevIsTransitioning.current !== isTransitioning) changes.isTransitioning = { from: prevIsTransitioning.current, to: isTransitioning };
+    if (prevIsPreloading.current !== isPreloading) changes.isPreloading = { from: prevIsPreloading.current, to: isPreloading };
+    if (prevIsBuffering.current !== isBuffering) changes.isBuffering = { from: prevIsBuffering.current, to: isBuffering };
+
+    if (Object.keys(changes).length > 0) {
+      console.info("[PlayerOverlay] Render reason - changed values:", changes);
+    } else {
+      console.info("[PlayerOverlay] Render reason - NO values changed (Parent render or Context change)");
+    }
+
+    prevIsExpanded.current = isExpanded;
+    prevActiveSurface.current = activeSurface;
+    prevCurrentTrack.current = currentTrack;
+    prevQueue.current = queue;
+    prevCurrentIndex.current = currentIndex;
+    prevIsPlaying.current = isPlaying;
+    prevIsTransitioning.current = isTransitioning;
+    prevIsPreloading.current = isPreloading;
+    prevIsBuffering.current = isBuffering;
+  });
   const isTransitionLoading = isTransitioning || isPreloading || isBuffering;
 
   const bgFadeProgress = useSharedValue(1);
-
-  const [bgBuffers, setBgBuffers] = useState(() => {
-    const initialPalette = currentTrack?.dominantColors 
-      ? paletteFromDominant(currentTrack.dominantColors) 
-      : getDeterministicPalette(currentTrack?.id);
-    return {
-      prevArtwork: currentTrack?.art || null,
-      currentArtwork: currentTrack?.art || null,
-      prevPalette: initialPalette,
-      currentPalette: initialPalette,
-    };
-  });
+  const metaFadeProgress = useSharedValue(1);
+  const [currentArtwork, setCurrentArtwork] = useState<string | null>(null);
 
   useEffect(() => {
-    const nextPalette = currentTrack?.dominantColors 
-      ? paletteFromDominant(currentTrack.dominantColors) 
-      : getDeterministicPalette(currentTrack?.id);
-    const nextArtwork = currentTrack?.art || null;
-
-    setBgBuffers(prev => {
-      if (prev.currentArtwork === nextArtwork && prev.currentPalette.backgroundBase === nextPalette.backgroundBase) {
-        return prev;
-      }
-      return {
-        prevArtwork: prev.currentArtwork,
-        currentArtwork: nextArtwork,
-        prevPalette: prev.currentPalette,
-        currentPalette: nextPalette,
-      };
-    });
-
+    setCurrentArtwork(currentTrack?.art || null);
     bgFadeProgress.value = 0;
-    bgFadeProgress.value = withTiming(1, { duration: 450 });
+    bgFadeProgress.value = withTiming(1, { duration: 150, easing: REasing.out(REasing.quad) });
+    metaFadeProgress.value = 0;
+    metaFadeProgress.value = withTiming(1, { duration: 150, easing: REasing.out(REasing.quad) });
   }, [currentTrack?.id]);
+
+  const [transitionArtwork, setTransitionArtwork] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTransitionArtwork(nextTrack?.art || null);
+  }, [nextTrack?.id]);
+
+  const prevTrackArtShared = useSharedValue<string | null>(null);
+  const nextTrackArtShared = useSharedValue<string | null>(null);
+
+  useEffect(() => {
+    prevTrackArtShared.value = prevTrack?.art || null;
+    nextTrackArtShared.value = nextTrack?.art || null;
+  }, [prevTrack?.id, nextTrack?.id]);
+
+  const transitionArtworkShared = useSharedValue<string | null>(null);
+
+  useEffect(() => {
+    transitionArtworkShared.value = transitionArtwork;
+  }, [transitionArtwork]);
 
   const play = usePlayerStore(s => s.play);
   const pause = usePlayerStore(s => s.pause);
@@ -834,15 +950,12 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   const [lastSurface, setLastSurface] = useState<any>('controls');
   useEffect(() => {
     runOnJS(setIsLocked)(true);
-    surfaceOpenProgress.value = withTiming(activeSurface !== 'controls' ? 1 : 0, { duration: 220 }, (f) => {
-      if (f) {
-        runOnJS(setIsLocked)(false);
-        runOnJS(setLastSurface)(activeSurface);
-      }
+    surfaceOpenProgress.value = withTiming(activeSurface !== 'controls' ? 1 : 0, { duration: 220 }, () => {
+      runOnJS(setIsLocked)(false);
+      runOnJS(setLastSurface)(activeSurface);
     });
   }, [activeSurface]);
 
-  const palette = useMemo(() => currentTrack?.dominantColors ? paletteFromDominant(currentTrack.dominantColors) : getDeterministicPalette(currentTrack?.id), [currentTrack]);
   const artworkUri = currentTrack?.art;
 
   // Dynamic bottom dock positioning based on segment segments and safe-area padding
@@ -853,8 +966,51 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   const MINI_HEIGHT = 68;
   const COLLAPSED_Y = SH - (MINI_HEIGHT + bottomOffset);
 
+  const triggerHaptic = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const nextTrackJS = () => {
+    next();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
+  const prevTrackJS = () => {
+    prev(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
+  // Gesture state SharedValue and Ref listeners
+  const isGestureEnabledShared = useSharedValue(true);
+  useEffect(() => {
+    isGestureEnabledShared.value = activeSurface !== 'lyrics' && activeSurface !== 'queue';
+  }, [activeSurface]);
+
+  const expandRef = useRef(expand);
+  const collapseRef = useRef(collapse);
+  const triggerHapticRef = useRef(triggerHaptic);
+  const nextTrackJSRef = useRef(nextTrackJS);
+  const prevTrackJSRef = useRef(prevTrackJS);
+  const setTransitionArtworkRef = useRef(setTransitionArtwork);
+
+  useEffect(() => {
+    expandRef.current = expand;
+    collapseRef.current = collapse;
+    triggerHapticRef.current = triggerHaptic;
+    nextTrackJSRef.current = nextTrackJS;
+    prevTrackJSRef.current = prevTrackJS;
+    setTransitionArtworkRef.current = setTransitionArtwork;
+  });
+
+  const runExpand = useCallback(() => expandRef.current(), []);
+  const runCollapse = useCallback(() => collapseRef.current(), []);
+  const runTriggerHaptic = useCallback(() => triggerHapticRef.current(), []);
+  const runNextTrack = useCallback(() => nextTrackJSRef.current(), []);
+  const runPrevTrack = useCallback(() => prevTrackJSRef.current(), []);
+  const runSetTransitionArtwork = useCallback((art: string | null) => setTransitionArtworkRef.current(art), []);
+
   // Gesture definition for MiniPlayer
-  const collapsedPan = Gesture.Pan()
+  const collapsedPan = useMemo(() => Gesture.Pan()
     .onStart(() => {
       "worklet";
       startProgress.value = expandProgress.value;
@@ -867,55 +1023,41 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     .onEnd((e) => {
       "worklet";
       if (e.velocityY < -500 || expandProgress.value > 0.5) {
-        expandProgress.value = withSpring(1, SPR_MAIN, (finished) => {
-          if (finished) runOnJS(expand)();
+        expandProgress.value = withSpring(1, SPR_MAIN, () => {
+          runOnJS(runExpand)();
         });
       } else {
-        expandProgress.value = withSpring(0, SPR_MAIN, (finished) => {
-          if (finished) runOnJS(collapse)();
+        expandProgress.value = withSpring(0, SPR_MAIN, () => {
+          runOnJS(runCollapse)();
         });
       }
-    });
+    }), []);
 
-  const triggerHaptic = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  const collapsedTap = Gesture.Tap()
+  const collapsedTap = useMemo(() => Gesture.Tap()
     .onStart(() => {
       "worklet";
-      runOnJS(triggerHaptic)();
-      runOnJS(expand)();
-    });
+      runOnJS(runTriggerHaptic)();
+      runOnJS(runExpand)();
+    }), []);
 
-  const miniGesture = Gesture.Exclusive(collapsedPan, collapsedTap);
-
-  const isGestureEnabled = activeSurface !== 'lyrics' && activeSurface !== 'queue';
+  const miniGesture = useMemo(() => Gesture.Exclusive(collapsedPan, collapsedTap), [collapsedPan, collapsedTap]);
 
   const artSwipeX = useSharedValue(0);
   const artScale = useSharedValue(1);
   const artDismissY = useSharedValue(0);
   const dragDirection = useSharedValue<'none' | 'horizontal' | 'vertical'>('none');
 
-  const nextTrackJS = () => {
-    next();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  };
-  const prevTrackJS = () => {
-    prev(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  };
-
   // Gesture definition for PlayerOverlayPresentation
-  const expandedPan = Gesture.Pan()
-    .enabled(isGestureEnabled)
+  const expandedPan = useMemo(() => Gesture.Pan()
     .onStart(() => {
       "worklet";
+      if (!isGestureEnabledShared.value) return;
       startProgress.value = expandProgress.value;
       artDismissY.value = 0;
     })
     .onUpdate((e) => {
       "worklet";
+      if (!isGestureEnabledShared.value) return;
       const dy = e.translationY;
       if (dy > 0) {
         artDismissY.value = dy;
@@ -925,24 +1067,23 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     })
     .onEnd((e) => {
       "worklet";
+      if (!isGestureEnabledShared.value) return;
       const threshold = SH * 0.22;
       if (e.translationY > threshold || e.velocityY > 500) {
-        expandProgress.value = withSpring(0, SPR_MAIN, (finished) => {
-          if (finished) {
-            runOnJS(collapse)();
-            artDismissY.value = 0;
-          }
+        expandProgress.value = withSpring(0, SPR_MAIN, () => {
+          runOnJS(runCollapse)();
+          artDismissY.value = 0;
         });
       } else {
         expandProgress.value = withSpring(1, SPR_MAIN);
         artDismissY.value = withSpring(0, SPR_REBOUND);
       }
-    });
+    }), []);
 
-  const artworkSwipe = Gesture.Pan()
-    .enabled(isGestureEnabled)
+  const artworkSwipe = useMemo(() => Gesture.Pan()
     .onStart(() => {
       "worklet";
+      if (!isGestureEnabledShared.value) return;
       dragDirection.value = 'none';
       startProgress.value = expandProgress.value;
       artDismissY.value = 0;
@@ -950,6 +1091,7 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     })
     .onUpdate((e) => {
       "worklet";
+      if (!isGestureEnabledShared.value) return;
       const dx = e.translationX;
       const dy = e.translationY;
 
@@ -971,6 +1113,11 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
         artSwipeX.value = dx;
         artScale.value = interpolate(Math.abs(dx), [0, SW * 0.4], [1, 0.94], Extrapolate.CLAMP);
         artDismissY.value = 0;
+        
+        const targetArt = dx > 0 ? prevTrackArtShared.value : nextTrackArtShared.value;
+        if (targetArt !== transitionArtworkShared.value) {
+          runOnJS(runSetTransitionArtwork)(targetArt);
+        }
       } else if (dragDirection.value === 'vertical') {
         artDismissY.value = Math.max(0, dy);
         artSwipeX.value = 0;
@@ -980,22 +1127,19 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     })
     .onEnd((e) => {
       "worklet";
+      if (!isGestureEnabledShared.value) return;
       if (dragDirection.value === 'horizontal') {
         if (e.translationX < -SW * 0.25 || e.velocityX < -400) {
-          artSwipeX.value = withSpring(-SW, SPR_SWIPE, (finished) => {
-            if (finished) {
-              runOnJS(nextTrackJS)();
-              artSwipeX.value = 0;
-              artScale.value = withSpring(1);
-            }
+          artSwipeX.value = withSpring(-SW, SPR_SWIPE, () => {
+            runOnJS(runNextTrack)();
+            artSwipeX.value = 0;
+            artScale.value = withSpring(1);
           });
         } else if (e.translationX > SW * 0.25 || e.velocityX > 400) {
-          artSwipeX.value = withSpring(SW, SPR_SWIPE, (finished) => {
-            if (finished) {
-              runOnJS(prevTrackJS)();
-              artSwipeX.value = 0;
-              artScale.value = withSpring(1);
-            }
+          artSwipeX.value = withSpring(SW, SPR_SWIPE, () => {
+            runOnJS(runPrevTrack)();
+            artSwipeX.value = 0;
+            artScale.value = withSpring(1);
           });
         } else {
           artSwipeX.value = withSpring(0, SPR_REBOUND);
@@ -1004,11 +1148,9 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
       } else if (dragDirection.value === 'vertical') {
         const threshold = SH * 0.22;
         if (e.translationY > threshold || e.velocityY > 500) {
-          expandProgress.value = withSpring(0, SPR_MAIN, (finished) => {
-            if (finished) {
-              runOnJS(collapse)();
-              artDismissY.value = 0;
-            }
+          expandProgress.value = withSpring(0, SPR_MAIN, () => {
+            runOnJS(runCollapse)();
+            artDismissY.value = 0;
           });
         } else {
           expandProgress.value = withSpring(1, SPR_MAIN);
@@ -1016,93 +1158,7 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
         }
       }
       dragDirection.value = 'none';
-    });
-
-  const breathValue = useSharedValue(1);
-  useEffect(() => {
-    if (isPlaying && activeSurface !== 'lyrics') {
-      breathValue.value = withRepeat(withTiming(1.02, { duration: 2500, easing: REasing.inOut(REasing.ease) }), -1, true);
-    } else { breathValue.value = withTiming(1, { duration: 400 }); }
-  }, [isPlaying, activeSurface]);
-
-  const isLyricsUserScrolling = useSharedValue(false);
-  const lyricsLineOffsets = useSharedValue<{ y: number; h: number }[]>([]);
-  const offsetsRef = useRef<{ y: number; h: number }[]>([]);
-  const layoutCountRef = useRef(0);
-  const lyricsViewportH = useSharedValue(SH * 0.62);
-  const lyricsScrollRef = useAnimatedRef<any>();
-  const lastLyricsScrollY = useSharedValue(0);
-
-  const lyricsData = usePlayerStore(s => s.lyrics);
-  const lyricsList = useMemo(() => lyricsData?.lyrics || [], [lyricsData]);
-  const isLyricsSynced = useMemo(() => lyricsData?.synced ?? false, [lyricsData]);
-  const isLyricsLoading = usePlayerStore(s => s.isLyricsLoading);
-
-  useEffect(() => { if (isExpanded && currentTrack && !lyricsData && !isLyricsLoading) usePlayerStore.getState().fetchLyrics(currentTrack); }, [isExpanded, currentTrack?.id, lyricsData, isLyricsLoading]);
-  useEffect(() => { layoutCountRef.current = 0; offsetsRef.current = new Array(lyricsList.length).fill(undefined); lyricsLineOffsets.value = []; }, [lyricsList]);
-
-  const lastActiveLineIndex = useSharedValue(-1);
-  const canSyncLyrics = useDerivedValue(() => uiPhase.value === 2 && activeSurface === 'lyrics');
-
-  const activeLineIndex = useDerivedValue(() => {
-    "worklet";
-    if (!isLyricsSynced || !lyricsList.length) return -1;
-    const t = playbackProgress.positionMs.value;
-    const last = lastActiveLineIndex.value;
-    if (last >= 0 && last < lyricsList.length) {
-      const cur = lyricsList[last].time;
-      const nxt = last + 1 < lyricsList.length ? lyricsList[last + 1].time : Infinity;
-      if (t >= cur && t < nxt) return last;
-    }
-    let res = -1;
-    if (last >= 0 && last + 1 < lyricsList.length && lyricsList[last + 1].time <= t) {
-      let i = last + 1;
-      while (i + 1 < lyricsList.length && lyricsList[i + 1].time <= t) i++;
-      res = i;
-    } else {
-      let lo = 0, hi = lyricsList.length - 1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (lyricsList[mid].time <= t) { res = mid; lo = mid + 1; }
-        else hi = mid - 1;
-      }
-    }
-    lastActiveLineIndex.value = res;
-    return res;
-  }, [isLyricsSynced, lyricsList]);
-
-  const scrollToLyric = useCallback((index: number) => {
-    lyricsScrollRef.current?.scrollToIndex({
-      index,
-      animated: true,
-      viewPosition: 0.38,
-    });
-  }, []);
-
-  useAnimatedReaction(() => ({ idx: activeLineIndex.value, scroll: isLyricsUserScrolling.value, canSync: canSyncLyrics.value }), (cur, prev) => {
-    "worklet";
-    if (!cur.canSync || cur.scroll || cur.idx < 0) return;
-    if (prev && cur.idx === prev.idx) return;
-    runOnJS(scrollToLyric)(cur.idx);
-  });
-
-  const onPressLine = useCallback((idx: number) => {
-    if (isLocked) return;
-    if (!isLyricsSynced || !lyricsList[idx]) return;
-    
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    isLyricsUserScrolling.value = false;
-    runOnJS(scrollToLyric)(idx);
-    usePlayerStore.getState().seek(lyricsList[idx].time);
-  }, [isLyricsSynced, lyricsList, scrollToLyric, isLocked]);
-
-  const onLayoutLine = useCallback((idx: number, y: number, h: number) => {
-    offsetsRef.current[idx] = { y, h };
-    layoutCountRef.current++;
-    if (layoutCountRef.current >= lyricsList.length) {
-      lyricsLineOffsets.value = offsetsRef.current.map(v => v ? { y: v.y, h: v.h } : { y: 0, h: 0 });
-    }
-  }, [lyricsList.length]);
+    }), []);
 
   useBackHandler({
     id: 'player-sub-surface',
@@ -1124,8 +1180,8 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     priority: BackPriority.EXPANDED_PLAYER,
     onBack: () => {
       console.log('[PlayerOverlay] EXPANDED_PLAYER handler triggered (collapsing expanded player)');
-      expandProgress.value = withSpring(0, SPR_MAIN, (finished) => {
-        if (finished) runOnJS(collapse)();
+      expandProgress.value = withSpring(0, SPR_MAIN, () => {
+        runOnJS(collapse)();
       });
       return true;
     },
@@ -1138,21 +1194,17 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
       // Start controls fade immediately alongside the spring — no sequential wait
       controlsOpacity.value = 0;
       controlsOpacity.value = withTiming(1, { duration: 380, easing: REasing.out(REasing.quad) });
-      expandProgress.value = withSpring(1, SPR_MAIN, (finished) => {
-        if (finished) {
-          uiPhase.value = 2;
-          runOnJS(setIsLocked)(false);
-        }
+      expandProgress.value = withSpring(1, SPR_MAIN, () => {
+        uiPhase.value = 2;
+        runOnJS(setIsLocked)(false);
       });
     } else {
       uiPhase.value = 0;
       runOnJS(setIsLocked)(true);
       controlsOpacity.value = withTiming(0, { duration: 180 });
-      expandProgress.value = withSpring(0, SPR_MAIN, (finished) => {
-        if (finished) {
-          uiPhase.value = 2;
-          runOnJS(setIsLocked)(false);
-        }
+      expandProgress.value = withSpring(0, SPR_MAIN, () => {
+        uiPhase.value = 2;
+        runOnJS(setIsLocked)(false);
       });
     }
   }, [isExpanded]);
@@ -1161,15 +1213,6 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   const atmosphereStyle = useAnimatedStyle(() => ({ 
     opacity: 0.4 * surfaceOpenProgress.value
   }));
-
-  const prevBgStyle = useAnimatedStyle(() => {
-    const p = expandProgress.value;
-    const expansionBgFade = interpolate(p, [0, 0.38], [0, 1], Extrapolate.CLAMP);
-    return {
-      opacity: expansionBgFade * (1 - bgFadeProgress.value),
-      transform: [{ scale: 1 }],
-    };
-  });
 
   const currentBgStyle = useAnimatedStyle(() => {
     const p = expandProgress.value;
@@ -1230,7 +1273,6 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     const currentTranslateY = desiredScreenY - parentTranslateY - expandedArtCenterY;
     
     const currentBorderRadius = interpolate(p, [0, 1], [13 * (ART_BOX / 48), 12], Extrapolate.CLAMP);
-    const breathSc = activeSurface !== 'lyrics' ? breathValue.value : 1;
 
     const verticalDragScale = artDismissY.value > 0
       ? interpolate(artDismissY.value, [0, SH * 0.4], [0.98, 0.92], Extrapolate.CLAMP)
@@ -1242,13 +1284,13 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
       transform: [
         { translateX: currentTranslateX + artSwipeX.value },
         { translateY: currentTranslateY + artDismissY.value * 0.3 },
-        { scale: currentScale * breathSc * artScale.value * verticalDragScale },
+        { scale: currentScale * artScale.value * verticalDragScale },
       ], 
-      display: dim <= 0.01 ? "none" : "flex" 
+      pointerEvents: dim <= 0.01 ? "none" : "auto"
     };
   });
 
-  const prevArtStyle = useAnimatedStyle(() => {
+  const transitionArtStyle = useAnimatedStyle(() => {
     const isLyricsActive = activeSurface === 'lyrics' || lastSurface === 'lyrics';
     const dim = isLyricsActive ? interpolate(surfaceOpenProgress.value, [0, 1], [1, 0]) : 1;
 
@@ -1270,57 +1312,28 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
 
     const currentBorderRadius = interpolate(p, [0, 1], [13 * (ART_BOX / 48), 12], Extrapolate.CLAMP);
 
-    const prevArtScale = interpolate(artSwipeX.value, [0, SW * 0.4], [0.9, 1.0], Extrapolate.CLAMP);
-    const opacity = interpolate(Math.abs(artSwipeX.value), [0, SW * 0.3], [0, 1], Extrapolate.CLAMP);
+    const isSwipingRight = artSwipeX.value > 0;
+    const offsetDirection = isSwipingRight ? -1 : 1;
+    const transitionOffset = offsetDirection * (ART_BOX + 24);
+
+    const targetScale = interpolate(Math.abs(artSwipeX.value), [0, SW * 0.4], [0.94, 1.0], Extrapolate.CLAMP);
+    const opacity = interpolate(Math.abs(artSwipeX.value), [0, SW * 0.25], [0, 1], Extrapolate.CLAMP);
 
     return {
       opacity: dim * opacity * (1 - surfaceOpenProgress.value),
       borderRadius: currentBorderRadius,
       transform: [
-        { translateX: currentTranslateX + artSwipeX.value - (ART_BOX + 24) },
+        { translateX: currentTranslateX + artSwipeX.value + transitionOffset },
         { translateY: currentTranslateY + artDismissY.value * 0.3 },
-        { scale: currentScale * prevArtScale },
+        { scale: currentScale * targetScale },
       ],
-      display: dim * opacity <= 0.01 ? "none" : "flex"
+      pointerEvents: "none",
     };
   });
 
-  const nextArtStyle = useAnimatedStyle(() => {
-    const isLyricsActive = activeSurface === 'lyrics' || lastSurface === 'lyrics';
-    const dim = isLyricsActive ? interpolate(surfaceOpenProgress.value, [0, 1], [1, 0]) : 1;
-
-    const p = expandProgress.value;
-    const scaleFactor = 48 / ART_BOX;
-    const currentScale = interpolate(p, [0, 1], [scaleFactor, 1], Extrapolate.CLAMP);
-
-    const miniArtCenterX = (SW - metrics.navWidth) / 2 + 12 + 24;
-    const miniArtCenterY = SH - bottomOffset - 10 - 24;
-    const expandedArtCenterX = SW / 2;
-    const expandedArtCenterY = insets.top + 60 + ART_BOX / 2;
-
-    const targetTranslateX = miniArtCenterX - expandedArtCenterX;
-    const currentTranslateX = interpolate(p, [0, 1], [targetTranslateX, 0], Extrapolate.CLAMP);
-
-    const parentTranslateY = interpolate(p, [0, 1], [SH * 0.8, 0], Extrapolate.CLAMP);
-    const desiredScreenY = interpolate(p, [0, 1], [miniArtCenterY, expandedArtCenterY], Extrapolate.CLAMP);
-    const currentTranslateY = desiredScreenY - parentTranslateY - expandedArtCenterY;
-
-    const currentBorderRadius = interpolate(p, [0, 1], [13 * (ART_BOX / 48), 12], Extrapolate.CLAMP);
-
-    const nextArtScale = interpolate(artSwipeX.value, [0, -SW * 0.4], [0.9, 1.0], Extrapolate.CLAMP);
-    const opacity = interpolate(Math.abs(artSwipeX.value), [0, SW * 0.3], [0, 1], Extrapolate.CLAMP);
-
-    return {
-      opacity: dim * opacity * (1 - surfaceOpenProgress.value),
-      borderRadius: currentBorderRadius,
-      transform: [
-        { translateX: currentTranslateX + artSwipeX.value + (ART_BOX + 24) },
-        { translateY: currentTranslateY + artDismissY.value * 0.3 },
-        { scale: currentScale * nextArtScale },
-      ],
-      display: dim * opacity <= 0.01 ? "none" : "flex"
-    };
-  });
+  const metaStyle = useAnimatedStyle(() => ({
+    opacity: metaFadeProgress.value,
+  }));
 
   const bottomBarOverlayStyle = useAnimatedStyle(() => {
     const p = expandProgress.value;
@@ -1358,23 +1371,11 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
       />
       <Animated.View style={[StyleSheet.absoluteFill, overlayStyle, { backgroundColor: 'transparent' }]} pointerEvents={isExpanded ? "auto" : "none"}>
         
-        {/* Layer 1: Previous Background */}
-        <Animated.View style={[StyleSheet.absoluteFill, prevBgStyle, { backgroundColor: bgBuffers.prevPalette.backgroundBase }]} pointerEvents="none">
-          {bgBuffers.prevArtwork ? (
+        {/* Simplified Background Blur (Single Layer, Reuses Cached Artwork URI) */}
+        <Animated.View style={[StyleSheet.absoluteFill, currentBgStyle, { backgroundColor: '#0C0C14' }]} pointerEvents="none">
+          {currentArtwork ? (
             <View style={StyleSheet.absoluteFill}>
-              <Image source={{ uri: bgBuffers.prevArtwork }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={Platform.OS === "android" ? 80 : 110} />
-              {Platform.OS === "ios" && <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />}
-            </View>
-          ) : (
-            <LinearGradient colors={["#120f26", "#090514"]} style={StyleSheet.absoluteFill} />
-          )}
-        </Animated.View>
-
-        {/* Layer 2: Current Background */}
-        <Animated.View style={[StyleSheet.absoluteFill, currentBgStyle, { backgroundColor: bgBuffers.currentPalette.backgroundBase }]} pointerEvents="none">
-          {bgBuffers.currentArtwork ? (
-            <View style={StyleSheet.absoluteFill}>
-              <Image source={{ uri: bgBuffers.currentArtwork }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={Platform.OS === "android" ? 80 : 110} />
+              <Image source={{ uri: currentArtwork }} style={StyleSheet.absoluteFill} contentFit="cover" blurRadius={Platform.OS === "android" ? 80 : 110} />
               {Platform.OS === "ios" && <BlurView intensity={85} tint="dark" style={StyleSheet.absoluteFill} />}
             </View>
           ) : (
@@ -1390,18 +1391,7 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
 
         <GestureDetector gesture={expandedPan}><View style={{ position: "absolute", top: 0, width: "100%", height: GESTURE_ZONE }} /></GestureDetector>
         
-        {prevTrack && (
-          <Animated.View style={[st.artShadow, { position: "absolute", left: (SW - ART_BOX) / 2, top: insets.top + 60, width: ART_BOX, height: ART_BOX, overflow: "hidden" }, prevArtStyle]}>
-            {prevTrack.art ? (
-              <Image source={{ uri: prevTrack.art }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
-            ) : (
-              <LinearGradient colors={["rgba(255,255,255,0.06)", "rgba(255,255,255,0.01)"]} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-                <Ionicons name="musical-notes" size={40} color="rgba(255,255,255,0.18)" />
-              </LinearGradient>
-            )}
-          </Animated.View>
-        )}
-
+        {/* Card 1: Foreground Card */}
         <GestureDetector gesture={artworkSwipe}>
           <Animated.View style={[st.artShadow, { position: "absolute", left: (SW - ART_BOX) / 2, top: insets.top + 60, width: ART_BOX, height: ART_BOX, overflow: "hidden" }, expArtStyle]}>
             {artworkUri ? <Image source={{ uri: artworkUri }} style={{ width: "100%", height: "100%" }} contentFit="cover" /> : <LinearGradient colors={["rgba(255,255,255,0.06)", "rgba(255,255,255,0.01)"]} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Ionicons name="musical-notes" size={40} color="rgba(255,255,255,0.18)" /></LinearGradient>}
@@ -1409,20 +1399,20 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
           </Animated.View>
         </GestureDetector>
 
-        {nextTrack && (
-          <Animated.View style={[st.artShadow, { position: "absolute", left: (SW - ART_BOX) / 2, top: insets.top + 60, width: ART_BOX, height: ART_BOX, overflow: "hidden" }, nextArtStyle]}>
-            {nextTrack.art ? (
-              <Image source={{ uri: nextTrack.art }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
-            ) : (
-              <LinearGradient colors={["rgba(255,255,255,0.06)", "rgba(255,255,255,0.01)"]} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-                <Ionicons name="musical-notes" size={40} color="rgba(255,255,255,0.18)" />
-              </LinearGradient>
-            )}
-          </Animated.View>
-        )}
+        {/* Card 2: Transition Card (Next/Previous Artwork) */}
+        <Animated.View style={[st.artShadow, { position: "absolute", left: (SW - ART_BOX) / 2, top: insets.top + 60, width: ART_BOX, height: ART_BOX, overflow: "hidden" }, transitionArtStyle]} pointerEvents="none">
+          {transitionArtwork ? (
+            <Image source={{ uri: transitionArtwork }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
+          ) : (
+            <LinearGradient colors={["rgba(255,255,255,0.06)", "rgba(255,255,255,0.01)"]} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <Ionicons name="musical-notes" size={40} color="rgba(255,255,255,0.18)" />
+            </LinearGradient>
+          )}
+        </Animated.View>
+
         <View style={[st.controlsArea, { top: ART_H - 150 }]}>{Platform.OS === "ios" && <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />}</View>
         <Animated.View style={[st.controlsContent, { top: ART_H + 25, bottom: Math.max(insets.bottom + 8, 20) + 70 }, controlsStyle]} pointerEvents={activeSurface === 'controls' ? "box-none" : "none"}>
-          <View style={st.infoRow}>
+          <Animated.View style={[st.infoRow, metaStyle]}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Marquee>
                 <Text style={st.trackTitle} numberOfLines={1}>{currentTrack?.title || "—"}</Text>
@@ -1435,7 +1425,7 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
               <TouchableOpacity onPress={handleLikePress} disabled={isLocked}><Ionicons name={isLiked ? "heart" : "heart-outline"} size={24} color={isLiked ? "#FF3B30" : "#FFF"} /></TouchableOpacity>
               {currentTrack && !isLocalDeviceTrack(currentTrack) && <DownloadButton track={currentTrack} size={24} color="#FFF" />}
             </View>
-          </View>
+          </Animated.View>
           <PlaybackScrubber accentColor={AURA_ACCENT} uiPhase={uiPhase} />
           <View style={st.playbackRow}><SkipBtn icon="play-back" label="Prev" onPress={() => !isLocked && prev()} /><PlayPauseBtn isPlaying={isPlaying} onPress={() => !isLocked && handlePlayPause()} /><SkipBtn icon="play-forward" label="Next" onPress={() => !isLocked && next()} /></View>
           <VolumeControl uiPhase={uiPhase} />
@@ -1451,11 +1441,11 @@ export default function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
             </Animated.View>
           </View>
         </Animated.View>
-        {(activeSurface === 'lyrics' || lastSurface === 'lyrics') && currentTrack && <LyricsSurface visible={activeSurface === 'lyrics'} lyricsData={lyricsData} isLoading={isLyricsLoading} accentColor={AURA_ACCENT} activeLineIndex={activeLineIndex} scrollRef={lyricsScrollRef} viewportH={lyricsViewportH} isUserScrolling={isLyricsUserScrolling} lyricsStyle={lyricsSurfaceStyle} onPressLine={onPressLine} onLayoutLine={onLayoutLine} />}
+        {(activeSurface === 'lyrics' || lastSurface === 'lyrics') && currentTrack && <LyricsSurface visible={activeSurface === 'lyrics'} accentColor={AURA_ACCENT} lyricsStyle={lyricsSurfaceStyle} isLocked={isLocked} />}
       </Animated.View>
       {(activeSurface === 'queue' || lastSurface === 'queue') && <QueueSheet isVisible={activeSurface === 'queue'} onClose={closeQueue} accentColor={AURA_ACCENT} />}
       {activeSurface === 'devices' && <DevicePickerSurface visible={true} onClose={closeDevices} accentColor={AURA_ACCENT} />}
-      {(activeSurface === 'menu' || lastSurface === 'menu') && currentTrack && <MoreMenuSurface visible={activeSurface === 'menu'} onClose={closeMenu} accentColor={AURA_ACCENT} currentTrack={currentTrack} onAddToPlaylist={() => { closeMenu(); setTimeout(() => setShowPlaylist(true), 150); }} onShare={async () => { closeMenu(); try { await Share.share({ message: `Listening to "${currentTrack.title}" by ${currentTrack.artist}` }); const { useAnalyticsStore } = require('../features/analytics/store/analytics.store'); useAnalyticsStore.getState().trackShared(currentTrack.id); } catch(_) {} }} isShuffle={isShuffle} toggleShuffle={toggleShuffle} repeatMode={repeatMode} toggleRepeat={toggleRepeat} />}
+      {(activeSurface === 'menu' || lastSurface === 'menu') && currentTrack && <MoreMenuSurface visible={activeSurface === 'menu'} onClose={closeMenu} accentColor={AURA_ACCENT} currentTrack={currentTrack} onAddToPlaylist={() => { closeMenu(); setTimeout(() => setShowPlaylist(true), 150); }} onShare={async () => { closeMenu(); try { await Share.share({ message: `Listening to "${currentTrack.title}" by ${currentTrack.artist}` }); const { useAnalyticsStore } = require('../features/analytics/store/analytics.store'); useAnalyticsStore.getState().trackShared(currentTrack.id); } catch(_) {} }} />}
       {showInsight && currentTrack && <InsightPanel isVisible={true} onClose={() => setShowInsight(false)} track={currentTrack} accentColor={AURA_ACCENT} />}
       {showPlaylist && currentTrack && <AddToPlaylistSheet visible={true} track={currentTrack} onClose={() => setShowPlaylist(false)} />}
     </View>
@@ -1503,3 +1493,5 @@ const st = StyleSheet.create({
   menuItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16, borderWidth: 0.5, borderColor: "rgba(255,255,255,0.08)", backgroundColor: "rgba(255,255,255,0.03)" },
   menuItemText: { flex: 1, fontSize: 14, fontWeight: "600", color: "rgba(255,255,255,0.9)" },
 });
+
+export default memo(PlayerOverlay);

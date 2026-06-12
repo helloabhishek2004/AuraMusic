@@ -471,7 +471,16 @@ export default function SettingsScreen() {
   });
 
   useEffect(() => {
-    if (!devOpen) return;
+    if (!devOpen) {
+      if (!__DEV__) {
+        RenderDiagnostics.stopMonitoring();
+      }
+      return;
+    }
+
+    if (!__DEV__) {
+      RenderDiagnostics.startMonitoring();
+    }
 
     let active = true;
     const update = async () => {
@@ -499,6 +508,9 @@ export default function SettingsScreen() {
     return () => {
       active = false;
       clearInterval(interval);
+      if (!__DEV__) {
+        RenderDiagnostics.stopMonitoring();
+      }
     };
   }, [devOpen]);
   const [isClearing, setIsClearing] = useState(false);

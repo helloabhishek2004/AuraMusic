@@ -33,6 +33,7 @@ import { useLibraryHealthStore } from '@/src/features/library-health/store/libra
 import { hydrateRecommendationSeed } from '@/src/features/recommendations/services/recommendation-hydrator';
 import { getCanonicalTrackId } from '@/src/features/player/utils/track-identity';
 import { useScrollToTopOnTabPress } from '@/src/hooks/use-scroll-to-top';
+import { FlashList } from '@shopify/flash-list';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 const PAD = 24;
@@ -871,7 +872,7 @@ const SectionHeader = ({ title, onSeeAll }: any) => (
 
 // ── MAIN HOME SCREEN ───────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<any>(null);
   useScrollToTopOnTabPress(scrollRef);
   const insets = useSafeAreaInsets();
   const { bottomPadding } = usePlaybackInsets();
@@ -1493,35 +1494,100 @@ export default function HomeScreen() {
     goNowPlaying(item.id);
   }, [goNowPlaying, setQueue, tracks, setActiveContext, handlePlaySeed]);
 
-  return (
-    <View style={s.root}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+  const sections = useMemo(() => {
+    const list = [];
+    list.push({ id: 'welcome', type: 'welcome' });
+    if (heroSlides.length > 0) {
+      list.push({ id: 'hero', type: 'hero', data: heroSlides });
+    } else {
+      list.push({ id: 'onboarding', type: 'onboarding' });
+    }
+    if (continueListeningTracks.length > 0) {
+      list.push({ id: 'continue_listening', type: 'continue_listening', data: continueListeningTracks });
+    }
+    if (recentlyPlayedTracks.length > 0) {
+      list.push({ id: 'recently_played', type: 'recently_played', data: recentlyPlayedTracks });
+    }
+    if (topSongs && topSongs.length > 0) {
+      list.push({ id: 'top_songs', type: 'top_songs', data: topSongs });
+    }
+    if (dailyMixes && dailyMixes.length > 0) {
+      list.push({ id: 'daily_mixes', type: 'daily_mixes', data: dailyMixes });
+    }
+    if (rowType !== null && (rowType === 'gems' ? hiddenGems.length > 0 : forgottenFavorites.length > 0)) {
+      list.push({ id: 'row_type', type: 'row_type', data: rowType === 'gems' ? hiddenGems : forgottenFavorites, rowType });
+    }
+    if (healthReport && healthReport.storageWasteBytes > 250 * 1024 * 1024) {
+      list.push({ id: 'cleanup', type: 'cleanup', data: healthReport });
+    }
+    if (madeForYou && madeForYou.length > 0) {
+      list.push({ id: 'made_for_you', type: 'made_for_you', data: madeForYou });
+    }
+    if (becauseYouLike && becauseYouLike.length > 0) {
+      list.push({ id: 'because_you_like', type: 'because_you_like', data: becauseYouLike });
+    }
+    if (topArtists && topArtists.length > 0) {
+      list.push({ id: 'top_artists', type: 'top_artists', data: topArtists });
+    }
+    if (favoriteArtists.length > 0) {
+      list.push({ id: 'favorite_artists', type: 'favorite_artists', data: favoriteArtists });
+    }
+    if (favoriteAlbums.length > 0) {
+      list.push({ id: 'favorite_albums', type: 'favorite_albums', data: favoriteAlbums });
+    }
+    if (trendingSeeds && trendingSeeds.length > 0) {
+      list.push({ id: 'trending_now', type: 'trending_now', data: trendingSeeds });
+    }
+    if (rediscover && rediscover.length > 0) {
+      list.push({ id: 'rediscover', type: 'rediscover', data: rediscover });
+    }
+    if (recentlyLoved && recentlyLoved.length > 0) {
+      list.push({ id: 'recently_loved', type: 'recently_loved', data: recentlyLoved });
+    }
+    if (recentlyPlayedArtists.length > 0) {
+      list.push({ id: 'recently_played_artists', type: 'recently_played_artists', data: recentlyPlayedArtists });
+    }
+    return list;
+  }, [
+    heroSlides,
+    continueListeningTracks,
+    recentlyPlayedTracks,
+    topSongs,
+    dailyMixes,
+    rowType,
+    hiddenGems,
+    forgottenFavorites,
+    healthReport,
+    madeForYou,
+    becauseYouLike,
+    topArtists,
+    favoriteArtists,
+    favoriteAlbums,
+    trendingSeeds,
+    rediscover,
+    recentlyLoved,
+    recentlyPlayedArtists
+  ]);
 
-      {/* Animated Gradient Background */}
-      <AnimatedGradientBackground />
-
-      <ScrollView
-        ref={scrollRef}
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={[s.scrollContent, { paddingTop: insets.top + 10, paddingBottom: bottomPadding }]}
-        scrollIndicatorInsets={{ bottom: bottomPadding }}
-        showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-      >
-        {/* Welcome Section */}
-        <MaterialEntrance delay={0}>
-          <View style={s.welcomeSection}>
-            <Text style={s.welcomeTitle}>{greetingData.title}</Text>
-            <Text style={s.welcomeSubtitle}>{greetingData.sub}</Text>
-          </View>
-        </MaterialEntrance>
-
-        {/* Swipeable Hero Featured Cards or Onboarding */}
-        {heroSlides.length > 0 ? (
-          <MaterialEntrance delay={100}>
-            <SwipeableHeroCard albums={heroSlides} onPlay={handlePlayPress} onPressCard={(id: string) => goPlaylist(id)} />
+  const renderSectionItem = useCallback(({ item }: any) => {
+    switch (item.type) {
+      case 'welcome':
+        return (
+          <MaterialEntrance delay={0}>
+            <View style={s.welcomeSection}>
+              <Text style={s.welcomeTitle}>{greetingData.title}</Text>
+              <Text style={s.welcomeSubtitle}>{greetingData.sub}</Text>
+            </View>
           </MaterialEntrance>
-        ) : (
+        );
+      case 'hero':
+        return (
+          <MaterialEntrance delay={100}>
+            <SwipeableHeroCard albums={item.data} onPlay={handlePlayPress} onPressCard={(id: string) => goPlaylist(id)} />
+          </MaterialEntrance>
+        );
+      case 'onboarding':
+        return (
           <MaterialEntrance delay={100}>
             <View style={s.onboardingCard}>
               <PremiumGlass r={32} blur={60} gloss gradient style={s.onboardingGlass}>
@@ -1547,124 +1613,89 @@ export default function HomeScreen() {
               </PremiumGlass>
             </View>
           </MaterialEntrance>
-        )}
-
-        {/* Continue Listening */}
-        {continueListeningTracks.length > 0 && (
+        );
+      case 'continue_listening':
+        return (
           <MaterialEntrance delay={200}>
-            <SectionHeader
-              title="Continue Listening"
-            />
-            <ScrollView
+            <SectionHeader title="Continue Listening" />
+            <FlashList
               horizontal
-              contentInsetAdjustmentBehavior="automatic"
+              data={item.data}
+              renderItem={({ item: track }: any) => (
+                <ContinueListeningCard track={track} onPress={() => handlePlayCLTrack(track)} />
+              )}
+              keyExtractor={(track: any) => track.id}
               showsHorizontalScrollIndicator={false}
-              style={s.hzScroll}
               contentContainerStyle={s.hzScrollContent}
-            >
-              {continueListeningTracks.map((track) => (
-                <ContinueListeningCard
-                  key={track.id}
-                  track={track}
-                  onPress={() => handlePlayCLTrack(track)}
-                />
-              ))}
-            </ScrollView>
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Recently Played */}
-        {recentlyPlayedTracks.length > 0 && (
+        );
+      case 'recently_played':
+        return (
           <MaterialEntrance delay={250}>
-            <SectionHeader
-              title="Recently Played"
-            />
-            <ScrollView
+            <SectionHeader title="Recently Played" />
+            <FlashList
               horizontal
-              contentInsetAdjustmentBehavior="automatic"
+              data={item.data}
+              renderItem={({ item: track }: any) => (
+                <RecentlyPlayedCard track={track} onPress={() => handlePlayRPTrack(track)} />
+              )}
+              keyExtractor={(track: any) => track.playedAt ? track.playedAt.toString() : track.id}
               showsHorizontalScrollIndicator={false}
-              style={s.hzScroll}
               contentContainerStyle={s.hzScrollContent}
-            >
-              {recentlyPlayedTracks.map((track) => (
-                <RecentlyPlayedCard
-                  key={track.playedAt}
-                  track={track}
-                  onPress={() => handlePlayRPTrack(track)}
-                />
-              ))}
-            </ScrollView>
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Your Top Songs */}
-        {topSongs && topSongs.length > 0 && (
+        );
+      case 'top_songs':
+        return (
           <MaterialEntrance delay={260}>
             <SectionHeader title="Your Top Songs" />
-            <ScrollView
+            <FlashList
               horizontal
-              contentInsetAdjustmentBehavior="automatic"
+              data={item.data}
+              renderItem={({ item: song }: any) => (
+                <SeedTrackCard seed={song} onPress={() => handlePlaySeed(song)} />
+              )}
+              keyExtractor={(song: any, idx: number) => `${song.id}-${idx}`}
               showsHorizontalScrollIndicator={false}
-              style={s.hzScroll}
               contentContainerStyle={s.hzScrollContent}
-            >
-              {topSongs.map((item, idx) => (
-                <SeedTrackCard
-                  key={`${item.id}-${idx}`}
-                  seed={item}
-                  onPress={() => handlePlaySeed(item)}
-                />
-              ))}
-            </ScrollView>
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Daily Mixes */}
-        {dailyMixes && dailyMixes.length > 0 && (
+        );
+      case 'daily_mixes':
+        return (
           <MaterialEntrance delay={310}>
             <SectionHeader title="Daily Mixes" />
-            <ScrollView
+            <FlashList
               horizontal
-              contentInsetAdjustmentBehavior="automatic"
+              data={item.data}
+              renderItem={({ item: mix }: any) => (
+                <DailyMixCard seed={mix} onPress={() => goPlaylist(mix.id)} />
+              )}
+              keyExtractor={(mix: any, idx: number) => `${mix.id}-${idx}`}
               showsHorizontalScrollIndicator={false}
-              style={s.hzScroll}
               contentContainerStyle={s.hzScrollContent}
-            >
-              {dailyMixes.map((mix, idx) => (
-                <DailyMixCard
-                  key={`${mix.id}-${idx}`}
-                  seed={mix}
-                  onPress={() => goPlaylist(mix.id)}
-                />
-              ))}
-            </ScrollView>
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Hidden Gems OR Forgotten Favorites */}
-        {rowType !== null && (rowType === 'gems' ? hiddenGems.length > 0 : forgottenFavorites.length > 0) && (
+        );
+      case 'row_type':
+        return (
           <MaterialEntrance delay={315}>
-            <SectionHeader title={rowType === 'gems' ? "Hidden Gems" : "Forgotten Favorites"} />
-            <ScrollView
+            <SectionHeader title={item.rowType === 'gems' ? "Hidden Gems" : "Forgotten Favorites"} />
+            <FlashList
               horizontal
-              contentInsetAdjustmentBehavior="automatic"
+              data={item.data}
+              renderItem={({ item: song }: any) => (
+                <SeedTrackCard seed={song} onPress={() => handlePlaySeed(song)} />
+              )}
+              keyExtractor={(song: any, idx: number) => `${song.id}-${idx}`}
               showsHorizontalScrollIndicator={false}
-              style={s.hzScroll}
               contentContainerStyle={s.hzScrollContent}
-            >
-              {(rowType === 'gems' ? hiddenGems : forgottenFavorites).map((item, idx) => (
-                <SeedTrackCard
-                  key={`${item.id}-${idx}`}
-                  seed={item}
-                  onPress={() => handlePlaySeed(item)}
-                />
-              ))}
-            </ScrollView>
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Library Cleanup Card */}
-        {healthReport && healthReport.storageWasteBytes > 250 * 1024 * 1024 && (
+        );
+      case 'cleanup':
+        return (
           <MaterialEntrance delay={305}>
             <View style={s.cleanupContainer}>
               <TouchableOpacity
@@ -1679,17 +1710,15 @@ export default function HomeScreen() {
                     <View style={s.cleanupTextSection}>
                       <Text style={s.cleanupTag}>LIBRARY CLEANUP</Text>
                       <Text style={s.cleanupTitle}>
-                        Recover {formatBytes(healthReport.storageWasteBytes)}
+                        Recover {formatBytes(item.data.storageWasteBytes)}
                       </Text>
                       <Text style={s.cleanupSub}>
                         {duplicateGroups.length} duplicate songs detected
                       </Text>
                     </View>
-
-                    {/* Circular Progress Ring for Health Score */}
                     <View style={s.cleanupScoreContainer}>
                       <View style={s.scoreCircle}>
-                        <Text style={s.scoreText}>{healthReport.healthScore}</Text>
+                        <Text style={s.scoreText}>{item.data.healthScore}</Text>
                       </View>
                     </View>
                   </View>
@@ -1697,14 +1726,13 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           </MaterialEntrance>
-        )}
-
-        {/* Made For You */}
-        {madeForYou && madeForYou.length > 0 && (
+        );
+      case 'made_for_you':
+        return (
           <MaterialEntrance delay={300}>
             <View style={s.madeForYouSection}>
               <SectionHeader title="Made For You" />
-              {madeForYou.map((seed, idx) => (
+              {item.data.map((seed: any, idx: number) => (
                 <BentoCard
                   key={`${seed.id}-${idx}`}
                   image={seed.image}
@@ -1716,116 +1744,96 @@ export default function HomeScreen() {
               ))}
             </View>
           </MaterialEntrance>
-        )}
-
-        {/* Because You Like */}
-        {becauseYouLike && becauseYouLike.length > 0 && (
+        );
+      case 'because_you_like':
+        return (
           <MaterialEntrance delay={320}>
             <SectionHeader title="Because You Like" />
-            <ScrollView
+            <FlashList
               horizontal
-              contentInsetAdjustmentBehavior="automatic"
+              data={item.data}
+              renderItem={({ item: seed }: any) => (
+                <BecauseYouLikeCard seed={seed} onPress={() => goPlaylist(seed.id)} />
+              )}
+              keyExtractor={(seed: any, idx: number) => `${seed.id}-${idx}`}
               showsHorizontalScrollIndicator={false}
-              style={s.hzScroll}
               contentContainerStyle={s.hzScrollContent}
-            >
-              {becauseYouLike.map((item, idx) => (
-                <BecauseYouLikeCard
-                  key={`${item.id}-${idx}`}
-                  seed={item}
-                  onPress={() => goPlaylist(item.id)}
-                />
-              ))}
-            </ScrollView>
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Top Artists */}
-        {topArtists && topArtists.length > 0 && (
+        );
+      case 'top_artists':
+        return (
           <MaterialEntrance delay={270}>
             <SectionHeader title="Top Artists This Month" />
-            <ScrollView
+            <FlashList
               horizontal
-              contentInsetAdjustmentBehavior="automatic"
-              showsHorizontalScrollIndicator={false}
-              style={s.artistScroll}
-              contentContainerStyle={s.artistScrollContent}
-            >
-              {topArtists.map((artist, idx) => (
+              data={item.data}
+              renderItem={({ item: artist }: any) => (
                 <CircleArtistCard
-                  key={`${artist.id}-${idx}`}
                   name={artist.title}
                   image={artist.image}
                   score={artist.score}
                   onPress={() => handleArtistClick({ name: artist.title, id: artist.id })}
                 />
-              ))}
-            </ScrollView>
+              )}
+              keyExtractor={(artist: any, idx: number) => `${artist.id}-${idx}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.artistScrollContent}
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Favorite Artists */}
-        {favoriteArtists.length > 0 && (
+        );
+      case 'favorite_artists':
+        return (
           <MaterialEntrance delay={275}>
             <SectionHeader title="Favorite Artists" />
-            <ScrollView 
-              horizontal 
-              contentInsetAdjustmentBehavior="automatic" 
-              showsHorizontalScrollIndicator={false} 
-              style={s.artistScroll}
-              contentContainerStyle={s.artistScrollContent}
-            >
-              {favoriteArtists.map((artist) => (
+            <FlashList
+              horizontal
+              data={item.data}
+              renderItem={({ item: artist }: any) => (
                 <CircleArtistCard
-                  key={artist.name}
                   name={artist.name}
                   image={artist.image}
                   score={artist.score}
                   onPress={() => handleArtistClick(artist)}
                 />
-              ))}
-            </ScrollView>
+              )}
+              keyExtractor={(artist: any) => artist.name}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.artistScrollContent}
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Favorite Albums */}
-        {favoriteAlbums.length > 0 && (
+        );
+      case 'favorite_albums':
+        return (
           <MaterialEntrance delay={290}>
             <SectionHeader title="Favorite Albums" />
-            <ScrollView
+            <FlashList
               horizontal
-              contentInsetAdjustmentBehavior="automatic"
-              showsHorizontalScrollIndicator={false}
-              style={s.hzScroll}
-              contentContainerStyle={s.hzScrollContent}
-            >
-              {favoriteAlbums.map((album, idx) => (
+              data={item.data}
+              renderItem={({ item: album }: any) => (
                 <FavoriteAlbumCard
-                  key={`${album.id || album.title}-${idx}`}
                   album={album}
                   onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     goAlbum(album.id);
                   }}
                 />
-              ))}
-            </ScrollView>
+              )}
+              keyExtractor={(album: any, idx: number) => `${album.id || album.title}-${idx}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.hzScrollContent}
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Trending Now */}
-        {trendingSeeds && trendingSeeds.length > 0 && (
+        );
+      case 'trending_now':
+        return (
           <MaterialEntrance delay={500}>
             <SectionHeader title="Trending Now" />
-            <ScrollView 
-              horizontal 
-              contentInsetAdjustmentBehavior="automatic" 
-              showsHorizontalScrollIndicator={false} 
-              style={s.hzScroll}
-              contentContainerStyle={s.hzScrollContent}
-            >
-              {trendingSeeds.map((seed, idx) => (
-                <View key={seed.id} style={{ width: 280, marginRight: 20 }}>
+            <FlashList
+              horizontal
+              data={item.data}
+              renderItem={({ item: seed }: any) => (
+                <View style={{ width: 280, marginRight: 20 }}>
                   <BentoCard
                     image={seed.image}
                     tag={seed.source === 'india' ? 'TRENDING IN INDIA' : 'GLOBAL HITS'}
@@ -1834,81 +1842,97 @@ export default function HomeScreen() {
                     onPress={() => goPlaylist(seed.id)}
                   />
                 </View>
-              ))}
-            </ScrollView>
+              )}
+              keyExtractor={(seed: any) => seed.id}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.hzScrollContent}
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Rediscover */}
-        {rediscover && rediscover.length > 0 && (
+        );
+      case 'rediscover':
+        return (
           <MaterialEntrance delay={330}>
             <SectionHeader title="Rediscover" />
-            <ScrollView
+            <FlashList
               horizontal
-              contentInsetAdjustmentBehavior="automatic"
+              data={item.data}
+              renderItem={({ item: song }: any) => (
+                <SeedTrackCard seed={song} onPress={() => handlePlaySeed(song)} />
+              )}
+              keyExtractor={(song: any, idx: number) => `${song.id}-${idx}`}
               showsHorizontalScrollIndicator={false}
-              style={s.hzScroll}
               contentContainerStyle={s.hzScrollContent}
-            >
-              {rediscover.map((item, idx) => (
-                <SeedTrackCard
-                  key={`${item.id}-${idx}`}
-                  seed={item}
-                  onPress={() => handlePlaySeed(item)}
-                />
-              ))}
-            </ScrollView>
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Recently Loved */}
-        {recentlyLoved && recentlyLoved.length > 0 && (
+        );
+      case 'recently_loved':
+        return (
           <MaterialEntrance delay={340}>
             <SectionHeader title="Recently Loved" />
-            <ScrollView
+            <FlashList
               horizontal
-              contentInsetAdjustmentBehavior="automatic"
+              data={item.data}
+              renderItem={({ item: song }: any) => (
+                <SeedTrackCard seed={song} onPress={() => handlePlaySeed(song)} />
+              )}
+              keyExtractor={(song: any, idx: number) => `${song.id}-${idx}`}
               showsHorizontalScrollIndicator={false}
-              style={s.hzScroll}
               contentContainerStyle={s.hzScrollContent}
-            >
-              {recentlyLoved.map((item, idx) => (
-                <SeedTrackCard
-                  key={`${item.id}-${idx}`}
-                  seed={item}
-                  onPress={() => handlePlaySeed(item)}
-                />
-              ))}
-            </ScrollView>
+            />
           </MaterialEntrance>
-        )}
-
-        {/* Recently Played Artists */}
-        {recentlyPlayedArtists.length > 0 && (
+        );
+      case 'recently_played_artists':
+        return (
           <MaterialEntrance delay={400}>
             <SectionHeader title="Recently Played Artists" />
-            <ScrollView 
-              horizontal 
-              contentInsetAdjustmentBehavior="automatic" 
-              showsHorizontalScrollIndicator={false} 
-              style={s.artistScroll}
-              contentContainerStyle={s.artistScrollContent}
-            >
-              {recentlyPlayedArtists.map((artist, idx) => (
+            <FlashList
+              horizontal
+              data={item.data}
+              renderItem={({ item: artist }: any) => (
                 <CircleArtistCard
-                  key={`${artist.name}-${idx}`}
                   name={artist.name}
                   image={artist.image}
                   onPress={() => handleArtistClick(artist)}
                 />
-              ))}
-            </ScrollView>
+              )}
+              keyExtractor={(artist: any, idx: number) => `${artist.name}-${idx}`}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.artistScrollContent}
+            />
           </MaterialEntrance>
-        )}
+        );
+      default:
+        return null;
+    }
+  }, [
+    greetingData,
+    duplicateGroups.length,
+    handlePlayCLTrack,
+    handlePlayRPTrack,
+    handlePlaySeed,
+    goPlaylist,
+    goAlbum,
+    handleArtistClick,
+    handlePlayPress,
+    router
+  ]);
 
-      </ScrollView>
+  return (
+    <View style={s.root}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
+      {/* Animated Gradient Background */}
+      <AnimatedGradientBackground />
 
+      <FlashList
+        ref={scrollRef}
+        data={sections}
+        renderItem={renderSectionItem}
+        keyExtractor={(item) => item.id}
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[s.scrollContent, { paddingTop: insets.top + 10, paddingBottom: bottomPadding }]}
+        showsVerticalScrollIndicator={false}
+      />
     </View>
   );
 }
