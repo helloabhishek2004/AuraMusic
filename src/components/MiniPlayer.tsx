@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   GestureResponderEvent,
@@ -7,6 +7,8 @@ import {
   Text,
   View,
   ActivityIndicator,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import Reanimated, { 
   useSharedValue, 
@@ -29,13 +31,22 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PressScale } from '@/src/components/ui/press-scale';
 import { glass, radius } from '@/src/design/tokens';
-import { minimumHitSlop, useResponsiveMetrics } from '@/src/hooks/use-responsive-metrics';
+import { minimumHitSlop } from '@/src/hooks/use-responsive-metrics';
+
+import { Dimensions } from 'react-native';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const isLandscape = SCREEN_WIDTH > SCREEN_HEIGHT;
+const isTablet = Math.min(SCREEN_WIDTH, SCREEN_HEIGHT) >= 720;
+const NAV_WIDTH = Math.min(SCREEN_WIDTH - 32, isTablet ? 620 : isLandscape ? 560 : SCREEN_WIDTH - 32);
 import { useMusicControls, useNowPlayingTrack } from '@/src/context/MusicContext';
 import { usePlayerStore } from '../features/player/store/player.store';
 import { impact } from '@/src/utils/haptics';
 import { openNowPlaying } from '@/src/navigation/music-navigation';
 import { playbackProgress } from '@/src/features/player/services/playback-progress';
-import { getTrackArtwork } from '@/src/features/player/utils/track-identity';
+import { getTrackArtwork, getArtworkUrl } from '@/src/features/player/utils/track-identity';
+import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
+import { AuraArtwork } from '@/src/components/ui/aura-artwork';
+import { MotionTiming, MotionSpring, MotionEasing } from '@/src/design/motion';
 
 const DEFAULT_ACCENT = '#BF5AF2';
 
@@ -68,14 +79,28 @@ const h2r = (hex: string, a: number) => {
 
 const Shimmer = memo(({ style }: { style?: any }) => {
   const anim = useRef(new Animated.Value(0)).current;
+  const [appState, setAppState] = useState(AppState.currentState);
+
   useEffect(() => {
-    Animated.loop(
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      setAppState(nextAppState);
+    });
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    if (appState !== 'active') return undefined;
+
+    const animation = Animated.loop(
       Animated.sequence([
         Animated.timing(anim, { toValue: 1, duration: 900, useNativeDriver: true }),
         Animated.timing(anim, { toValue: 0, duration: 900, useNativeDriver: true }),
       ]),
-    ).start();
-  }, [anim]);
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [anim, appState]);
+
   const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.28, 0.55] });
   return <Animated.View style={[{ backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 6, opacity }, style]} />;
 });
@@ -99,15 +124,14 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
   const isBuffering = usePlayerStore(s => s.isBuffering);
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const metrics = useResponsiveMetrics();
 
   // Presence state for smooth entry/exit animations when playback starts/stops
   const presence = useSharedValue(0);
   useEffect(() => {
     if (track) {
-      presence.value = withSpring(1, { damping: 20, stiffness: 180 });
+      presence.value = withSpring(1, MotionSpring.STANDARD);
     } else {
-      presence.value = withSpring(0, { damping: 20, stiffness: 180 });
+      presence.value = withSpring(0, MotionSpring.STANDARD);
     }
   }, [track]);
 
@@ -196,7 +220,15 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
     const renderInnerContent = () => (
       <>
         <Reanimated.View style={[styles.artWrap, miniArtStyle]}>
-          <Image source={{ uri: getTrackArtwork(track) }} style={styles.art} contentFit="cover" transition={180} />
+          <AuraArtwork 
+            source={resolveArtwork(track, 'card')} 
+            entityName={track.title}
+            entityType="song"
+            style={styles.art} 
+            contentFit="cover" 
+            transition={MotionTiming.QUICK}
+            cachePolicy="memory-disk"
+          />
           {isBuffering && <View style={[StyleSheet.absoluteFill, styles.bufferingOverlay]}><ActivityIndicator size="small" color={accent} /></View>}
           {status === 'error' && <View style={[StyleSheet.absoluteFill, styles.errorOverlay]}><Ionicons name="alert-circle" size={20} color="#FFF" /></View>}
           <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.artRim]} />
@@ -252,7 +284,7 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
   };
 
   return (
-    <Reanimated.View style={[styles.container, { bottom, width: metrics.navWidth }, miniPlayerStyle]}>
+    <Reanimated.View style={[styles.container, { bottom, width: NAV_WIDTH }, miniPlayerStyle]}>
       {renderContent()}
     </Reanimated.View>
   );

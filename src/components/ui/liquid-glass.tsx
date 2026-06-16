@@ -17,6 +17,7 @@ type LiquidGlassProps = {
   dense?: boolean;
   gradient?: boolean;
   pointerEvents?: 'auto' | 'none' | 'box-none' | 'box-only';
+  noBlur?: boolean;
 };
 
 function getBlurIntensity(intensity: number) {
@@ -37,8 +38,15 @@ function LiquidGlassComponent({
   dense = false,
   gradient = false,
   pointerEvents,
+  noBlur = false,
 }: LiquidGlassProps) {
-  const backgroundColor = dense ? palette.glassDense : palette.glass;
+  const isAndroid = Platform.OS === 'android';
+  const shouldBlur = !noBlur && (Platform.OS === 'ios');
+  
+  // On Android, we use a slightly more opaque background to simulate glass without the expensive blur
+  const backgroundColor = isAndroid 
+    ? (dense ? 'rgba(30, 30, 40, 0.92)' : 'rgba(25, 25, 35, 0.85)')
+    : (dense ? palette.glassDense : palette.glass);
 
   return (
     <View
@@ -47,13 +55,18 @@ function LiquidGlassComponent({
         styles.shell,
         {
           borderRadius,
-          backgroundColor,
+          backgroundColor: isAndroid ? backgroundColor : 'transparent', // iOS uses BlurView + palette.glass
         },
         style,
       ]}
     >
-      <BlurView intensity={getBlurIntensity(intensity)} tint={tint} style={StyleSheet.absoluteFill} />
-      <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { borderRadius, backgroundColor }]} />
+      {shouldBlur && (
+        <BlurView intensity={getBlurIntensity(intensity)} tint={tint} style={StyleSheet.absoluteFill} />
+      )}
+      
+      {!isAndroid && (
+        <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { borderRadius, backgroundColor: dense ? palette.glassDense : palette.glass }]} />
+      )}
 
       {accentOpacity > 0 && (
         <View

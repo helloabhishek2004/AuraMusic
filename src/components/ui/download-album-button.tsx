@@ -63,6 +63,7 @@ export const DownloadAlbumButton = memo(({ tracks, style }: DownloadAlbumButtonP
   }, [tracks, stats, downloadedTracks, activeTasks, addDownload]);
 
   if (stats.isDownloading) {
+    const { width, minWidth, flex, ...containerStyle } = StyleSheet.flatten(style || {});
     return (
       <View style={[styles.downloadingContainer, style]}>
         <View style={styles.info}>
@@ -80,11 +81,20 @@ export const DownloadAlbumButton = memo(({ tracks, style }: DownloadAlbumButtonP
     );
   }
 
+  const flattenedStyle = StyleSheet.flatten(style || {});
+  const hasFlex = flattenedStyle.flex !== undefined && flattenedStyle.flex !== 0;
+  const hasParentWidth = flattenedStyle.width !== undefined;
+
   return (
     <TouchableOpacity 
       onPress={handlePress}
       activeOpacity={0.8}
-      style={[styles.iconButton, stats.isCompleted && styles.completedButton, style]}
+      style={[
+        styles.iconButton,
+        (hasFlex && !hasParentWidth) && { width: undefined },
+        stats.isCompleted && styles.completedButton,
+        style
+      ]}
     >
       <Ionicons 
         name={stats.isCompleted ? "checkmark-circle" : "cloud-download-outline"} 

@@ -164,6 +164,42 @@ export class LocalMusicService {
   }
 
   /**
+   * Safe and cached extraction of embedded local artwork
+   */
+  static async extractLocalArtwork(assetId: string): Promise<string> {
+    if (Platform.OS !== "android") return "";
+
+    try {
+      // Create local artwork cache directory if it doesn't exist
+      const artworkDir = `${FileSystem.cacheDirectory}artwork/`;
+      const dirInfo = await FileSystem.getInfoAsync(artworkDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(artworkDir, { intermediates: true });
+      }
+
+      // Check if we already cached this artwork
+      const cachedPath = `${artworkDir}${assetId}.jpg`;
+      const cacheInfo = await FileSystem.getInfoAsync(cachedPath);
+      
+      if (cacheInfo.exists) {
+        return `file://${cachedPath}`;
+      }
+
+      // Read asset info to extract embedded artwork
+      // MediaLibrary.getAssetInfoAsync returns a localUri if artwork is present
+      const assetInfo = await MediaLibrary.getAssetInfoAsync(assetId);
+      
+      // Some versions of Android/MediaLibrary don't extract artwork via getAssetInfoAsync properly
+      // We fall back to the generic content:// albumart URI if extraction fails, but this is known to be spotty on A11+
+      return assetInfo?.localUri || `content://media/external/audio/albumart/${assetInfo?.albumId || ''}`;
+
+    } catch (e) {
+      logger.warn(`[LocalSAF] Failed to extract local artwork for ${assetId}:`, e);
+      return "";
+    }
+  }
+
+  /**
    * Scan all device audio folders dynamically using MediaLibrary
    * This covers older and newer Android versions (and iOS) at production level.
    */
@@ -185,12 +221,29 @@ export class LocalMusicService {
       while (hasNextPage) {
         const response = await MediaLibrary.getAssetsAsync({
           mediaType: 'audio',
-          first: 150,
+          first: 200,
           after,
         });
         allAssets = [...allAssets, ...response.assets];
         hasNextPage = response.hasNextPage;
         after = response.endCursor;
+      }
+
+      // 3. Batch extract artwork (with concurrency limit)
+      // This ensures we resolve file URIs instead of content URIs where possible.
+      // We execute concurrently but without blocking the main thread significantly.
+      
+      const MAX_CONCURRENCY = 10;
+      const artworkMap = new Map<string, string>();
+      
+      for (let i = 0; i < allAssets.length; i += MAX_CONCURRENCY) {
+        const chunk = allAssets.slice(i, i + MAX_CONCURRENCY);
+        await Promise.all(chunk.map(async (asset) => {
+          if (asset.albumId) {
+             const uri = await this.extractLocalArtwork(asset.id);
+             artworkMap.set(asset.id, uri);
+          }
+        }));
       }
 
       // Convert assets to MusicTracks
@@ -206,9 +259,8 @@ export class LocalMusicService {
         const s = durSec % 60;
         const timeStr = `${m}:${s.toString().padStart(2, "0")}`;
 
-        const albumArtUri = asset.albumId && Platform.OS === "android"
-          ? `content://media/external/audio/albumart/${asset.albumId}`
-          : "";
+        // Safer Android artwork URI via our extraction cache
+        const albumArtUri = artworkMap.get(asset.id) || "";
 
         const playbackUri = Platform.OS === "android"
           ? `content://media/external/audio/media/${asset.id}`
@@ -218,6 +270,7 @@ export class LocalMusicService {
           id: asset.uri,
           title: title || filename,
           artist: "Local Artist",
+          album: folderName,
           art: albumArtUri,
           isLocal: true,
           localUri: playbackUri,

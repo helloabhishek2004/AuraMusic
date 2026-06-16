@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PlayerTrack } from '../../player/types/player';
-import { catalogTracks } from '../../../data/music-catalog';
+import { catalogTracks, catalogAlbums } from '../../../data/music-catalog';
 
 export function splitArtistNames(artistStr: string): string[] {
   if (!artistStr) return [];
@@ -89,6 +89,12 @@ export interface AnalyticsState {
     startPosition: number;
   } | null;
   
+  // Incremental counters for taste profile
+  totalHistoryCount: number;
+  totalCompletedCount: number;
+  totalSkippedCount: number;
+  activeHoursMap: Record<number, number>;
+
   // Recommendation CTR & Analytics counters
   shownRecommendationsCount: number;
   clickedRecommendationsCount: number;
@@ -97,6 +103,16 @@ export interface AnalyticsState {
   newSongsCompletedCount: number;
 
   analyticsVersion: number;
+  isHydrated: boolean;
+
+  // Push-based Computed Collections (Stable References)
+  computed: {
+    continueListening: HistoryEntry[];
+    recentlyPlayed: HistoryEntry[];
+    topArtists: (AffinityMetric & { name: string })[];
+    topAlbums: (AffinityMetric & { name: string })[];
+    topTracks: (AffinityMetric & { name: string })[];
+  };
 }
 
 export interface AnalyticsActions {
@@ -111,9 +127,12 @@ export interface AnalyticsActions {
   incrementTrackAffinity: (key: string, partial: Partial<AffinityMetric> & { skipWithin15s?: boolean }) => void;
   cacheArtistDetails: (name: string, details: { id: string; image: string }) => void;
   cacheArtistProfile: (profile: ArtistProfile) => void;
-  rebuildTasteProfile: () => void;
+  rebuildTasteProfile: (force?: boolean) => void;
+  rebuildComputedCollections: () => void;
   resetAnalytics: () => void;
+  initialize: () => Promise<void>;
   setCurrentSession: (session: { trackId: string; startedAt: number; startPosition: number } | null) => void;
+  setHydrated: (hydrated: boolean) => void;
 
   // Counter Increments
   incrementShownRecommendations: (count?: number) => void;
@@ -142,6 +161,11 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
       userTasteProfile: null,
       currentSession: null,
 
+      totalHistoryCount: 0,
+      totalCompletedCount: 0,
+      totalSkippedCount: 0,
+      activeHoursMap: {},
+
       shownRecommendationsCount: 0,
       clickedRecommendationsCount: 0,
       completedRecommendationsCount: 0,
@@ -149,12 +173,23 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
       newSongsCompletedCount: 0,
 
       analyticsVersion: 0,
+      isHydrated: false,
+
+      computed: {
+        continueListening: [],
+        recentlyPlayed: [],
+        topArtists: [],
+        topAlbums: [],
+        topTracks: [],
+      },
 
       // Actions
+      setHydrated: (hydrated) => set({ isHydrated: hydrated }),
       addHistoryEntry: (entry) => {
         set((state) => {
-          let newSongsRecommendedCount = state.newSongsRecommendedCount || 0;
-          let newSongsCompletedCount = state.newSongsCompletedCount || 0;
+          let { newSongsRecommendedCount, newSongsCompletedCount, totalHistoryCount, totalCompletedCount, totalSkippedCount, activeHoursMap } = state;
+          newSongsRecommendedCount = newSongsRecommendedCount || 0;
+          newSongsCompletedCount = newSongsCompletedCount || 0;
 
           const isRecommendationContext = entry.sourceContext?.id && (
             entry.sourceContext.id.startsWith('daily-mix-') ||
@@ -174,53 +209,132 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
             }
           }
 
+          const playedAt = Date.now();
+          const hour = new Date(playedAt).getHours();
+          const nextActiveHoursMap = { ...activeHoursMap, [hour]: (activeHoursMap[hour] || 0) + 1 };
+
           const last = state.history[0];
           if (last && last.id === entry.id) {
             // Update top entry: playedAt, positionMs, durationMs, completionRatio, skipped, and changed metadata
             const updated = [...state.history];
+            
+            // Adjust incremental counters if completion/skipped state changed
+            const wasCompleted = last.completionRatio >= 0.9 || !last.skipped;
+            const isCompleted = entry.completionRatio >= 0.9 || !entry.skipped;
+            if (!wasCompleted && isCompleted) totalCompletedCount++;
+            else if (wasCompleted && !isCompleted) totalCompletedCount--;
+
+            if (!last.skipped && entry.skipped) totalSkippedCount++;
+            else if (last.skipped && !entry.skipped) totalSkippedCount--;
+
+            // PRUNE SNAPSHOT: Only store essential fields to reduce memory growth
+            const prunedSnapshot = entry.trackSnapshot ? {
+              id: entry.trackSnapshot.id,
+              title: entry.trackSnapshot.title,
+              artist: entry.trackSnapshot.artist,
+              art: entry.trackSnapshot.art,
+              album: entry.trackSnapshot.album,
+              isLocal: entry.trackSnapshot.isLocal,
+              source: entry.trackSnapshot.source,
+            } as any : undefined;
+
             updated[0] = {
               ...last,
               ...entry,
-              playedAt: Date.now(),
+              playedAt,
+              trackSnapshot: prunedSnapshot,
             };
             return { 
               history: updated, 
               newSongsRecommendedCount,
               newSongsCompletedCount,
+              totalCompletedCount,
+              totalSkippedCount,
+              activeHoursMap: nextActiveHoursMap,
               analyticsVersion: state.analyticsVersion + 1 
             };
           }
 
-          // Prepend new history record (capping at 1000)
+          // New history entry
+          totalHistoryCount++;
+          if (entry.completionRatio >= 0.9 || !entry.skipped) totalCompletedCount++;
+          if (entry.skipped) totalSkippedCount++;
+
+          // PRUNE SNAPSHOT: Only store essential fields to reduce memory growth
+          const prunedSnapshot = entry.trackSnapshot ? {
+            id: entry.trackSnapshot.id,
+            title: entry.trackSnapshot.title,
+            artist: entry.trackSnapshot.artist,
+            art: entry.trackSnapshot.art,
+            album: entry.trackSnapshot.album,
+            isLocal: entry.trackSnapshot.isLocal,
+            source: entry.trackSnapshot.source,
+          } as any : undefined;
+
           const newEntry: HistoryEntry = {
             ...entry,
-            playedAt: Date.now(),
+            playedAt,
+            trackSnapshot: prunedSnapshot,
           };
           const newHistory = [newEntry, ...state.history].slice(0, 1000);
+          
           return { 
             history: newHistory, 
             newSongsRecommendedCount,
             newSongsCompletedCount,
+            totalHistoryCount,
+            totalCompletedCount,
+            totalSkippedCount,
+            activeHoursMap: nextActiveHoursMap,
             analyticsVersion: state.analyticsVersion + 1 
           };
         });
-        get().rebuildTasteProfile();
+        
+        // Push architecture: Rebuild collections when history changes
+        get().rebuildComputedCollections();
+
+        if (get().history.length % 5 === 0) {
+            get().rebuildTasteProfile();
+        }
       },
 
       removeHistoryEntry: (id, playedAt) => {
-        set((state) => ({
-          history: state.history.filter((e) => !(e.id === id && e.playedAt === playedAt)),
-          analyticsVersion: state.analyticsVersion + 1
-        }));
-        get().rebuildTasteProfile();
+        set((state) => {
+            const entry = state.history.find(e => e.id === id && e.playedAt === playedAt);
+            if (!entry) return state;
+
+            let { totalHistoryCount, totalCompletedCount, totalSkippedCount, activeHoursMap } = state;
+            totalHistoryCount = Math.max(0, totalHistoryCount - 1);
+            if (entry.completionRatio >= 0.9 || !entry.skipped) totalCompletedCount = Math.max(0, totalCompletedCount - 1);
+            if (entry.skipped) totalSkippedCount = Math.max(0, totalSkippedCount - 1);
+            
+            const hour = new Date(entry.playedAt).getHours();
+            const nextActiveHoursMap = { ...activeHoursMap, [hour]: Math.max(0, (activeHoursMap[hour] || 0) - 1) };
+
+            return {
+                history: state.history.filter((e) => !(e.id === id && e.playedAt === playedAt)),
+                totalHistoryCount,
+                totalCompletedCount,
+                totalSkippedCount,
+                activeHoursMap: nextActiveHoursMap,
+                analyticsVersion: state.analyticsVersion + 1
+            };
+        });
+        get().rebuildComputedCollections();
+        get().rebuildTasteProfile(true);
       },
 
       clearHistory: () => {
         set((state) => ({ 
           history: [], 
+          totalHistoryCount: 0,
+          totalCompletedCount: 0,
+          totalSkippedCount: 0,
+          activeHoursMap: {},
           analyticsVersion: state.analyticsVersion + 1 
         }));
-        get().rebuildTasteProfile();
+        get().rebuildComputedCollections();
+        get().rebuildTasteProfile(true);
       },
 
       incrementArtistAffinity: (key, partial) => {
@@ -271,10 +385,10 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
             const firstPlayedAt = existing.firstPlayedAt || Date.now();
             const lastPlayedAt = partial.playCount ? Date.now() : (existing.lastPlayedAt || Date.now());
 
-            // Compute consecutive skips for same artist from history
+            // Compute consecutive skips for same artist - only look at recent history for performance
             let consecutiveSkips = 0;
-            const history = state.history || [];
-            for (const entry of history) {
+            const recentHistory = state.history.slice(0, 20);
+            for (const entry of recentHistory) {
               const names = splitArtistNames(entry.artist);
               if (names.includes(artist)) {
                 if (entry.skipped) {
@@ -324,7 +438,7 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
             analyticsVersion: state.analyticsVersion + 1
           };
         });
-        get().rebuildTasteProfile();
+        get().rebuildComputedCollections();
       },
 
       incrementAlbumAffinity: (key, partial) => {
@@ -378,7 +492,7 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
             analyticsVersion: state.analyticsVersion + 1
           };
         });
-        get().rebuildTasteProfile();
+        get().rebuildComputedCollections();
       },
 
       incrementTrackAffinity: (key, partial) => {
@@ -432,7 +546,7 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
             analyticsVersion: state.analyticsVersion + 1
           };
         });
-        get().rebuildTasteProfile();
+        get().rebuildComputedCollections();
       },
 
       cacheArtistDetails: (name, details) => {
@@ -475,62 +589,154 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
         });
       },
 
-      rebuildTasteProfile: () => {
-        set((state) => {
-          const history = state.history || [];
-          if (history.length === 0) return {};
+      rebuildTasteProfile: (force = false) => {
+        const state = get();
+        if (!force && state.history.length === 0) return;
 
-          const sortedArtists = Object.keys(state.artistAffinities)
+        // Perform sorting and derivation outside of state if possible
+        const sortedArtists = Object.keys(state.artistAffinities)
             .map((key) => ({ name: key, score: state.artistAffinities[key].score }))
             .sort((a, b) => b.score - a.score)
             .slice(0, 5)
             .map(a => a.name);
 
-          const sortedAlbums = Object.keys(state.albumAffinities)
+        const sortedAlbums = Object.keys(state.albumAffinities)
             .map((key) => ({ name: key, score: state.albumAffinities[key].score }))
             .sort((a, b) => b.score - a.score)
             .slice(0, 5)
             .map(a => a.name);
 
-          let totalCompleted = 0;
-          let totalSkipped = 0;
-          const activeHoursMap: Record<number, number> = {};
+        const completionRate = state.totalHistoryCount > 0 ? state.totalCompletedCount / state.totalHistoryCount : 0;
+        const skipRate = state.totalHistoryCount > 0 ? state.totalSkippedCount / state.totalHistoryCount : 0;
 
-          for (const entry of history) {
-            if (entry.completionRatio >= 0.9 || !entry.skipped) {
-              totalCompleted++;
-            }
-            if (entry.skipped) {
-              totalSkipped++;
-            }
-            const date = new Date(entry.playedAt);
-            const hour = date.getHours();
-            activeHoursMap[hour] = (activeHoursMap[hour] || 0) + 1;
-          }
-
-          const completionRate = history.length > 0 ? totalCompleted / history.length : 0;
-          const skipRate = history.length > 0 ? totalSkipped / history.length : 0;
-
-          const activeHours = Object.keys(activeHoursMap)
+        const activeHours = Object.keys(state.activeHoursMap)
             .map(Number)
-            .sort((a, b) => activeHoursMap[b] - activeHoursMap[a])
+            .sort((a, b) => state.activeHoursMap[b] - state.activeHoursMap[a])
             .slice(0, 4);
 
-          const uniqueArtists = new Set(history.map((h) => h.artist));
-          const explorationScore = history.length > 0 
-            ? Math.min(100, Math.round((uniqueArtists.size / history.length) * 100))
+        // Approximate exploration score without full-history iteration
+        const uniqueArtistsCount = Object.keys(state.artistAffinities).length;
+        const explorationScore = state.totalHistoryCount > 0 
+            ? Math.min(100, Math.round((uniqueArtistsCount / state.totalHistoryCount) * 100))
             : 50;
 
-          const userTasteProfile: UserTasteProfile = {
+        const userTasteProfile: UserTasteProfile = {
             favoriteArtists: sortedArtists,
             favoriteAlbums: sortedAlbums,
             activeHours,
             completionRate,
             skipRate,
             explorationScore,
-          };
+        };
 
-          return { userTasteProfile };
+        set({ userTasteProfile });
+      },
+
+      rebuildComputedCollections: () => {
+        const state = get();
+        
+        // 1. Continue Listening
+        const seenCL = new Set<string>();
+        const continueListening = state.history
+          .filter((e) => e.positionMs >= 30000 && e.completionRatio < 0.95 && !e.skipped)
+          .sort((a, b) => b.playedAt - a.playedAt)
+          .filter((e) => {
+            if (seenCL.has(e.id)) return false;
+            seenCL.add(e.id);
+            return true;
+          })
+          .slice(0, 10);
+
+        // 2. Recently Played
+        const seenRP = new Set<string>();
+        const recentlyPlayed = state.history
+          .filter((e) => {
+            if (!e.trackSnapshot) return false;
+            const durationMs = e.positionMs || 0;
+            return durationMs >= 15000 && e.completionRatio >= 0.05 && !e.skipped;
+          })
+          .sort((a, b) => b.playedAt - a.playedAt)
+          .filter((e) => {
+            if (seenRP.has(e.id)) return false;
+            seenRP.add(e.id);
+            return true;
+          })
+          .slice(0, 20);
+
+        // 3. Top Artists
+        const topArtists = Object.keys(state.artistAffinities)
+          .map((key) => ({ name: key, ...state.artistAffinities[key] }))
+          .sort((a, b) => (b.score !== a.score ? b.score - a.score : b.playCount - a.playCount))
+          .slice(0, 30);
+
+        // 4. Top Albums
+        const topAlbums = Object.keys(state.albumAffinities)
+          .map((key) => ({ name: key, ...state.albumAffinities[key] }))
+          .sort((a, b) => (b.score !== a.score ? b.score - a.score : b.playCount - a.playCount))
+          .slice(0, 30);
+
+        // 5. Top Tracks
+        const topTracks = Object.keys(state.trackAffinities)
+          .map((key) => {
+            const affinity = state.trackAffinities[key];
+            const playCount = affinity.playCount || 0;
+            const completionRate = playCount > 0 ? (affinity.completionCount || 0) / playCount : 0;
+            const skipRate = playCount > 0 ? (affinity.skipCount || 0) / playCount : 0;
+
+            // Try to find in history to get full metadata
+            const historyMatch = state.history.find(h => h.id === key);
+            // Try to find in catalog
+            const catalogMatch = catalogTracks.find(t => t.id === key);
+            
+            const albumMatch = catalogMatch?.albumId ? catalogAlbums.find(a => a.id === catalogMatch.albumId) : null;
+            const metadata = historyMatch ? {
+              id: historyMatch.id,
+              title: historyMatch.title,
+              artist: historyMatch.artist,
+              art: historyMatch.art,
+              album: historyMatch.album,
+              artistId: historyMatch.artistId,
+              albumId: historyMatch.albumId,
+              url: historyMatch.trackSnapshot?.url || '',
+            } : catalogMatch ? {
+              id: catalogMatch.id,
+              title: catalogMatch.title,
+              artist: catalogMatch.artist,
+              art: catalogMatch.art,
+              album: albumMatch ? albumMatch.title : null,
+              artistId: catalogMatch.artistId,
+              albumId: catalogMatch.albumId || null,
+              url: '',
+            } : {
+              id: key,
+              title: key,
+              artist: 'Unknown Artist',
+              art: null,
+              album: null,
+              artistId: null,
+              albumId: null,
+              url: '',
+            };
+
+            return {
+              ...metadata,
+              ...affinity,
+              completionRate,
+              skipRate,
+              name: key,
+            };
+          })
+          .sort((a, b) => (b.score !== a.score ? b.score - a.score : b.playCount - a.playCount))
+          .slice(0, 30);
+
+        set({
+          computed: {
+            continueListening,
+            recentlyPlayed,
+            topArtists,
+            topAlbums,
+            topTracks,
+          }
         });
       },
 
@@ -544,16 +750,35 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
           artistProfileCache: {},
           userTasteProfile: null,
           currentSession: null,
+          totalHistoryCount: 0,
+          totalCompletedCount: 0,
+          totalSkippedCount: 0,
+          activeHoursMap: {},
           shownRecommendationsCount: 0,
           clickedRecommendationsCount: 0,
           completedRecommendationsCount: 0,
           newSongsRecommendedCount: 0,
           newSongsCompletedCount: 0,
           analyticsVersion: 0,
+          computed: {
+            continueListening: [],
+            recentlyPlayed: [],
+            topArtists: [],
+            topAlbums: [],
+            topTracks: [],
+          },
         });
       },
       setCurrentSession: (currentSession) => {
         set({ currentSession });
+      },
+      initialize: async () => {
+        // Deferred heavy re-computations
+        if (get().history.length > 0) {
+          get().rebuildComputedCollections();
+          get().rebuildTasteProfile(true);
+        }
+        set({ isHydrated: true });
       },
       incrementShownRecommendations: (count = 1) => {
         set((state) => ({ shownRecommendationsCount: (state.shownRecommendationsCount || 0) + count }));
@@ -673,80 +898,37 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
         artistCache: state.artistCache || {},
         artistProfileCache: state.artistProfileCache || {},
         userTasteProfile: state.userTasteProfile || null,
+        totalHistoryCount: state.totalHistoryCount || 0,
+        totalCompletedCount: state.totalCompletedCount || 0,
+        totalSkippedCount: state.totalSkippedCount || 0,
+        activeHoursMap: state.activeHoursMap || {},
         shownRecommendationsCount: state.shownRecommendationsCount || 0,
         clickedRecommendationsCount: state.clickedRecommendationsCount || 0,
         completedRecommendationsCount: state.completedRecommendationsCount || 0,
         newSongsRecommendedCount: state.newSongsRecommendedCount || 0,
         newSongsCompletedCount: state.newSongsCompletedCount || 0,
       }),
+      onRehydrateStorage: (state) => {
+        return (hydratedState, error) => {
+          if (!error && hydratedState) {
+            // Rebuild computed collections once hydrated
+            hydratedState.rebuildComputedCollections();
+          }
+        };
+      },
     }
   )
 );
 
-// Memo-ready sorted selectors
-export const getRecentHistory = (state: AnalyticsState) => {
-  return state.history;
-};
+// Memo-ready sorted selectors (Now using stable state references)
+export const getRecentHistory = (state: AnalyticsState) => state.history;
+export const getContinueListeningCandidates = (state: AnalyticsState) => state.computed.continueListening;
+export const getRecentlyPlayedCandidates = (state: AnalyticsState) => state.computed.recentlyPlayed;
+export const getTopArtists = (state: AnalyticsState) => state.computed.topArtists;
+export const getTopAlbums = (state: AnalyticsState) => state.computed.topAlbums;
+export const getTopTracks = (state: AnalyticsState) => state.computed.topTracks;
 
-export const getContinueListeningCandidates = (state: AnalyticsState) => {
-  const seen = new Set<string>();
-  const list = state.history
-    .filter((e) => e.positionMs >= 30000 && e.completionRatio < 0.95 && !e.skipped)
-    .sort((a, b) => b.playedAt - a.playedAt);
-    
-  return list.filter((e) => {
-    if (seen.has(e.id)) return false;
-    seen.add(e.id);
-    return true;
-  });
-};
-
-export const getRecentlyPlayedCandidates = (state: AnalyticsState) => {
-  const seen = new Set<string>();
-  const list = state.history
-    .filter((e) => {
-      if (!e.trackSnapshot) return false;
-      const durationMs = e.positionMs || 0;
-      const isQualified = durationMs >= 15000 && e.completionRatio >= 0.05 && !e.skipped;
-      return isQualified;
-    })
-    .sort((a, b) => b.playedAt - a.playedAt);
-    
-  return list.filter((e) => {
-    if (seen.has(e.id)) return false;
-    seen.add(e.id);
-    return true;
-  }).slice(0, 20);
-};
-
-export const getTopArtists = (state: AnalyticsState) => {
-  return Object.keys(state.artistAffinities)
-    .map((key) => ({ key, ...state.artistAffinities[key] }))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return b.playCount - a.playCount;
-    });
-};
-
-export const getTopAlbums = (state: AnalyticsState) => {
-  return Object.keys(state.albumAffinities)
-    .map((key) => ({ key, ...state.albumAffinities[key] }))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return b.playCount - a.playCount;
-    });
-};
-
-export const getTopTracks = (state: AnalyticsState) => {
-  return Object.keys(state.trackAffinities)
-    .map((key) => ({ key, ...state.trackAffinities[key] }))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return b.playCount - a.playCount;
-    });
-};
-
-// Rolling Window selectors
+// Rolling Window selectors (Now using stable timestamps)
 export const getHistoryLast7Days = (state: AnalyticsState) => {
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
   return state.history.filter((h) => h.playedAt >= sevenDaysAgo);

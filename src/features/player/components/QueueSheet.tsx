@@ -38,7 +38,9 @@ import { usePlayerStore } from "../store/player.store";
 import { PlayerTrack } from "../types/player";
 import { QueueActionSheet } from "./QueueActionSheet";
 import AddToPlaylistSheet from "@/src/features/playlist/components/AddToPlaylistSheet";
-import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
+import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
+import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
+import { AuraArtwork } from "@/src/components/ui/aura-artwork";
 
 type AnimatedPanGestureEvent = {
   nativeEvent: {
@@ -89,13 +91,17 @@ const Glass = ({
   blur?: number;
   tintColor?: string;
 }) => (
-  <View style={[{ borderRadius: r, overflow: "hidden" }, style]}>
-    <BlurView intensity={blur} tint="dark" style={StyleSheet.absoluteFill} />
+  <View style={[{ 
+    borderRadius: r, 
+    overflow: "hidden",
+    backgroundColor: Platform.OS === 'android' ? 'rgba(25, 25, 35, 0.94)' : 'transparent'
+  }, style]}>
+    {Platform.OS === 'ios' && <BlurView intensity={blur} tint="dark" style={StyleSheet.absoluteFill} />}
     <View
       pointerEvents="none"
       style={[
         StyleSheet.absoluteFill,
-        { borderRadius: r, backgroundColor: SURFACE },
+        { borderRadius: r, backgroundColor: tintColor || SURFACE },
       ]}
     />
     {tintColor && (
@@ -200,15 +206,13 @@ export const QueueSheet = ({
 }: QueueSheetProps) => {
   const insets = useSafeAreaInsets();
   const queue = usePlayerStore((s) => s.queue);
-  const currentIndex = usePlayerStore((s) => s.currentIndex);
+  const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isShuffle = usePlayerStore((s) => s.isShuffle);
-  const jumpToQueueIndex = usePlayerStore((s) => s.jumpToQueueIndex);
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
   const reorderQueue = usePlayerStore((s) => s.reorderQueue);
   const playNext = usePlayerStore((s) => s.playNext);
   const addToQueue = usePlayerStore((s) => s.addToQueue);
   const toggleShuffle = usePlayerStore((s) => s.toggleShuffle);
-  const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isReordering = usePlayerStore((s) => s.isReordering);
 
   // Local copy for smooth dragging
@@ -355,14 +359,14 @@ export const QueueSheet = ({
           accessibilityLabel="Close queue"
           accessibilityRole="button"
         >
-          <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
+          {Platform.OS === 'ios' && <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />}
           <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.55)" }]} />
         </TouchableOpacity>
       </Animated.View>
 
       <Animated.View style={[s.sheet, sheetStyle, { paddingBottom: insets.bottom + 16 }]}>
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <BlurView intensity={72} tint="dark" style={StyleSheet.absoluteFill} />
+          {Platform.OS === 'ios' && <BlurView intensity={72} tint="dark" style={StyleSheet.absoluteFill} />}
           <LinearGradient
             colors={["rgba(12,10,20,0.97)", "rgba(8,8,14,0.99)"]}
             style={StyleSheet.absoluteFill}
@@ -537,17 +541,21 @@ const QueueRow = React.memo(
                 activeOpacity={0.7}
               >
                 <View style={s.artWrap}>
-                  <Image
-                    source={{ uri: getTrackArtwork(item) }}
+                  <AuraArtwork
+                    source={resolveArtwork(item, 'card')}
+                    entityName={item.title}
+                    entityType="song"
                     style={s.art}
                     contentFit="cover"
                     transition={200}
+                    cachePolicy="memory-disk"
+                    borderRadius={14}
                   />
                   <View
                     style={[
                       StyleSheet.absoluteFillObject,
                       {
-                        borderRadius: 12,
+                        borderRadius: 14,
                         borderWidth: 1,
                         borderColor: "rgba(255,255,255,0.08)",
                       },
@@ -844,4 +852,3 @@ const s = StyleSheet.create({
     lineHeight: 22,
   },
 });
-

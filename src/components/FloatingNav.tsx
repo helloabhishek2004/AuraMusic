@@ -32,10 +32,16 @@ import { LiquidGlass } from '@/src/components/ui/liquid-glass';
 import { PressScale } from '@/src/components/ui/press-scale';
 import { glass, motion, palette, radius } from '@/src/design/tokens';
 import { useReducedMotionPreference } from '@/src/hooks/use-accessibility-preferences';
-import { minimumHitSlop, useResponsiveMetrics } from '@/src/hooks/use-responsive-metrics';
+import { minimumHitSlop } from '@/src/hooks/use-responsive-metrics';
 import { hexToRgba } from '@/src/utils/color';
 
 // ─── Layout Constants ─────────────────────────────────────────────────────────
+
+import { Dimensions } from 'react-native';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const isLandscape = SCREEN_WIDTH > SCREEN_HEIGHT;
+const isTablet = Math.min(SCREEN_WIDTH, SCREEN_HEIGHT) >= 720;
+const NAV_WIDTH = Math.min(SCREEN_WIDTH - 32, isTablet ? 620 : isLandscape ? 560 : SCREEN_WIDTH - 32);
 
 const BAR_HEIGHT = 72;
 const PILL_INSET = 5;
@@ -337,10 +343,9 @@ const LiquidPill = memo(({ width, showRipple, onRippleDone }: LiquidPillProps) =
 
 function FloatingNav({ state, descriptors, navigation }: any) {
   const insets = useSafeAreaInsets();
-  const metrics = useResponsiveMetrics();
   const reduceMotion = useReducedMotionPreference();
   const tabCount = state.routes.length;
-  const tabWidth = metrics.navWidth / tabCount;
+  const tabWidth = NAV_WIDTH / tabCount;
   const pillWidth = tabWidth - PILL_INSET * 2;
 
   // Ripple fires on press-in, not after a setTimeout
@@ -470,14 +475,24 @@ function FloatingNav({ state, descriptors, navigation }: any) {
       </Animated.View>
 
       {/* ── Glass bar ─────────────────────────────────────────────────────────── */}
-      <View style={[s.bar, { width: metrics.navWidth }]}>
+      <View style={[s.bar, { width: NAV_WIDTH }]}>
 
         {/* Backdrop blur */}
-        <BlurView
-          intensity={Platform.OS === 'ios' ? 80 : 52}
-          tint="dark"
-          style={[StyleSheet.absoluteFill, { borderRadius: BAR_HEIGHT / 2, overflow: 'hidden' }]}
-        />
+        {Platform.OS === 'ios' ? (
+          <BlurView
+            intensity={80}
+            tint="dark"
+            style={[StyleSheet.absoluteFill, { borderRadius: BAR_HEIGHT / 2, overflow: 'hidden' }]}
+          />
+        ) : (
+          <View 
+            style={[StyleSheet.absoluteFill, { 
+              borderRadius: BAR_HEIGHT / 2, 
+              backgroundColor: 'rgba(15, 15, 20, 0.94)',
+              overflow: 'hidden' 
+            }]} 
+          />
+        )}
 
         {/* Dark charcoal base — the key fix for the screenshot colours */}
         <View

@@ -17,9 +17,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Animated as RNAnimated,
   Dimensions,
-  Easing as RNEasing,
   Modal,
   PanResponder,
   Platform,
@@ -38,6 +36,12 @@ import Animated, {
   useSharedValue,
   withRepeat,
   withTiming,
+  withSpring,
+  withDelay,
+  interpolateColor,
+  interpolate,
+  useAnimatedProps,
+  runOnJS,
   Easing as ReanimatedEasing,
 } from "react-native-reanimated";
 
@@ -58,6 +62,8 @@ const { width: SW } = Dimensions.get("window");
 const PRIMARY = "#BF5AF2";  // purple toggle / ring slice 1
 const SECONDARY = "#46f5e0";  // aqua / ring slice 2
 const BG = "#0F0F13";
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AMBIENT LIQUID BACKGROUND  (3 drifting blobs, Reanimated UI-thread)
@@ -103,7 +109,7 @@ const AmbientBackground = () => {
 // GLASS CARD  (matches .glass-card in HTML)
 // rgba(53,52,58,0.20) bg · blur(24px) · 1px rgba(255,255,255,0.08) border · r=32
 // ─────────────────────────────────────────────────────────────────────────────
-const GlassCard = ({ children, style, r = 32, frosted = false }: {
+const GlassCard = React.memo(({ children, style, r = 32, frosted = false }: {
   children: React.ReactNode; style?: any; r?: number; frosted?: boolean;
 }) => (
   <View style={[{ borderRadius: r, overflow: "hidden" }, style]}>
@@ -118,61 +124,85 @@ const GlassCard = ({ children, style, r = 32, frosted = false }: {
     <LinearGradient colors={["rgba(255,255,255,0.07)", "rgba(255,255,255,0.02)", "transparent"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
     {children}
   </View>
-);
+));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STAGGERED SECTION  (matches .animate-stagger > *:nth-child(n))
 // fadeInUp 0.8s cubic-bezier(0.2,1,0.3,1) forwards with per-index delay
 // ─────────────────────────────────────────────────────────────────────────────
-const Section = ({ children, index }: { children: React.ReactNode; index: number }) => {
-  const opacity = useRef(new RNAnimated.Value(0)).current;
-  const translateY = useRef(new RNAnimated.Value(30)).current;
+const Section = React.memo(({ children, index }: { children: React.ReactNode; index: number }) => {
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(30);
 
   useEffect(() => {
     const delay = 100 + index * 100;
-    RNAnimated.parallel([
-      RNAnimated.timing(opacity, { toValue: 1, duration: 800, delay, easing: RNEasing.bezier(0.2, 1, 0.3, 1), useNativeDriver: true }),
-      RNAnimated.timing(translateY, { toValue: 0, duration: 800, delay, easing: RNEasing.bezier(0.2, 1, 0.3, 1), useNativeDriver: true }),
-    ]).start();
+    opacity.value = withDelay(
+      delay,
+      withTiming(1, { duration: 800, easing: ReanimatedEasing.bezier(0.2, 1, 0.3, 1) })
+    );
+    translateY.value = withDelay(
+      delay,
+      withTiming(0, { duration: 800, easing: ReanimatedEasing.bezier(0.2, 1, 0.3, 1) })
+    );
   }, []);
 
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      opacity: opacity.value,
+      transform: [{ translateY: translateY.value }],
+    };
+  });
+
   return (
-    <RNAnimated.View style={{ opacity, transform: [{ translateY }] }}>
+    <Animated.View style={animatedStyle}>
       {children}
-    </RNAnimated.View>
+    </Animated.View>
   );
-};
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION HEADER LABEL
 // ─────────────────────────────────────────────────────────────────────────────
-const SectionLabel = ({ icon, title }: { icon: string; title: string }) => (
+const SectionLabel = React.memo(({ icon, title }: { icon: string; title: string }) => (
   <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 36, marginBottom: 12, paddingLeft: 4, opacity: 0.6 }}>
     <MaterialIcons name={icon as any} size={14} color="rgba(255,255,255,0.9)" />
     <Text style={{ fontSize: 11, fontWeight: "800", letterSpacing: 2.0, color: "#FFFFFF", textTransform: "uppercase" }}>
       {title}
     </Text>
   </View>
-);
+));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SPRING TOGGLE  (matches .custom-toggle / .custom-toggle.active)
 // cubic-bezier(0.175,0.885,0.32,1.275) bounce
 // ─────────────────────────────────────────────────────────────────────────────
-const Toggle = ({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) => {
-  const anim = useRef(new RNAnimated.Value(value ? 1 : 0)).current;
+const Toggle = React.memo(({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) => {
+  const anim = useSharedValue(value ? 1 : 0);
 
   useEffect(() => {
-    RNAnimated.spring(anim, {
-      toValue: value ? 1 : 0,
-      useNativeDriver: false,
-      tension: 190, friction: 16,   // approximates cubic-bezier(0.175,0.885,0.32,1.275)
-    }).start();
+    anim.value = withSpring(value ? 1 : 0, {
+      damping: 15,
+      stiffness: 150,
+      mass: 0.8,
+    });
   }, [value]);
 
-  const bg = anim.interpolate({ inputRange: [0, 1], outputRange: ["rgba(255,255,255,0.10)", PRIMARY] });
-  const tx = anim.interpolate({ inputRange: [0, 1], outputRange: [2, 26] });
-  const sc = anim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.88, 1] });
+  const animatedTrackStyle = useAnimatedStyle(() => {
+    const backgroundColor = interpolateColor(
+      anim.value,
+      [0, 1],
+      ["rgba(255,255,255,0.10)", PRIMARY]
+    );
+    return { backgroundColor };
+  });
+
+  const animatedThumbStyle = useAnimatedStyle(() => {
+    const translateX = interpolate(anim.value, [0, 1], [2, 26]);
+    const scale = interpolate(anim.value, [0, 0.5, 1], [1, 0.88, 1]);
+    return {
+      transform: [{ translateX }, { scale }],
+    };
+  });
 
   return (
     <Pressable
@@ -181,22 +211,22 @@ const Toggle = ({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
       accessibilityState={{ checked: value }}
       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
     >
-      <RNAnimated.View style={[st.toggleTrack, { backgroundColor: bg }]}>
-        <RNAnimated.View style={[st.toggleThumb, { transform: [{ translateX: tx }, { scale: sc }] }]} />
-      </RNAnimated.View>
+      <Animated.View style={[st.toggleTrack, animatedTrackStyle]}>
+        <Animated.View style={[st.toggleThumb, animatedThumbStyle]} />
+      </Animated.View>
     </Pressable>
   );
-};
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DIVIDER  (divide-y divide-white/5)
 // ─────────────────────────────────────────────────────────────────────────────
-const Divider = () => <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.05)", marginHorizontal: 0 }} />;
+const Divider = React.memo(() => <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.05)", marginHorizontal: 0 }} />);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ROW  (p-6 flex items-center justify-between hover:bg-white/[0.03])
 // ─────────────────────────────────────────────────────────────────────────────
-const Row = ({
+const Row = React.memo(({
   icon, iconColor, iconBg, label, sub, right, onPress, chevron = false,
 }: {
   icon: string; iconColor: string; iconBg: string;
@@ -223,79 +253,59 @@ const Row = ({
 
   if (onPress) {
     return (
-      <TouchableOpacity onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPress(); }} activeOpacity={0.78} style={st.row}>
+      <TouchableOpacity onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPress(); }} activeOpacity={0.7} delayPressIn={0} style={st.row}>
         {Inner}
       </TouchableOpacity>
     );
   }
   return <View style={st.row}>{Inner}</View>;
-};
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CUSTOM SELECT BUTTON  (mimics <select> from HTML)
 // ─────────────────────────────────────────────────────────────────────────────
-const SelectBtn = ({ label, onPress }: { label: string; onPress: () => void }) => (
+const SelectBtn = React.memo(({ label, onPress }: { label: string; onPress: () => void }) => (
   <TouchableOpacity
     onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onPress(); }}
-    activeOpacity={0.78}
+    activeOpacity={0.7}
+    delayPressIn={0}
     style={st.selectBtn}
   >
     <Text style={st.selectTxt}>{label}</Text>
     <MaterialIcons name="keyboard-arrow-down" size={20} color="rgba(255,255,255,0.40)" />
   </TouchableOpacity>
-);
+));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // QUALITY MODAL  (bottom-sheet, spring slide-up)
 // ─────────────────────────────────────────────────────────────────────────────
-const QualityModal = ({ visible, onClose, title, selectedOption, onSelect }: {
+const QualityModal = React.memo(({ visible, onClose, title, selectedOption, onSelect }: {
   visible: boolean; onClose: () => void; title: string;
   selectedOption: AudioQuality; onSelect: (q: AudioQuality) => void;
 }) => {
   const [rendered, setRendered] = useState(visible);
-  const slideY = useRef(new RNAnimated.Value(550)).current;
-  const overlayOp = useRef(new RNAnimated.Value(0)).current;
+  const slideY = useSharedValue(550);
+  const overlayOp = useSharedValue(0);
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (evt, gestureState) => {
-        // Capture downward vertical swipes that are distinct from static taps
         return gestureState.dy > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
       },
       onPanResponderMove: (e, gestureState) => {
         if (gestureState.dy > 0) {
-          slideY.setValue(gestureState.dy);
+          slideY.value = gestureState.dy;
         }
       },
       onPanResponderRelease: (e, gestureState) => {
         if (gestureState.dy > 80 || gestureState.vy > 0.4) {
-          // Quick swipe-down dismissal animation
-          RNAnimated.parallel([
-            RNAnimated.timing(overlayOp, {
-              toValue: 0,
-              duration: 150,
-              easing: RNEasing.in(RNEasing.ease),
-              useNativeDriver: true,
-            }),
-            RNAnimated.timing(slideY, {
-              toValue: 550,
-              duration: 180,
-              easing: RNEasing.out(RNEasing.ease),
-              useNativeDriver: true,
-            }),
-          ]).start(() => {
-            onClose();
-            setRendered(false);
+          overlayOp.value = withTiming(0, { duration: 150 });
+          slideY.value = withTiming(550, { duration: 180 }, () => {
+            runOnJS(onClose)();
           });
         } else {
-          // Snap back into place
-          RNAnimated.spring(slideY, {
-            toValue: 0,
-            tension: 280,
-            friction: 24,
-            useNativeDriver: true,
-          }).start();
+          slideY.value = withSpring(0, { damping: 24, stiffness: 280 });
         }
       },
     })
@@ -304,35 +314,13 @@ const QualityModal = ({ visible, onClose, title, selectedOption, onSelect }: {
   useEffect(() => {
     if (visible) {
       setRendered(true);
-      RNAnimated.parallel([
-        RNAnimated.timing(overlayOp, {
-          toValue: 1,
-          duration: 180,
-          easing: RNEasing.out(RNEasing.ease),
-          useNativeDriver: true,
-        }),
-        RNAnimated.spring(slideY, {
-          toValue: 0,
-          tension: 280,
-          friction: 24,
-          useNativeDriver: true,
-        }),
-      ]).start();
+      overlayOp.value = withTiming(1, { duration: 180 });
+      slideY.value = withSpring(0, { damping: 24, stiffness: 280 });
     } else {
-      RNAnimated.parallel([
-        RNAnimated.timing(overlayOp, {
-          toValue: 0,
-          duration: 150,
-          easing: RNEasing.in(RNEasing.ease),
-          useNativeDriver: true,
-        }),
-        RNAnimated.timing(slideY, {
-          toValue: 550,
-          duration: 180,
-          easing: RNEasing.out(RNEasing.ease),
-          useNativeDriver: true,
-        }),
-      ]).start(() => setRendered(false));
+      overlayOp.value = withTiming(0, { duration: 150 });
+      slideY.value = withTiming(550, { duration: 180 }, () => {
+        runOnJS(setRendered)(false);
+      });
     }
   }, [visible]);
 
@@ -343,16 +331,27 @@ const QualityModal = ({ visible, onClose, title, selectedOption, onSelect }: {
     { label: "Best", value: "best", sub: "320 kbps / Lossless · Premium", icon: "workspace-premium" },
   ];
 
+  const overlayStyle = useAnimatedStyle(() => ({
+    backgroundColor: "rgba(0,0,0,0.65)",
+    opacity: overlayOp.value,
+  }));
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: slideY.value }],
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+  }));
+
   if (!rendered) return null;
 
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      <RNAnimated.View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.65)", opacity: overlayOp }]}>
+      <Animated.View style={[StyleSheet.absoluteFill, overlayStyle]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-      </RNAnimated.View>
+      </Animated.View>
       <View style={{ flex: 1, justifyContent: "flex-end", pointerEvents: "box-none" }}>
-        <RNAnimated.View
-          style={{ transform: [{ translateY: slideY }], paddingHorizontal: 14, paddingBottom: 14 }}
+        <Animated.View
+          style={sheetStyle}
           {...panResponder.panHandlers}
         >
           <GlassCard r={32} frosted>
@@ -369,7 +368,8 @@ const QualityModal = ({ visible, onClose, title, selectedOption, onSelect }: {
                   <TouchableOpacity
                     onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onSelect(opt.value); onClose(); }}
                     style={[st.modalOpt, sel && { backgroundColor: `${PRIMARY}12` }]}
-                    activeOpacity={0.72}
+                    activeOpacity={0.7}
+                    delayPressIn={0}
                   >
                     <View style={[st.modalOptIcon, { backgroundColor: sel ? `${PRIMARY}22` : "rgba(255,255,255,0.06)", borderColor: sel ? `${PRIMARY}40` : "rgba(255,255,255,0.08)" }]}>
                       <MaterialIcons name={opt.icon as any} size={18} color={sel ? PRIMARY : "rgba(170,170,185,0.65)"} />
@@ -388,39 +388,58 @@ const QualityModal = ({ visible, onClose, title, selectedOption, onSelect }: {
               );
             })}
           </GlassCard>
-        </RNAnimated.View>
+        </Animated.View>
       </View>
     </Modal>
   );
-};
-
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CROSSFADE SLIDER
 // ─────────────────────────────────────────────────────────────────────────────
-const CrossfadeSlider = ({ value, panHandlers }: { value: number; panHandlers: any }) => (
-  <View style={{ paddingHorizontal: 24, paddingBottom: 20 }}>
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-      <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", width: 24, textAlign: "center" }}>0s</Text>
-      <View style={{ flex: 1, height: 5, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.08)", position: "relative" }}>
-        <View style={[StyleSheet.absoluteFill, { width: `${(value / 12) * 100}%`, borderRadius: 3, overflow: "hidden" }]}>
-          <LinearGradient colors={[PRIMARY, `${PRIMARY}99`]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+const CrossfadeSlider = React.memo(({ value, panHandlers }: { value: number; panHandlers: any }) => {
+  const animWidth = useSharedValue(value);
+
+  useEffect(() => {
+    animWidth.value = withSpring(value, { damping: 20, stiffness: 150 });
+  }, [value]);
+
+  const fillStyle = useAnimatedStyle(() => {
+    return {
+      width: `${(animWidth.value / 12) * 100}%`,
+    };
+  });
+
+  const thumbStyle = useAnimatedStyle(() => {
+    return {
+      left: `${(animWidth.value / 12) * 100}%`,
+    };
+  });
+
+  return (
+    <View style={{ paddingHorizontal: 24, paddingBottom: 20 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", width: 24, textAlign: "center" }}>0s</Text>
+        <View style={{ flex: 1, height: 5, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.08)", position: "relative" }}>
+          <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: 3, overflow: "hidden" }, fillStyle]}>
+            <LinearGradient colors={[PRIMARY, `${PRIMARY}99`]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+          </Animated.View>
+          <Animated.View style={[st.sliderThumb, { borderColor: PRIMARY, shadowColor: PRIMARY }, thumbStyle]} />
+          <View style={[StyleSheet.absoluteFill, { marginVertical: -14 }]} {...panHandlers} />
         </View>
-        <View style={[st.sliderThumb, { left: `${(value / 12) * 100}%`, borderColor: PRIMARY, shadowColor: PRIMARY }]} />
-        <View style={[StyleSheet.absoluteFill, { marginVertical: -14 }]} {...panHandlers} />
+        <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", width: 28, textAlign: "center" }}>12s</Text>
       </View>
-      <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", width: 28, textAlign: "center" }}>12s</Text>
+      <View style={{ alignItems: "center", marginTop: 8 }}>
+        <Text style={{ fontSize: 12, color: PRIMARY, fontWeight: "700" }}>{value === 0 ? "Off" : `${value}s crossfade`}</Text>
+      </View>
     </View>
-    <View style={{ alignItems: "center", marginTop: 8 }}>
-      <Text style={{ fontSize: 12, color: PRIMARY, fontWeight: "700" }}>{value === 0 ? "Off" : `${value}s crossfade`}</Text>
-    </View>
-  </View>
-);
+  );
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CACHE LIMIT PILLS  (2 GB / 5 GB / 10 GB / ∞)
 // ─────────────────────────────────────────────────────────────────────────────
-const CachePills = ({ current, onSelect }: { current: number | "unlimited"; onSelect: (v: number | "unlimited") => void }) => (
+const CachePills = React.memo(({ current, onSelect }: { current: number | "unlimited"; onSelect: (v: number | "unlimited") => void }) => (
   <View style={{ flexDirection: "row", gap: 8 }}>
     {([2, 5, 10, "unlimited"] as const).map(v => {
       const active = current === v;
@@ -428,7 +447,8 @@ const CachePills = ({ current, onSelect }: { current: number | "unlimited"; onSe
         <TouchableOpacity
           key={v}
           onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onSelect(v); }}
-          activeOpacity={0.8}
+          activeOpacity={0.7}
+          delayPressIn={0}
           style={[st.pill, {
             backgroundColor: active ? `${PRIMARY}33` : "rgba(255,255,255,0.05)",
             borderColor: active ? `${PRIMARY}55` : "rgba(255,255,255,0.06)",
@@ -440,18 +460,45 @@ const CachePills = ({ current, onSelect }: { current: number | "unlimited"; onSe
       );
     })}
   </View>
-);
+));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const settings = useSettingsStore();
+  
+  // Settings selectors
+  const crossfadeDuration = useSettingsStore(s => s.crossfadeDuration);
+  const crossfadeEnabled = useSettingsStore(s => s.crossfadeEnabled);
+  const toggleSetting = useSettingsStore(s => s.toggleSetting);
+  const gaplessPlayback = useSettingsStore(s => s.gaplessPlayback);
+  const normalizeVolume = useSettingsStore(s => s.normalizeVolume);
+  const autoplayEnabled = useSettingsStore(s => s.autoplayEnabled);
+  const smartShuffleEnabled = useSettingsStore(s => s.smartShuffleEnabled);
+  const streamingQualityWifi = useSettingsStore(s => s.streamingQualityWifi);
+  const streamingQualityCellular = useSettingsStore(s => s.streamingQualityCellular);
+  const downloadQualityWifi = useSettingsStore(s => s.downloadQualityWifi);
+  const downloadQualityCellular = useSettingsStore(s => s.downloadQualityCellular);
+  const downloadOnlyOnWifi = useSettingsStore(s => s.downloadOnlyOnWifi);
+  const autoDownloadLikedSongs = useSettingsStore(s => s.autoDownloadLikedSongs);
+  const maxSongCacheGB = useSettingsStore(s => s.maxSongCacheGB);
+  const setMaxSongCache = useSettingsStore(s => s.setMaxSongCache);
+  const setStreamingQuality = useSettingsStore(s => s.setStreamingQuality);
+  const setDownloadQuality = useSettingsStore(s => s.setDownloadQuality);
+  const setCrossfadeDuration = useSettingsStore(s => s.setCrossfadeDuration);
+
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTopOnTabPress(scrollRef);
   const downloadedTracks = useDownloadStore(s => s.downloadedTracks);
-  const telemetry = useTelemetryStore();
+
+  // Telemetry selectors
+  const telemetrySourceErrorCount = useTelemetryStore(s => s.sourceErrorCount);
+  const telemetryLocalRecoveryCount = useTelemetryStore(s => s.localRecoveryCount);
+  const telemetryStreamRecoveryCount = useTelemetryStore(s => s.streamRecoveryCount);
+  const telemetryQueueRepairCount = useTelemetryStore(s => s.queueRepairCount);
+  const telemetryResolverCooldownHits = useTelemetryStore(s => s.resolverCooldownHits);
+  const telemetryResetTelemetry = useTelemetryStore(s => s.resetTelemetry);
 
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [modalType, setModalType] = useState<null | "streamingWifi" | "streamingCellular" | "downloadWifi" | "downloadCellular">(null);
@@ -548,7 +595,10 @@ export default function SettingsScreen() {
       });
   }, [trackAffinities]);
 
-  const recStore = useRecommendationsStore();
+  // Recommendations selectors
+  const generateRecommendations = useRecommendationsStore(s => s.generateRecommendations);
+  const generatedAt = useRecommendationsStore(s => s.generatedAt);
+  const resetRecommendations = useRecommendationsStore(s => s.resetRecommendations);
 
   const totalPlays = useMemo(() => {
     return Object.values(trackAffinities).reduce((acc, t) => acc + (t.playCount || 0), 0);
@@ -625,12 +675,12 @@ export default function SettingsScreen() {
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (e) => {
         const v = Math.round((e.nativeEvent.locationX / (SW - 96)) * 12);
-        settings.setCrossfadeDuration(Math.max(0, Math.min(12, v)));
+        setCrossfadeDuration(Math.max(0, Math.min(12, v)));
         Haptics.selectionAsync();
       },
       onPanResponderMove: (e) => {
         const v = Math.round((e.nativeEvent.locationX / (SW - 96)) * 12);
-        settings.setCrossfadeDuration(Math.max(0, Math.min(12, v)));
+        setCrossfadeDuration(Math.max(0, Math.min(12, v)));
       },
     })
   ).current;
@@ -659,9 +709,9 @@ export default function SettingsScreen() {
   const RADIUS = 88, STROKE_W = 12;
   const CIRC = 2 * Math.PI * RADIUS; // 552.92
 
-  const maxBytes = settings.maxSongCacheGB === "unlimited"
+  const maxBytes = maxSongCacheGB === "unlimited"
     ? 20 * 1024 * 1024 * 1024
-    : (settings.maxSongCacheGB as number) * 1024 * 1024 * 1024;
+    : (maxSongCacheGB as number) * 1024 * 1024 * 1024;
 
   const dlBytes = storageStats?.downloads ?? 0;
   const cacheBytes = storageStats?.songCache ?? 0;
@@ -674,6 +724,23 @@ export default function SettingsScreen() {
     const s = CIRC / (dlFill + cacheFill);
     dlFill *= s; cacheFill *= s;
   }
+
+  const dlFillSV = useSharedValue(0);
+  const cacheFillSV = useSharedValue(0);
+
+  useEffect(() => {
+    dlFillSV.value = withTiming(dlFill, { duration: 800, easing: ReanimatedEasing.out(ReanimatedEasing.ease) });
+    cacheFillSV.value = withTiming(cacheFill, { duration: 800, easing: ReanimatedEasing.out(ReanimatedEasing.ease) });
+  }, [dlFill, cacheFill]);
+
+  const dlCircleProps = useAnimatedProps(() => ({
+    strokeDasharray: `${dlFillSV.value} ${CIRC}`,
+  }));
+
+  const cacheCircleProps = useAnimatedProps(() => ({
+    strokeDasharray: `${cacheFillSV.value} ${CIRC}`,
+    strokeDashoffset: -dlFillSV.value,
+  }));
 
   return (
     <View style={{ flex: 1, backgroundColor: BG }}>
@@ -707,14 +774,10 @@ export default function SettingsScreen() {
               <View style={{ width: 192, height: 192, alignItems: "center", justifyContent: "center", marginBottom: 24 }}>
                 <Svg width={192} height={192} style={{ transform: [{ rotate: "-90deg" }] }}>
                   <Circle cx="96" cy="96" r={RADIUS} fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth={STROKE_W} />
-                  {dlFill > 0 && (
-                    <Circle cx="96" cy="96" r={RADIUS} fill="transparent" stroke={PRIMARY} strokeWidth={STROKE_W}
-                      strokeDasharray={`${dlFill} ${CIRC}`} strokeDashoffset={0} strokeLinecap="round" />
-                  )}
-                  {cacheFill > 0 && (
-                    <Circle cx="96" cy="96" r={RADIUS} fill="transparent" stroke={SECONDARY} strokeWidth={STROKE_W}
-                      strokeDasharray={`${cacheFill} ${CIRC}`} strokeDashoffset={-dlFill} strokeLinecap="round" />
-                  )}
+                  <AnimatedCircle cx="96" cy="96" r={RADIUS} fill="transparent" stroke={PRIMARY} strokeWidth={STROKE_W}
+                    animatedProps={dlCircleProps} strokeLinecap="round" />
+                  <AnimatedCircle cx="96" cy="96" r={RADIUS} fill="transparent" stroke={SECONDARY} strokeWidth={STROKE_W}
+                    animatedProps={cacheCircleProps} strokeLinecap="round" />
                 </Svg>
                 {/* Centre text */}
                 <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -745,11 +808,11 @@ export default function SettingsScreen() {
 
               {/* Action buttons */}
               <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
-                <TouchableOpacity onPress={handleClearCache} activeOpacity={0.78}
+                <TouchableOpacity onPress={handleClearCache} activeOpacity={0.7} delayPressIn={0}
                   style={{ flex: 1, paddingVertical: 12, borderRadius: 14, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", alignItems: "center" }}>
                   <Text style={{ fontSize: 12, fontWeight: "700", color: "#FFF" }}>Clear Cache</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleClearDownloads} activeOpacity={0.78}
+                <TouchableOpacity onPress={handleClearDownloads} activeOpacity={0.7} delayPressIn={0}
                   style={{ flex: 1, paddingVertical: 12, borderRadius: 14, backgroundColor: "rgba(239,68,68,0.08)", borderWidth: 1, borderColor: "rgba(239,68,68,0.18)", alignItems: "center" }}>
                   <Text style={{ fontSize: 12, fontWeight: "700", color: "#f87171" }}>Clear Downloads</Text>
                 </TouchableOpacity>
@@ -768,25 +831,25 @@ export default function SettingsScreen() {
               label="Crossfade" sub="Seamlessly blend tracks"
               right={
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                  {settings.crossfadeEnabled && <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", fontWeight: "600" }}>{settings.crossfadeDuration}s</Text>}
-                  <Toggle value={settings.crossfadeEnabled} onChange={() => settings.toggleSetting("crossfadeEnabled")} />
+                  {crossfadeEnabled && <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", fontWeight: "600" }}>{crossfadeDuration}s</Text>}
+                  <Toggle value={crossfadeEnabled} onChange={() => toggleSetting("crossfadeEnabled")} />
                 </View>
               }
             />
-            {settings.crossfadeEnabled && <CrossfadeSlider value={settings.crossfadeDuration} panHandlers={crossfadePan.panHandlers} />}
+            {crossfadeEnabled && <CrossfadeSlider value={crossfadeDuration} panHandlers={crossfadePan.panHandlers} />}
             <Divider />
             {/* Gapless */}
             <Row
               icon="linear-scale" iconColor="#67E8F9" iconBg="rgba(6,182,212,0.10)"
               label="Gapless Playback" sub="No silence between tracks"
-              right={<Toggle value={settings.gaplessPlayback} onChange={() => settings.toggleSetting("gaplessPlayback")} />}
+              right={<Toggle value={gaplessPlayback} onChange={() => toggleSetting("gaplessPlayback")} />}
             />
             <Divider />
             {/* Normalize */}
             <Row
               icon="volume-up" iconColor="#F9A8D4" iconBg="rgba(236,72,153,0.10)"
               label="Normalize Volume" sub="Consistent level for all songs"
-              right={<Toggle value={settings.normalizeVolume} onChange={() => settings.toggleSetting("normalizeVolume")} />}
+              right={<Toggle value={normalizeVolume} onChange={() => toggleSetting("normalizeVolume")} />}
             />
             <Divider />
             {/* Equalizer */}
@@ -800,14 +863,14 @@ export default function SettingsScreen() {
             <Row
               icon="radio" iconColor="#34D399" iconBg="rgba(52,211,153,0.10)"
               label="Autoplay Radio" sub="Continuation mix when queue ends"
-              right={<Toggle value={settings.autoplayEnabled} onChange={() => settings.toggleSetting("autoplayEnabled")} />}
+              right={<Toggle value={autoplayEnabled} onChange={() => toggleSetting("autoplayEnabled")} />}
             />
             <Divider />
             {/* Smart Shuffle */}
             <Row
               icon="shuffle" iconColor="#60A5FA" iconBg="rgba(96,165,250,0.10)"
               label="Smart Shuffle" sub="Weighted smart track shuffle"
-              right={<Toggle value={settings.smartShuffleEnabled} onChange={() => settings.toggleSetting("smartShuffleEnabled")} />}
+              right={<Toggle value={smartShuffleEnabled} onChange={() => toggleSetting("smartShuffleEnabled")} />}
             />
           </GlassCard>
         </Section>
@@ -817,10 +880,10 @@ export default function SettingsScreen() {
           <SectionLabel icon="high-quality" title="Audio Quality" />
           <View style={{ gap: 16 }}>
             {[
-              { key: "streamingWifi", icon: "wifi", iconColor: "#22d3ee", title: "Wi-Fi Streaming", val: settings.streamingQualityWifi },
-              { key: "streamingCellular", icon: "signal-cellular-alt", iconColor: "#c084fc", title: "Cellular Streaming", val: settings.streamingQualityCellular },
-              { key: "downloadWifi", icon: "downloading", iconColor: "#22d3ee", title: "Download • Wi-Fi", val: settings.downloadQualityWifi },
-              { key: "downloadCellular", icon: "downloading", iconColor: "#c084fc", title: "Download • Cellular", val: settings.downloadQualityCellular },
+              { key: "streamingWifi", icon: "wifi", iconColor: "#22d3ee", title: "Wi-Fi Streaming", val: streamingQualityWifi },
+              { key: "streamingCellular", icon: "signal-cellular-alt", iconColor: "#c084fc", title: "Cellular Streaming", val: streamingQualityCellular },
+              { key: "downloadWifi", icon: "downloading", iconColor: "#22d3ee", title: "Download • Wi-Fi", val: downloadQualityWifi },
+              { key: "downloadCellular", icon: "downloading", iconColor: "#c084fc", title: "Download • Cellular", val: downloadQualityCellular },
             ].map(item => (
               <GlassCard key={item.key} r={24} style={{ padding: 20 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -849,7 +912,7 @@ export default function SettingsScreen() {
                     <Text style={st.rowSub}>Avoid cellular data for downloads</Text>
                   </View>
                 </View>
-                <Toggle value={settings.downloadOnlyOnWifi} onChange={() => settings.toggleSetting("downloadOnlyOnWifi")} />
+                <Toggle value={downloadOnlyOnWifi} onChange={() => toggleSetting("downloadOnlyOnWifi")} />
               </View>
             </View>
             <Divider />
@@ -862,7 +925,7 @@ export default function SettingsScreen() {
                     <Text style={st.rowSub}>Save new favorites automatically</Text>
                   </View>
                 </View>
-                <Toggle value={settings.autoDownloadLikedSongs} onChange={() => settings.toggleSetting("autoDownloadLikedSongs")} />
+                <Toggle value={autoDownloadLikedSongs} onChange={() => toggleSetting("autoDownloadLikedSongs")} />
               </View>
             </View>
             <Divider />
@@ -871,7 +934,7 @@ export default function SettingsScreen() {
               <Text style={{ fontSize: 10, fontWeight: "800", color: "rgba(255,255,255,0.40)", letterSpacing: 2.0, marginBottom: 12, textTransform: "uppercase" }}>
                 Max Song Cache
               </Text>
-              <CachePills current={settings.maxSongCacheGB} onSelect={settings.setMaxSongCache} />
+              <CachePills current={maxSongCacheGB} onSelect={setMaxSongCache} />
             </View>
           </GlassCard>
         </Section>
@@ -883,7 +946,8 @@ export default function SettingsScreen() {
             {/* FAQ */}
             <TouchableOpacity
               onPress={() => Alert.alert("FAQ", "Frequently Asked Questions coming soon.")}
-              activeOpacity={0.78}
+              activeOpacity={0.7}
+              delayPressIn={0}
               style={st.row}
             >
               <View style={st.rowInner}>
@@ -900,7 +964,8 @@ export default function SettingsScreen() {
             {/* Privacy Policy */}
             <TouchableOpacity
               onPress={() => Alert.alert("Privacy Policy", "AuraMusic Privacy Policy coming soon.")}
-              activeOpacity={0.78}
+              activeOpacity={0.7}
+              delayPressIn={0}
               style={st.row}
             >
               <View style={st.rowInner}>
@@ -939,7 +1004,8 @@ export default function SettingsScreen() {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 setDevOpen(!devOpen);
               }}
-              activeOpacity={0.78}
+              activeOpacity={0.7}
+              delayPressIn={0}
               style={st.row}
             >
               <View style={st.rowInner}>
@@ -1023,7 +1089,8 @@ export default function SettingsScreen() {
                       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                       Alert.alert("Success", "Rendering telemetry reset.");
                     }}
-                    activeOpacity={0.78}
+                    activeOpacity={0.7}
+                    delayPressIn={0}
                     style={[st.devOverviewItem, { backgroundColor: "rgba(239,68,68,0.06)", borderColor: "rgba(239,68,68,0.18)" }]}
                   >
                     <MaterialIcons name="refresh" size={18} color="#f87171" style={{ marginBottom: 2 }} />
@@ -1037,36 +1104,37 @@ export default function SettingsScreen() {
                 <Text style={st.devSectionHeader}>Resolver Telemetry</Text>
                 <View style={st.devOverviewGrid}>
                   <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetry.sourceErrorCount}</Text>
+                    <Text style={st.devOverviewVal}>{telemetrySourceErrorCount}</Text>
                     <Text style={st.devOverviewLabel}>Source Errors</Text>
                   </View>
                   <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetry.localRecoveryCount}</Text>
+                    <Text style={st.devOverviewVal}>{telemetryLocalRecoveryCount}</Text>
                     <Text style={st.devOverviewLabel}>Local Recoveries</Text>
                   </View>
                   <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetry.streamRecoveryCount}</Text>
+                    <Text style={st.devOverviewVal}>{telemetryStreamRecoveryCount}</Text>
                     <Text style={st.devOverviewLabel}>Stream Recoveries</Text>
                   </View>
                 </View>
 
                 <View style={st.devOverviewGrid}>
                   <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetry.queueRepairCount}</Text>
+                    <Text style={st.devOverviewVal}>{telemetryQueueRepairCount}</Text>
                     <Text style={st.devOverviewLabel}>Queue Repairs</Text>
                   </View>
                   <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetry.resolverCooldownHits}</Text>
+                    <Text style={st.devOverviewVal}>{telemetryResolverCooldownHits}</Text>
                     <Text style={st.devOverviewLabel}>Cooldown Hits</Text>
                   </View>
                   <TouchableOpacity
                     onPress={() => {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      telemetry.resetTelemetry();
+                      telemetryResetTelemetry();
                       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                       Alert.alert("Success", "Resolver telemetry cleared.");
                     }}
-                    activeOpacity={0.78}
+                    activeOpacity={0.7}
+                    delayPressIn={0}
                     style={[st.devOverviewItem, { backgroundColor: "rgba(239,68,68,0.06)", borderColor: "rgba(239,68,68,0.18)" }]}
                   >
                     <MaterialIcons name="refresh" size={18} color="#f87171" style={{ marginBottom: 2 }} />
@@ -1205,11 +1273,12 @@ export default function SettingsScreen() {
                   <TouchableOpacity
                     onPress={() => {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      recStore.generateRecommendations();
-                      const time = recStore.generatedAt ? new Date(recStore.generatedAt).toLocaleTimeString() : new Date().toLocaleTimeString();
+                      generateRecommendations();
+                      const time = generatedAt ? new Date(generatedAt).toLocaleTimeString() : new Date().toLocaleTimeString();
                       Alert.alert("Recommendations", `Seeds successfully regenerated at ${time}.`);
                     }}
-                    activeOpacity={0.78}
+                    activeOpacity={0.7}
+                    delayPressIn={0}
                     style={st.devActionBtn}
                   >
                     <MaterialIcons name="sync" size={16} color={PRIMARY} />
@@ -1237,7 +1306,8 @@ export default function SettingsScreen() {
                           ]
                         );
                       }}
-                      activeOpacity={0.78}
+                      activeOpacity={0.7}
+                      delayPressIn={0}
                       style={[st.devActionBtn, { flex: 1, borderColor: "rgba(239,68,68,0.2)" }]}
                     >
                       <MaterialIcons name="delete-forever" size={16} color="#f87171" />
@@ -1247,11 +1317,12 @@ export default function SettingsScreen() {
                     <TouchableOpacity
                       onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                        recStore.resetRecommendations();
+                        resetRecommendations();
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                         Alert.alert("Success", "Recommendations store cleared.");
                       }}
-                      activeOpacity={0.78}
+                      activeOpacity={0.7}
+                      delayPressIn={0}
                       style={[st.devActionBtn, { flex: 1 }]}
                     >
                       <MaterialIcons name="refresh" size={16} color="#cbc3d9" />
@@ -1276,15 +1347,15 @@ export default function SettingsScreen() {
               modalType === "downloadWifi" ? "Download · Wi-Fi" : "Download · Cellular"
         }
         selectedOption={
-          modalType === "streamingWifi" ? settings.streamingQualityWifi :
-            modalType === "streamingCellular" ? settings.streamingQualityCellular :
-              modalType === "downloadWifi" ? settings.downloadQualityWifi : settings.downloadQualityCellular
+          modalType === "streamingWifi" ? streamingQualityWifi :
+            modalType === "streamingCellular" ? streamingQualityCellular :
+              modalType === "downloadWifi" ? downloadQualityWifi : downloadQualityCellular
         }
         onSelect={(q) => {
-          if (modalType === "streamingWifi") settings.setStreamingQuality("wifi", q);
-          else if (modalType === "streamingCellular") settings.setStreamingQuality("cellular", q);
-          else if (modalType === "downloadWifi") settings.setDownloadQuality("wifi", q);
-          else settings.setDownloadQuality("cellular", q);
+          if (modalType === "streamingWifi") setStreamingQuality("wifi", q);
+          else if (modalType === "streamingCellular") setStreamingQuality("cellular", q);
+          else if (modalType === "downloadWifi") setDownloadQuality("wifi", q);
+          else setDownloadQuality("cellular", q);
         }}
       />
     </View>

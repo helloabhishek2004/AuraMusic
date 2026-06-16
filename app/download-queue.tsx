@@ -1,4 +1,7 @@
-import { useDownloadStore } from "@/src/features/download/store/download.store";
+import { getArtworkUrl } from '@/src/features/player/utils/track-identity';
+import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
+import { AuraArtwork } from '@/src/components/ui/aura-artwork';
+import { useDownloadStore } from '@/src/features/download/store/download.store';
 import { DownloadQueueItem } from "@/src/features/download/types/download";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
@@ -212,11 +215,15 @@ const DownloadingRow = React.memo(({ item }: RowProps) => {
 
   return (
     <View style={styles.row}>
-      <Image
-        source={{ uri: item.artwork }}
+      <AuraArtwork
+        source={resolveArtwork({ art: item.artwork, title: item.title }, 'card')}
+        entityName={item.title}
+        entityType="song"
         style={styles.artwork}
         contentFit="cover"
         transition={200}
+        cachePolicy="memory-disk"
+        borderRadius={10}
       />
       <View style={styles.infoCol}>
         <Text style={styles.title} numberOfLines={1}>
@@ -272,11 +279,15 @@ const QueuedRow = React.memo(({ item, position }: QueuedRowProps) => {
 
   return (
     <View style={styles.row}>
-      <Image
-        source={{ uri: item.artwork }}
+      <AuraArtwork
+        source={resolveArtwork({ art: item.artwork, title: item.title }, 'card')}
+        entityName={item.title}
+        entityType="song"
         style={styles.artwork}
         contentFit="cover"
         transition={200}
+        cachePolicy="memory-disk"
+        borderRadius={10}
       />
       <View style={styles.infoCol}>
         <Text style={styles.title} numberOfLines={1}>
@@ -299,11 +310,15 @@ const QueuedRow = React.memo(({ item, position }: QueuedRowProps) => {
 const CompletedRow = React.memo(({ item }: RowProps) => {
   return (
     <View style={styles.row}>
-      <Image
-        source={{ uri: item.artwork }}
+      <AuraArtwork
+        source={resolveArtwork({ art: item.artwork, title: item.title }, 'card')}
+        entityName={item.title}
+        entityType="song"
         style={styles.artwork}
         contentFit="cover"
         transition={200}
+        cachePolicy="memory-disk"
+        borderRadius={10}
       />
       <View style={styles.infoCol}>
         <Text style={styles.title} numberOfLines={1}>
@@ -339,11 +354,15 @@ const FailedRow = React.memo(({ item }: RowProps) => {
 
   return (
     <View style={styles.row}>
-      <Image
-        source={{ uri: item.artwork }}
+      <AuraArtwork
+        source={resolveArtwork({ art: item.artwork, title: item.title }, 'card')}
+        entityName={item.title}
+        entityType="song"
         style={styles.artwork}
         contentFit="cover"
         transition={200}
+        cachePolicy="memory-disk"
+        borderRadius={10}
       />
       <View style={styles.infoCol}>
         <Text style={styles.title} numberOfLines={1}>
@@ -502,7 +521,7 @@ export default function DownloadQueueScreen() {
             onToggle={() => setDownloadingCollapsed(!downloadingCollapsed)}
           />
           {!downloadingCollapsed &&
-            downloading.map((item) => <DownloadingRow key={item.trackId} item={item} />)}
+            downloading.map((item, idx) => <DownloadingRow key={`dl-${item.trackId}-${idx}`} item={item} />)}
 
           {/* Queued Section */}
           <SectionHeader
@@ -513,7 +532,7 @@ export default function DownloadQueueScreen() {
           />
           {!queuedCollapsed &&
             queued.map((item, idx) => (
-              <QueuedRow key={item.trackId} item={item} position={idx + 1} />
+              <QueuedRow key={`queued-${item.trackId}-${idx}`} item={item} position={idx + 1} />
             ))}
 
           {/* Completed Section */}
@@ -524,7 +543,7 @@ export default function DownloadQueueScreen() {
             onToggle={() => setCompletedCollapsed(!completedCollapsed)}
           />
           {!completedCollapsed &&
-            completed.map((item) => <CompletedRow key={item.trackId} item={item} />)}
+            completed.map((item, idx) => <CompletedRow key={`completed-${item.trackId}-${idx}`} item={item} />)}
 
           {/* Failed Section */}
           <SectionHeader
@@ -534,7 +553,7 @@ export default function DownloadQueueScreen() {
             onToggle={() => setFailedCollapsed(!failedCollapsed)}
           />
           {!failedCollapsed &&
-            failed.map((item) => <FailedRow key={item.trackId} item={item} />)}
+            failed.map((item, idx) => <FailedRow key={`failed-${item.trackId}-${idx}`} item={item} />)}
 
           {queue.length === 0 && (
             <View style={styles.emptyContainer}>

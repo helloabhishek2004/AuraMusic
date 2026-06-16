@@ -34,6 +34,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import { getArtworkUrl } from '@/src/features/player/utils/track-identity';
+import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
+import { AuraArtwork } from '@/src/components/ui/aura-artwork';
 import { PlayerTrack } from '../types/player';
 import { palette, radius, spacing } from '@/src/design/tokens';
 import { useDownloadStore } from '../../download/store/download.store';
@@ -196,7 +199,6 @@ export const QueueActionSheet = ({
   trackIndex,
 }: QueueActionSheetProps) => {
   const insets = useSafeAreaInsets();
-  const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
 
   if (!visible || !track) return null;
 
@@ -242,7 +244,7 @@ export const QueueActionSheet = ({
           accessibilityLabel="Dismiss menu"
           accessibilityRole="button"
         >
-          <BlurView intensity={36} tint="dark" style={StyleSheet.absoluteFill} />
+          {Platform.OS === 'ios' && <BlurView intensity={36} tint="dark" style={StyleSheet.absoluteFill} />}
           <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.58)' }]} />
         </Pressable>
       </Animated.View>
@@ -257,7 +259,11 @@ export const QueueActionSheet = ({
         ]}
       >
         {/* Background */}
-        <BlurView intensity={68} tint="dark" style={StyleSheet.absoluteFill} />
+        {Platform.OS === 'ios' ? (
+          <BlurView intensity={68} tint="dark" style={StyleSheet.absoluteFill} />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(15, 12, 24, 0.96)' }]} />
+        )}
         <LinearGradient
           colors={['rgba(14,12,24,0.97)', 'rgba(8,8,14,0.99)']}
           style={StyleSheet.absoluteFill}
@@ -274,21 +280,16 @@ export const QueueActionSheet = ({
         <GlassInner r={20} style={s.trackPreview}>
           <View style={s.trackPreviewInner}>
             {/* Art */}
-            {track.art ? (
-              <Image
-                source={{ uri: track.art }}
-                style={s.trackArt}
-                contentFit="cover"
-                transition={200}
-              />
-            ) : (
-              <LinearGradient
-                colors={['rgba(191,90,242,0.22)', 'rgba(90,20,160,0.12)']}
-                style={[s.trackArt, { justifyContent: 'center', alignItems: 'center' }]}
-              >
-                <Ionicons name="musical-note" size={20} color={palette.primary} />
-              </LinearGradient>
-            )}
+            <AuraArtwork
+              source={resolveArtwork(track, 'card')}
+              entityName={track.title}
+              entityType="song"
+              style={s.trackArt}
+              contentFit="cover"
+              transition={200}
+              cachePolicy="memory-disk"
+              borderRadius={13}
+            />
 
             {/* Info */}
             <View style={s.trackMeta}>

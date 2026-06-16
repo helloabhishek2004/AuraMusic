@@ -48,7 +48,8 @@ class AuraAudioSessionModule(reactContext: ReactApplicationContext) : ReactConte
     fun getAudioSessionId(promise: Promise) {
         UiThreadUtil.runOnUiThread {
             try {
-                val sessionId = TrackPlayerPlaybackService.getSharedAudioSessionId()
+                val player = TrackPlayerPlaybackService.sharedExoPlayer
+                val sessionId = player?.audioSessionId ?: 0
                 promise.resolve(sessionId)
             } catch (e: Exception) {
                 promise.reject("ERR_SESSION", e.message)
@@ -59,13 +60,14 @@ class AuraAudioSessionModule(reactContext: ReactApplicationContext) : ReactConte
     @ReactMethod
     fun openSystemEqualizer(promise: Promise) {
         UiThreadUtil.runOnUiThread {
-            val activity = getCurrentActivity()
+            val activity = reactApplicationContext.currentActivity
             if (activity == null) {
                 promise.reject("ERR_ACTIVITY", "No activity")
                 return@runOnUiThread
             }
 
-            val sessionId = TrackPlayerPlaybackService.getSharedAudioSessionId()
+            val player = TrackPlayerPlaybackService.sharedExoPlayer
+            val sessionId = player?.audioSessionId ?: 0
             val packageName = reactApplicationContext.packageName
 
             val intent = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
@@ -95,7 +97,7 @@ class AuraAudioSessionModule(reactContext: ReactApplicationContext) : ReactConte
     fun getDisplaySpecs(promise: Promise) {
         UiThreadUtil.runOnUiThread {
             try {
-                val activity = getCurrentActivity()
+                val activity = reactApplicationContext.currentActivity
                 if (activity == null) {
                     promise.reject("ERR_ACTIVITY", "No activity")
                     return@runOnUiThread
@@ -164,7 +166,7 @@ class AuraAudioSessionModule(reactContext: ReactApplicationContext) : ReactConte
     }
 
     private fun attemptOEMEqualizers(promise: Promise) {
-        val activity = getCurrentActivity() ?: return
+        val activity = reactApplicationContext.currentActivity ?: return
         val oemIntents = listOf(
             "com.sec.android.app.soundalive.SETTING" to "Samsung",
             "com.miui.player.AUDIO_EFFECTS" to "Xiaomi",
@@ -224,6 +226,7 @@ import com.facebook.react.bridge.NativeModule
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.uimanager.ViewManager
 
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 class AuraAudioSessionPackage : ReactPackage {
     override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
         return listOf(AuraAudioSessionModule(reactContext))

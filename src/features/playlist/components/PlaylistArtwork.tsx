@@ -16,6 +16,9 @@ import { View, StyleSheet, ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { getArtworkUrl } from '@/src/features/player/utils/track-identity';
+import { resolveArtwork, isGeneratedArtwork } from '@/src/features/player/utils/artwork-resolver';
+import { AuraArtwork } from '@/src/components/ui/aura-artwork';
 import type { Playlist } from '../types/playlist';
 import { getCollageArtUrls } from '../utils/playlist-metrics';
 
@@ -24,11 +27,21 @@ interface PlaylistArtworkProps {
   size: number;
   style?: ViewStyle;
   borderRadius?: number;
+  cachePolicy?: 'none' | 'disk' | 'memory' | 'memory-disk';
 }
 
 const PlaylistArtwork = React.memo(
-  ({ playlist, size, style, borderRadius = 14 }: PlaylistArtworkProps) => {
+  ({ playlist, size, style, borderRadius = 14, cachePolicy = 'memory-disk' }: PlaylistArtworkProps) => {
+    const containerStyle: ViewStyle = {
+      width: size,
+      height: size,
+      borderRadius,
+      overflow: 'hidden',
+      ...(style as object),
+    };
+
     const gradientColors = useMemo(() => {
+      if (!playlist) return ['#bf5af2', '#6f2bbe'] as [string, string];
       const raw = playlist.gradientColors || ['#bf5af2', '#6f2bbe'];
       const hasYellow = raw.some(c => {
         const lower = c.toLowerCase();
@@ -38,38 +51,44 @@ const PlaylistArtwork = React.memo(
         return ['#d946ef', '#701a75'] as [string, string];
       }
       return raw;
-    }, [playlist.gradientColors]);
+    }, [playlist?.gradientColors]);
 
     // Memoize with stable primitive deps — no object identity churn
     const artUrls = useMemo(
-      () => getCollageArtUrls(playlist, 4),
+      () => {
+        if (!playlist) return [];
+        return getCollageArtUrls(playlist, 4);
+      },
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [
-        playlist.coverArt,
+        playlist?.coverArt,
         // Join trackIds for stable primitive comparison
-        playlist.trackIds.join(','),
+        playlist?.trackIds?.join(','),
         // Snapshot keys (only changes when tracks are added/removed)
-        playlist.trackSnapshots ? Object.keys(playlist.trackSnapshots).join(',') : '',
+        playlist?.trackSnapshots ? Object.keys(playlist?.trackSnapshots).join(',') : '',
       ]
     );
 
-    const containerStyle: ViewStyle = {
-      width: size,
-      height: size,
-      borderRadius,
-      overflow: 'hidden',
-      ...(style as object),
-    };
-
-    // ── Case 1: Custom cover art ───────────────────────────────────────────
-    if (playlist.coverArt) {
+    if (!playlist) {
       return (
         <View style={containerStyle}>
-          <Image
-            source={{ uri: playlist.coverArt }}
+          <LinearGradient colors={gradientColors} style={StyleSheet.absoluteFill} />
+        </View>
+      );
+    }
+
+    // ── Case 1: Custom cover art ───────────────────────────────────────────
+    if (playlist.coverArt && !isGeneratedArtwork(playlist.coverArt)) {
+      return (
+        <View style={containerStyle}>
+          <AuraArtwork
+            source={getArtworkUrl({ art: playlist.coverArt }, 'album')}
+            entityName={playlist.name}
+            entityType="playlist"
             style={StyleSheet.absoluteFill}
             contentFit="cover"
             transition={200}
+            cachePolicy={cachePolicy}
           />
         </View>
       );
@@ -80,13 +99,16 @@ const PlaylistArtwork = React.memo(
       const half = size / 2;
       return (
         <View style={[containerStyle, styles.collage]}>
-          {artUrls.slice(0, 4).map((uri, i) => (
-            <Image
+          {artUrls.slice(0, 4).map((uri: string, i: number) => (
+            <AuraArtwork
               key={i}
-              source={{ uri }}
+              source={resolveArtwork({ art: uri }, 'card')}
+              entityName={playlist.name}
+              entityType="song"
               style={{ width: half, height: half }}
               contentFit="cover"
               transition={200}
+              cachePolicy={cachePolicy}
             />
           ))}
         </View>
@@ -97,31 +119,29 @@ const PlaylistArtwork = React.memo(
     if (artUrls.length > 0) {
       return (
         <View style={containerStyle}>
-          <Image
-            source={{ uri: artUrls[0] }}
+          <AuraArtwork
+            source={resolveArtwork({ art: artUrls[0] }, 'card')}
+            entityName={playlist.name}
+            entityType="song"
             style={StyleSheet.absoluteFill}
             contentFit="cover"
             transition={200}
+            cachePolicy={cachePolicy}
           />
         </View>
       );
     }
 
-    // ── Case 4: Gradient placeholder ──────────────────────────────────────
+    // ── Case 4: Generated fallback ──────────────────────────────────────
     return (
       <View style={containerStyle}>
-        <LinearGradient
-          colors={gradientColors}
-          style={[StyleSheet.absoluteFill, styles.gradientCenter]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          <Ionicons
-            name="musical-notes"
-            size={size * 0.35}
-            color="rgba(255,255,255,0.6)"
-          />
-        </LinearGradient>
+        <AuraArtwork
+          source={resolveArtwork(playlist, 'album')}
+          entityName={playlist.name}
+          entityType="playlist"
+          style={StyleSheet.absoluteFill}
+          fallbackIcon="musical-notes"
+        />
       </View>
     );
   }

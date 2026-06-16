@@ -20,7 +20,9 @@
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
 import { useMusic } from "@/src/context/MusicContext";
 import { PlayerTrack } from "@/src/features/player/types/player";
-import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
+import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
+import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
+import { AuraArtwork } from "@/src/components/ui/aura-artwork";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { useRecentSearchStore } from "@/src/features/search/store/recent-search.store";
 import { RecentSearchItem } from "@/src/features/search/types/recent-search";
@@ -44,6 +46,8 @@ import React, {
   useState,
   memo,
 } from "react";
+import { MotionTiming, MotionSpring, MotionEasing } from "@/src/design/motion";
+import { ScrollPhysics } from "@/src/design/scroll-physics";
 import {
   Animated,
   Dimensions,
@@ -58,20 +62,18 @@ import {
   TouchableOpacity,
   View,
   Keyboard,
-  TouchableWithoutFeedback,
+  InteractionManager,
+  AppState,
 } from "react-native";
 import { useScrollToTopOnTabPress } from "@/src/hooks/use-scroll-to-top";
-import Reanimated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePlaybackInsets } from "@/src/hooks/use-playback-insets";
+import AnimatedReanimated, { FadeInUp } from "react-native-reanimated";
+import { usePathname } from "expo-router";
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
-const { width: SW, height: SH } = Dimensions.get("window");
+const { width: SW, height: SH } = Dimensions.get('window');
 const isTablet = SW >= 768;
 const isLargePhone = SW >= 414;
 const PAD = isTablet ? 32 : isLargePhone ? 22 : 18;
@@ -101,9 +103,7 @@ const C = {
 } as const;
 
 // Spring presets
-const SPR_SOFT = { tension: 60, friction: 9 };
 const SPR_SNAP = { tension: 200, friction: 10 };
-const SPR_TAB = { damping: 22, stiffness: 280, mass: 0.8 };
 const SPR_POP = { tension: 220, friction: 8 };
 const SPR_SLIDE = { tension: 66, friction: 9 };
 
@@ -122,7 +122,6 @@ const TRACK_URLS: Record<string, string> = {
 };
 
 // ─── Glass Card ───────────────────────────────────────────────────────────────
-// iOS 26 multi-layer: blur + charcoal base + top specular + left fresnel + border
 
 const Glass = ({
   children,
@@ -139,7 +138,11 @@ const Glass = ({
 }) => (
   <View style={[{ borderRadius: r, overflow: "hidden" }, style]}>
     {/* Backdrop blur */}
-    <BlurView intensity={blur} tint="dark" style={StyleSheet.absoluteFill} />
+    {Platform.OS === 'ios' ? (
+      <BlurView intensity={blur} tint="dark" style={StyleSheet.absoluteFill} />
+    ) : (
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(15, 15, 22, 0.92)' }]} />
+    )}
 
     {/* Dark charcoal base */}
     <View
@@ -181,21 +184,6 @@ const Glass = ({
       }}
     />
 
-    {/* Left fresnel shimmer */}
-    <View
-      pointerEvents="none"
-      style={{
-        position: "absolute",
-        left: 6,
-        top: r * 0.3,
-        bottom: r * 0.3,
-        width: 2,
-        backgroundColor: "rgba(255,255,255,0.10)",
-        transform: [{ skewX: "-8deg" }],
-        zIndex: 9,
-      }}
-    />
-
     {/* Border */}
     <View
       pointerEvents="none"
@@ -226,35 +214,13 @@ const Mat = ({
   delay?: number;
   style?: any;
 }) => {
-  const sc = useRef(new Animated.Value(0.94)).current;
-  const op = useRef(new Animated.Value(0)).current;
-  const ty = useRef(new Animated.Value(10)).current;
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      Animated.parallel([
-        Animated.spring(sc, { toValue: 1, ...SPR_SOFT, useNativeDriver: true }),
-        Animated.timing(op, {
-          toValue: 1,
-          duration: 300,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.spring(ty, { toValue: 0, ...SPR_SOFT, useNativeDriver: true }),
-      ]).start();
-    }, delay);
-    return () => clearTimeout(t);
-  }, []);
-
   return (
-    <Animated.View
-      style={[
-        { opacity: op, transform: [{ scale: sc }, { translateY: ty }] },
-        style,
-      ]}
+    <AnimatedReanimated.View 
+      entering={FadeInUp.delay(delay).duration(MotionTiming.ENTRANCE)} 
+      style={style}
     >
       {children}
-    </Animated.View>
+    </AnimatedReanimated.View>
   );
 };
 
@@ -265,13 +231,15 @@ const usePress = () => {
   const onIn = () =>
     Animated.spring(sc, {
       toValue: 0.94,
-      ...SPR_SNAP,
+      damping: MotionSpring.TAPPING.damping,
+      stiffness: MotionSpring.TAPPING.stiffness,
       useNativeDriver: true,
     }).start();
   const onOut = () =>
     Animated.spring(sc, {
       toValue: 1.0,
-      ...SPR_SNAP,
+      damping: MotionSpring.TAPPING.damping,
+      stiffness: MotionSpring.TAPPING.stiffness,
       useNativeDriver: true,
     }).start();
   return { sc, onIn, onOut };
@@ -333,7 +301,7 @@ const Shimmer = ({
         }),
       ]),
     ).start();
-  }, []);
+  }, [op]);
   return (
     <Animated.View
       style={[
@@ -426,109 +394,104 @@ const SectionHead = ({
 const SongRow = ({
   song,
   onPlay,
-  onPlayNext,
-  onAddToQueue,
-  delay = 0,
   isActive = false,
 }: any) => {
   const p = usePress();
   const h = useHeart(song);
 
   return (
-    <Mat delay={delay}>
-      <Animated.View style={{ transform: [{ scale: p.sc }] }}>
-        <Glass
-          style={s.songCard}
-          r={18}
-          blur={52}
-          tintColor={isActive ? h2r(C.primary, 0.07) : undefined}
+    <Animated.View style={{ transform: [{ scale: p.sc }] }}>
+      <Glass
+        style={s.songCard}
+        r={18}
+        blur={52}
+        tintColor={isActive ? h2r(C.primary, 0.07) : undefined}
+      >
+        <TouchableOpacity
+          style={s.songInner}
+          onPressIn={p.onIn}
+          onPressOut={p.onOut}
+          onPress={() => onPlay(song)}
+          activeOpacity={1}
+          accessibilityRole="button"
+          accessibilityLabel={`Play ${song.title} by ${song.artist}`}
         >
-          <TouchableOpacity
-            style={s.songInner}
-            onPressIn={p.onIn}
-            onPressOut={p.onOut}
-            onPress={() => onPlay(song)}
-            activeOpacity={1}
-            accessibilityRole="button"
-            accessibilityLabel={`Play ${song.title} by ${song.artist}`}
-          >
-            {/* Artwork */}
-            {getTrackArtwork(song) ? (
-              <Image
-                source={{ uri: getTrackArtwork(song) }}
-                style={s.songArt}
-                contentFit="cover"
-                transition={200}
-              />
-            ) : (
-              <LinearGradient
-                colors={["rgba(191,90,242,0.22)", "rgba(90,20,160,0.12)"]}
-                style={[
-                  s.songArt,
-                  { justifyContent: "center", alignItems: "center" },
-                ]}
-              >
-                <Ionicons name="musical-note" size={20} color={C.primary} />
-              </LinearGradient>
-            )}
-
-            {/* Info */}
-            <View style={s.songMeta}>
-              <Text
-                style={[s.songTitle, isActive && { color: C.primary }]}
-                numberOfLines={1}
-              >
-                {song.title}
-              </Text>
-              <Text style={s.songArtist} numberOfLines={1}>
-                {song.artist}
-              </Text>
-            </View>
-
-            {/* Duration */}
-            <Text style={s.songTime}>{song.time}</Text>
-
-            {/* Heart */}
-
-            <Animated.View style={{ transform: [{ scale: h.sc }] }}>
-              <TouchableOpacity
-                onPress={h.toggle}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityLabel={h.liked ? "Unlike" : "Like"}
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name={h.liked ? "heart" : "heart-outline"}
-                  size={18}
-                  color={h.liked ? C.primary : "rgba(255,255,255,0.25)"}
-                />
-              </TouchableOpacity>
-            </Animated.View>
-
-            {/* Download */}
-            <DownloadButton
-              track={{
-                id: song.id,
-                title: song.title,
-                artist: song.artist,
-                art: song.art,
-                url: song.url || TRACK_URLS[song.id] || "",
-                duration: 0, // Placeholder
-              }}
-              size={18}
-              color="rgba(255,255,255,0.25)"
-              style={{ marginLeft: 4 }}
+          {/* Artwork */}
+          {getArtworkUrl(song, 'card') ? (
+            <Image
+              source={{ uri: getArtworkUrl(song, 'card') }}
+              style={s.songArt}
+              contentFit="cover"
+              transition={200}
+              cachePolicy="memory-disk"
             />
-          </TouchableOpacity>
-        </Glass>
-      </Animated.View>
-    </Mat>
+          ) : (
+            <LinearGradient
+              colors={["rgba(191,90,242,0.22)", "rgba(90,20,160,0.12)"]}
+              style={[
+                s.songArt,
+                { justifyContent: "center", alignItems: "center" },
+              ]}
+            >
+              <Ionicons name="musical-note" size={20} color={C.primary} />
+            </LinearGradient>
+          )}
+
+          {/* Info */}
+          <View style={s.songMeta}>
+            <Text
+              style={[s.songTitle, isActive && { color: C.primary }]}
+              numberOfLines={1}
+            >
+              {song.title}
+            </Text>
+            <Text style={s.songArtist} numberOfLines={1}>
+              {song.artist}
+            </Text>
+          </View>
+
+          {/* Duration */}
+          <Text style={s.songTime}>{song.time}</Text>
+
+          {/* Heart */}
+          <Animated.View style={{ transform: [{ scale: h.sc }] }}>
+            <TouchableOpacity
+              onPress={h.toggle}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel={h.liked ? "Unlike" : "Like"}
+              accessibilityRole="button"
+            >
+              <Ionicons
+                name={h.liked ? "heart" : "heart-outline"}
+                size={18}
+                color={h.liked ? C.primary : "rgba(255,255,255,0.25)"}
+              />
+            </TouchableOpacity>
+          </Animated.View>
+
+          {/* Download */}
+          <DownloadButton
+            track={{
+              id: song.id,
+              title: song.title,
+              artist: song.artist,
+              art: song.art,
+              url: song.url || TRACK_URLS[song.id] || "",
+              duration: 0,
+            }}
+            size={18}
+            color="rgba(255,255,255,0.25)"
+            style={{ marginLeft: 4 }}
+          />
+        </TouchableOpacity>
+      </Glass>
+    </Animated.View>
   );
 };
 
 // ─── Artist Row ───────────────────────────────────────────────────────────────
 
-const ArtistRow = ({ artist, delay = 0, onPress }: any) => {
+const ArtistRow = ({ artist, onPress }: any) => {
   const p = usePress();
   const [following, setFollowing] = useState(false);
   const followSc = useRef(new Animated.Value(1)).current;
@@ -551,158 +514,156 @@ const ArtistRow = ({ artist, delay = 0, onPress }: any) => {
   };
 
   return (
-    <Mat delay={delay}>
-      <Animated.View style={{ transform: [{ scale: p.sc }] }}>
-        <Glass style={s.artistCard} r={18} blur={50}>
-          <TouchableOpacity
-            style={s.artistInner}
-            onPressIn={p.onIn}
-            onPressOut={p.onOut}
-            onPress={onPress}
-            activeOpacity={1}
-            accessibilityRole="button"
-            accessibilityLabel={`Open ${artist.name}`}
-          >
-            {/* Avatar */}
-            <View style={s.avatarWrap}>
-              <Image
-                source={{ uri: artist.art }}
-                style={s.artistAvatar}
-                contentFit="cover"
+    <Animated.View style={{ transform: [{ scale: p.sc }] }}>
+      <Glass style={s.artistCard} r={18} blur={50}>
+        <TouchableOpacity
+          style={s.artistInner}
+          onPressIn={p.onIn}
+          onPressOut={p.onOut}
+          onPress={onPress}
+          activeOpacity={1}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${artist.name}`}
+        >
+          {/* Avatar */}
+          <View style={s.avatarWrap}>
+            <Image
+              source={{ uri: getArtworkUrl({ art: artist.art }, 'card') }}
+              style={s.artistAvatar}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+            />
+            {/* Purple ring */}
+            <View
+              style={[
+                StyleSheet.absoluteFillObject,
+                {
+                  borderRadius: AVATAR_SIZE / 2,
+                  borderWidth: 1.5,
+                  borderColor: h2r(C.primary, 0.38),
+                },
+              ]}
+            />
+          </View>
+
+          {/* Info */}
+          <View style={s.artistMeta}>
+            <Text style={s.artistName} numberOfLines={1}>
+              {artist.name}
+            </Text>
+            <Text style={s.artistFollowers}>
+              {artist.followers} followers
+            </Text>
+          </View>
+
+          {/* Follow pill */}
+          <Animated.View style={{ transform: [{ scale: followSc }] }}>
+            <TouchableOpacity
+              onPress={onFollow}
+              style={s.followPill}
+              accessibilityRole="button"
+              accessibilityLabel={following ? "Unfollow" : "Follow"}
+              accessibilityState={{ selected: following }}
+            >
+              <LinearGradient
+                colors={
+                  following
+                    ? [h2r(C.primary, 0.28), h2r(C.primaryMid, 0.18)]
+                    : [h2r(C.primary, 0.14), h2r(C.primaryMid, 0.08)]
+                }
+                style={StyleSheet.absoluteFill}
               />
-              {/* Purple ring */}
               <View
                 style={[
                   StyleSheet.absoluteFillObject,
                   {
-                    borderRadius: AVATAR_SIZE / 2,
-                    borderWidth: 1.5,
-                    borderColor: h2r(C.primary, 0.38),
+                    borderRadius: 16,
+                    borderWidth: 0.7,
+                    borderColor: h2r(C.primary, following ? 0.55 : 0.3),
                   },
                 ]}
               />
-            </View>
-
-            {/* Info */}
-            <View style={s.artistMeta}>
-              <Text style={s.artistName} numberOfLines={1}>
-                {artist.name}
+              <Text style={[s.followText, following && { color: "#fff" }]}>
+                {following ? "Following" : "Follow"}
               </Text>
-              <Text style={s.artistFollowers}>
-                {artist.followers} followers
-              </Text>
-            </View>
-
-            {/* Follow pill */}
-            <Animated.View style={{ transform: [{ scale: followSc }] }}>
-              <TouchableOpacity
-                onPress={onFollow}
-                style={s.followPill}
-                accessibilityRole="button"
-                accessibilityLabel={following ? "Unfollow" : "Follow"}
-                accessibilityState={{ selected: following }}
-              >
-                <LinearGradient
-                  colors={
-                    following
-                      ? [h2r(C.primary, 0.28), h2r(C.primaryMid, 0.18)]
-                      : [h2r(C.primary, 0.14), h2r(C.primaryMid, 0.08)]
-                  }
-                  style={StyleSheet.absoluteFill}
-                />
-                <View
-                  style={[
-                    StyleSheet.absoluteFillObject,
-                    {
-                      borderRadius: 16,
-                      borderWidth: 0.7,
-                      borderColor: h2r(C.primary, following ? 0.55 : 0.3),
-                    },
-                  ]}
-                />
-                <Text style={[s.followText, following && { color: "#fff" }]}>
-                  {following ? "Following" : "Follow"}
-                </Text>
-              </TouchableOpacity>
-            </Animated.View>
-          </TouchableOpacity>
-        </Glass>
-      </Animated.View>
-    </Mat>
+            </TouchableOpacity>
+          </Animated.View>
+        </TouchableOpacity>
+      </Glass>
+    </Animated.View>
   );
 };
 
 // ─── Album Card ───────────────────────────────────────────────────────────────
 
-const AlbumCard = ({ album, delay = 0, onPress }: any) => {
+const AlbumCard = ({ album, onPress }: any) => {
   const p = usePress();
   return (
-    <Mat delay={delay}>
-      <Animated.View style={{ transform: [{ scale: p.sc }], width: ALBUM_W }}>
-        <TouchableOpacity
-          onPressIn={p.onIn}
-          onPressOut={p.onOut}
-          activeOpacity={1}
-          onPress={onPress}
-          accessibilityRole="button"
-          accessibilityLabel={`Open album ${album.title}`}
-        >
-          <View style={[s.albumArtWrap, { width: ALBUM_W, height: ALBUM_W }]}>
-            <Image
-              source={{ uri: album.art }}
-              style={{ width: ALBUM_W, height: ALBUM_W, borderRadius: 18 }}
-              contentFit="cover"
-              transition={200}
-            />
-            {/* Top specular */}
-            <View
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 14,
-                right: 14,
-                height: 1.2,
-                backgroundColor: "rgba(255,255,255,0.22)",
-                borderRadius: 1,
-              }}
-            />
-            {/* Border overlay */}
-            <View
-              style={[
-                StyleSheet.absoluteFillObject,
-                {
-                  borderRadius: 18,
-                  borderWidth: 0.7,
-                  borderTopColor: "rgba(255,255,255,0.20)",
-                  borderLeftColor: "rgba(255,255,255,0.07)",
-                  borderRightColor: "rgba(255,255,255,0.07)",
-                  borderBottomColor: "rgba(255,255,255,0.04)",
-                },
-              ]}
-            />
-          </View>
-          <Text style={s.albumTitle} numberOfLines={1}>
-            {album.title}
+    <Animated.View style={{ transform: [{ scale: p.sc }], width: ALBUM_W }}>
+      <TouchableOpacity
+        onPressIn={p.onIn}
+        onPressOut={p.onOut}
+        activeOpacity={1}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`Open album ${album.title}`}
+      >
+        <View style={[s.albumArtWrap, { width: ALBUM_W, height: ALBUM_W }]}>
+          <Image
+            source={{ uri: getArtworkUrl({ art: album.art }, 'card') }}
+            style={{ width: ALBUM_W, height: ALBUM_W, borderRadius: 18 }}
+            contentFit="cover"
+            transition={200}
+            cachePolicy="memory-disk"
+          />
+          {/* Top specular */}
+          <View
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 14,
+              right: 14,
+              height: 1.2,
+              backgroundColor: "rgba(255,255,255,0.22)",
+              borderRadius: 1,
+            }}
+          />
+          {/* Border overlay */}
+          <View
+            style={[
+              StyleSheet.absoluteFillObject,
+              {
+                borderRadius: 18,
+                borderWidth: 0.7,
+                borderTopColor: "rgba(255,255,255,0.20)",
+                borderLeftColor: "rgba(255,255,255,0.07)",
+                borderRightColor: "rgba(255,255,255,0.07)",
+                borderBottomColor: "rgba(255,255,255,0.04)",
+              },
+            ]}
+          />
+        </View>
+        <Text style={s.albumTitle} numberOfLines={1}>
+          {album.title}
+        </Text>
+        {album.artist && (
+          <Text
+            style={[
+              s.albumTitle,
+              {
+                fontSize: 12,
+                color: C.muted,
+                fontWeight: "500",
+                marginTop: 1,
+              },
+            ]}
+            numberOfLines={1}
+          >
+            {album.artist}
           </Text>
-          {album.artist && (
-            <Text
-              style={[
-                s.albumTitle,
-                {
-                  fontSize: 12,
-                  color: C.muted,
-                  fontWeight: "500",
-                  marginTop: 1,
-                },
-              ]}
-              numberOfLines={1}
-            >
-              {album.artist}
-            </Text>
-          )}
-        </TouchableOpacity>
-      </Animated.View>
-    </Mat>
+        )}
+      </TouchableOpacity>
+    </Animated.View>
   );
 };
 
@@ -728,13 +689,14 @@ const RecentItem = ({ item, onPress, onDelete }: any) => {
           accessibilityHint="Long press to remove"
         >
           <Image
-            source={{ uri: item.thumbnail }}
+            source={{ uri: getArtworkUrl({ art: item.thumbnail }, 'card') }}
             style={[
               s.recentArt,
               item.type === "artist" && { borderRadius: RECENT_W * 0.22 },
             ]}
             contentFit="cover"
             transition={200}
+            cachePolicy="memory-disk"
           />
           <View style={{ flex: 1 }}>
             <Text style={s.recentTitle} numberOfLines={1}>
@@ -765,242 +727,239 @@ const TopResultCard = ({
   label,
   onPlay,
   goArtistByName,
-  delay = 0,
 }: any) => {
   const h = useHeart(song);
   const p = usePress();
   const pb = usePress();
 
   return (
-    <Mat delay={delay} style={{ marginBottom: 28 }}>
-      <View style={s.section}>
-        <SectionHead title="Top Result" />
-        <Animated.View style={{ transform: [{ scale: p.sc }] }}>
-          <Glass
-            style={s.topCard}
-            r={28}
-            blur={62}
-            tintColor={h2r(C.primaryMid, 0.1)}
-          >
-            {/* Tint gradient */}
-            <LinearGradient
-              colors={[
-                h2r(C.primaryMid, 0.18),
-                h2r(C.primaryDp, 0.08),
-                "transparent",
-              ]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFill}
-              pointerEvents="none"
-            />
+    <View style={s.section}>
+      <SectionHead title="Top Result" />
+      <Animated.View style={{ transform: [{ scale: p.sc }] }}>
+        <Glass
+          style={s.topCard}
+          r={28}
+          blur={62}
+          tintColor={h2r(C.primaryMid, 0.1)}
+        >
+          {/* Tint gradient */}
+          <LinearGradient
+            colors={[
+              h2r(C.primaryMid, 0.18),
+              h2r(C.primaryDp, 0.08),
+              "transparent",
+            ]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
 
-            <TouchableOpacity
-              style={s.topInner}
-              onPressIn={p.onIn}
-              onPressOut={p.onOut}
-              onPress={() => onPlay(song)}
-              activeOpacity={1}
-              onLongPress={() => goArtistByName(song.artist)}
-              accessibilityRole="button"
-              accessibilityLabel={`Play ${song.title} by ${song.artist}`}
-            >
-              {/* Artwork */}
-              <View style={s.topArtWrap}>
-                <Image
-                  source={{ uri: getTrackArtwork(song) }}
-                  style={s.topArt}
-                  contentFit="cover"
-                  transition={300}
+          <TouchableOpacity
+            style={s.topInner}
+            onPressIn={p.onIn}
+            onPressOut={p.onOut}
+            onPress={() => onPlay(song)}
+            activeOpacity={1}
+            onLongPress={() => goArtistByName(song.artist)}
+            accessibilityRole="button"
+            accessibilityLabel={`Play ${song.title} by ${song.artist}`}
+          >
+            {/* Artwork */}
+            <View style={s.topArtWrap}>
+              <Image
+                source={{ uri: getArtworkUrl(song, 'album') }}
+                style={s.topArt}
+                contentFit="cover"
+                transition={300}
+                cachePolicy="memory-disk"
+              />
+              {/* Rim */}
+              <View
+                style={[
+                  StyleSheet.absoluteFillObject,
+                  {
+                    borderRadius: 22,
+                    borderWidth: 1,
+                    borderColor: "rgba(255,255,255,0.16)",
+                  },
+                ]}
+              />
+              {/* Art specular */}
+              <View
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 16,
+                  right: 16,
+                  height: 1.5,
+                  backgroundColor: "rgba(255,255,255,0.30)",
+                  borderRadius: 1,
+                }}
+              />
+              {/* Purple glow below */}
+              <View style={s.topArtGlow} />
+            </View>
+
+            {/* Label pill */}
+            <View style={{ flexDirection: "row", marginBottom: 10 }}>
+              <View style={s.topLabelPill}>
+                <LinearGradient
+                  colors={[h2r(C.accent, 0.16), h2r(C.accent, 0.06)]}
+                  style={StyleSheet.absoluteFill}
                 />
-                {/* Rim */}
                 <View
                   style={[
                     StyleSheet.absoluteFillObject,
                     {
-                      borderRadius: 22,
-                      borderWidth: 1,
-                      borderColor: "rgba(255,255,255,0.16)",
+                      borderRadius: 10,
+                      borderWidth: 0.7,
+                      borderColor: h2r(C.accent, 0.3),
                     },
                   ]}
                 />
-                {/* Art specular */}
-                <View
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 16,
-                    right: 16,
-                    height: 1.5,
-                    backgroundColor: "rgba(255,255,255,0.30)",
-                    borderRadius: 1,
-                  }}
-                />
-                {/* Purple glow below */}
-                <View style={s.topArtGlow} />
+                <Text style={s.topLabel}>
+                  {label || song.label || "BEST MATCH  ·  SONG"}
+                </Text>
               </View>
+            </View>
 
-              {/* Label pill */}
-              <View style={{ flexDirection: "row", marginBottom: 10 }}>
-                <View style={s.topLabelPill}>
+            {/* Title */}
+            <Text style={s.topTitle} numberOfLines={2}>
+              {song.title}
+            </Text>
+
+            {/* Artist tap */}
+            <TouchableOpacity
+              onPress={() => goArtistByName(song.artist)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`Open artist ${song.artist}`}
+            >
+              <Text style={s.topArtist}>{song.artist}</Text>
+            </TouchableOpacity>
+
+            {/* Action row */}
+            <View style={s.topActions}>
+              {/* Play pill */}
+              <Animated.View
+                style={{ transform: [{ scale: pb.sc }], flex: 1 }}
+              >
+                <TouchableOpacity
+                  style={s.topPlayBtn}
+                  onPressIn={pb.onIn}
+                  onPressOut={pb.onOut}
+                  onPress={() => onPlay(song)}
+                  activeOpacity={1}
+                  accessibilityRole="button"
+                  accessibilityLabel="Play now"
+                >
                   <LinearGradient
-                    colors={[h2r(C.accent, 0.16), h2r(C.accent, 0.06)]}
+                    colors={[C.primary, C.primaryMid, C.primaryDp]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
                     style={StyleSheet.absoluteFill}
                   />
+                  {/* Specular */}
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 3,
+                      left: 18,
+                      right: 18,
+                      height: 2,
+                      borderRadius: 1,
+                      backgroundColor: "rgba(255,255,255,0.22)",
+                    }}
+                  />
+                  {/* Left fresnel */}
+                  <View
+                    style={{
+                      position: "absolute",
+                      left: 8,
+                      top: 7,
+                      bottom: 7,
+                      width: 18,
+                      borderRadius: 8,
+                      backgroundColor: "rgba(255,255,255,0.14)",
+                      transform: [{ skewX: "-8deg" }],
+                    }}
+                  />
+                  {/* Border */}
                   <View
                     style={[
                       StyleSheet.absoluteFillObject,
                       {
-                        borderRadius: 10,
+                        borderRadius: 26,
                         borderWidth: 0.7,
-                        borderColor: h2r(C.accent, 0.3),
+                        borderColor: "rgba(255,255,255,0.22)",
                       },
                     ]}
                   />
-                  <Text style={s.topLabel}>
-                    {label || song.label || "BEST MATCH  ·  SONG"}
-                  </Text>
-                </View>
-              </View>
+                  <Ionicons
+                    name="play"
+                    size={17}
+                    color="#FFF"
+                    style={{ marginLeft: 2, zIndex: 2 }}
+                  />
+                  <Text style={s.topPlayText}>Play Now</Text>
+                </TouchableOpacity>
+              </Animated.View>
 
-              {/* Title */}
-              <Text style={s.topTitle} numberOfLines={2}>
-                {song.title}
-              </Text>
-
-              {/* Artist tap */}
-              <TouchableOpacity
-                onPress={() => goArtistByName(song.artist)}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel={`Open artist ${song.artist}`}
-              >
-                <Text style={s.topArtist}>{song.artist}</Text>
-              </TouchableOpacity>
-
-              {/* Action row */}
-              <View style={s.topActions}>
-                {/* Play pill */}
-                <Animated.View
-                  style={{ transform: [{ scale: pb.sc }], flex: 1 }}
-                >
-                  <TouchableOpacity
-                    style={s.topPlayBtn}
-                    onPressIn={pb.onIn}
-                    onPressOut={pb.onOut}
-                    onPress={() => onPlay(song)}
-                    activeOpacity={1}
-                    accessibilityRole="button"
-                    accessibilityLabel="Play now"
-                  >
-                    <LinearGradient
-                      colors={[C.primary, C.primaryMid, C.primaryDp]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={StyleSheet.absoluteFill}
-                    />
-                    {/* Specular */}
-                    <View
-                      style={{
-                        position: "absolute",
-                        top: 3,
-                        left: 18,
-                        right: 18,
-                        height: 2,
-                        borderRadius: 1,
-                        backgroundColor: "rgba(255,255,255,0.28)",
-                      }}
-                    />
-                    {/* Left fresnel */}
-                    <View
-                      style={{
-                        position: "absolute",
-                        left: 8,
-                        top: 7,
-                        bottom: 7,
-                        width: 18,
-                        borderRadius: 8,
-                        backgroundColor: "rgba(255,255,255,0.14)",
-                        transform: [{ skewX: "-8deg" }],
-                      }}
-                    />
-                    {/* Border */}
-                    <View
-                      style={[
-                        StyleSheet.absoluteFillObject,
-                        {
-                          borderRadius: 26,
-                          borderWidth: 0.7,
-                          borderColor: "rgba(255,255,255,0.22)",
-                        },
-                      ]}
-                    />
-                    <Ionicons
-                      name="play"
-                      size={17}
-                      color="#FFF"
-                      style={{ marginLeft: 2, zIndex: 2 }}
-                    />
-                    <Text style={s.topPlayText}>Play Now</Text>
-                  </TouchableOpacity>
-                </Animated.View>
-
-                {/* Heart */}
-                <Animated.View style={{ transform: [{ scale: h.sc }] }}>
-                  <TouchableOpacity
-                    style={s.topIconBtn}
-                    onPress={h.toggle}
-                    accessibilityRole="button"
-                    accessibilityLabel={h.liked ? "Unlike" : "Like"}
-                  >
-                    <BlurView
-                      intensity={38}
-                      tint="dark"
-                      style={StyleSheet.absoluteFill}
-                    />
-                    <View
-                      style={[
-                        StyleSheet.absoluteFillObject,
-                        {
-                          borderRadius: 24,
-                          borderWidth: 0.7,
-                          borderColor: h.liked ? h2r(C.primary, 0.5) : C.border,
-                        },
-                      ]}
-                    />
-                    <Ionicons
-                      name={h.liked ? "heart" : "heart-outline"}
-                      size={20}
-                      color={h.liked ? C.primary : C.text}
-                    />
-                  </TouchableOpacity>
-                </Animated.View>
-
-                {/* Download */}
-                <DownloadButton
-                  track={{
-                    id: song.id,
-                    title: song.title,
-                    artist: song.artist,
-                    art: song.art || song.thumbnail,
-                    url: song.url || TRACK_URLS[song.id] || "",
-                    duration: 0,
-                  }}
-                  size={20}
-                  color={C.text}
+              {/* Heart */}
+              <Animated.View style={{ transform: [{ scale: h.sc }] }}>
+                <TouchableOpacity
                   style={s.topIconBtn}
-                />
-              </View>
-            </TouchableOpacity>
-          </Glass>
-        </Animated.View>
-      </View>
-    </Mat>
+                  onPress={h.toggle}
+                  accessibilityRole="button"
+                  accessibilityLabel={h.liked ? "Unlike" : "Like"}
+                >
+                  {Platform.OS === 'ios' ? (
+                    <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
+                  ) : (
+                    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(25, 25, 35, 0.94)' }]} />
+                  )}
+                  <View
+                    style={[
+                      StyleSheet.absoluteFillObject,
+                      {
+                        borderRadius: 24,
+                        borderWidth: 0.7,
+                        borderColor: h.liked ? h2r(C.primary, 0.5) : C.border,
+                      },
+                    ]}
+                  />
+                  <Ionicons
+                    name={h.liked ? "heart" : "heart-outline"}
+                    size={20}
+                    color={h.liked ? C.primary : C.text}
+                  />
+                </TouchableOpacity>
+              </Animated.View>
+
+              {/* Download */}
+              <DownloadButton
+                track={{
+                  id: song.id,
+                  title: song.title,
+                  artist: song.artist,
+                  art: song.art || song.thumbnail,
+                  url: song.url || TRACK_URLS[song.id] || "",
+                  duration: 0,
+                }}
+                size={20}
+                color={C.text}
+                style={s.topIconBtn}
+              />
+            </View>
+          </TouchableOpacity>
+        </Glass>
+      </Animated.View>
+    </View>
   );
 };
 
 // ─── Category Filter Bar ──────────────────────────────────────────────────────
-// Exact matching animation/design of library tab bar but with search categories
 const FilterBar = memo(({
   categories,
   active,
@@ -1027,7 +986,7 @@ const FilterBar = memo(({
       }
       return next;
     });
-  }, []);
+  }, [slideW, slideX]);
 
   const selectTab = useCallback((tab: string, idx: number) => {
     const layout = layouts[idx];
@@ -1042,12 +1001,16 @@ const FilterBar = memo(({
       Animated.spring(slideX, { toValue: layout.x + 4, ...SPR_SLIDE, useNativeDriver: false }),
       Animated.spring(slideW, { toValue: layout.width - 8, ...SPR_SLIDE, useNativeDriver: false }),
     ]).start();
-  }, [layouts]);
+  }, [layouts, onSelect, pillSc, slideW, slideX]);
 
   return (
     <View style={s.tabBarOuter}>
       {/* Glass backing for sticky tab bar */}
-      <BlurView intensity={52} tint="dark" style={StyleSheet.absoluteFill} />
+      {Platform.OS === 'ios' ? (
+        <BlurView intensity={52} tint="dark" style={StyleSheet.absoluteFill} />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(8, 8, 13, 0.96)' }]} />
+      )}
       <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(8,8,13,0.72)" }]} />
       {/* Top & bottom edges */}
       <View style={s.tabEdgeTop} />
@@ -1228,9 +1191,22 @@ const ErrorState = ({
 
 const AnimatedBg = () => {
   const phase = useRef(new Animated.Value(0)).current;
+  const pathname = usePathname();
+  const isVisible = pathname === '/search';
+  const [appState, setAppState] = useState(AppState.currentState);
 
   useEffect(() => {
-    Animated.loop(
+    const sub = AppState.addEventListener('change', (next) => setAppState(next));
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible || appState !== 'active') {
+      phase.stopAnimation();
+      return undefined;
+    }
+
+    const animation = Animated.loop(
       Animated.sequence([
         Animated.timing(phase, {
           toValue: 1,
@@ -1251,8 +1227,10 @@ const AnimatedBg = () => {
           useNativeDriver: true,
         }),
       ]),
-    ).start();
-  }, []);
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [phase, isVisible, appState]);
 
   const b1Op = phase.interpolate({
     inputRange: [0, 1, 2],
@@ -1344,13 +1322,24 @@ export default function SearchScreen() {
   const { bottomPadding } = usePlaybackInsets();
   const { goNowPlaying, goArtist, goArtistByName, goAlbum } =
     useMusicNavigation("search");
-  const { setQueue, preloadTrack, playNext, addToQueue } = useMusic();
+  const { setQueue, playNext, addToQueue } = useMusic();
   const setActiveContext = usePlayerStore((s) => s.setActiveContext);
 
   const { query: initialQuery } = useLocalSearchParams<{ query?: string }>();
   const { query, setQuery, results, isLoading, error } = useSearch(
     initialQuery || "",
   );
+
+  const [localQuery, setLocalQuery] = useState(query);
+
+  const handleQueryChange = useCallback((text: string) => {
+    setLocalQuery(text);
+    setQuery(text);
+  }, [setQuery]);
+
+  useEffect(() => {
+    setLocalQuery(query);
+  }, [query]);
 
   const {
     recentSearches,
@@ -1437,16 +1426,18 @@ export default function SearchScreen() {
         art: song.art || song.thumbnail || "",
       });
 
-      // Add to recent with original context for restoration
-      addRecentSearch({
-        id: song.id,
-        type: "song",
-        title: song.title,
-        subtitle: song.artist,
-        thumbnail: song.art || song.thumbnail || "",
-        data: song,
-        queueTracks: playedQueue,
-      });
+      if (playedQueue) {
+        // Add to recent with original context for restoration
+        addRecentSearch({
+          id: song.id,
+          type: "song",
+          title: song.title,
+          subtitle: song.artist,
+          thumbnail: song.art || song.thumbnail || "",
+          data: song,
+          queueTracks: playedQueue,
+        });
+      }
     },
     [addRecentSearch, handlePlay],
   );
@@ -1521,16 +1512,6 @@ export default function SearchScreen() {
   const remainingSongs = results?.songs || [];
   const filteredArtists = results?.artists || [];
   const filteredAlbums = results?.albums || [];
-
-  // ── PRELOADER: Warm up cache for top hits ────────────────────────────────
-  useEffect(() => {
-    if (!isLoading && hasResults && (results?.songs?.length ?? 0) > 0) {
-      // Preload top 5 results to make them feel instant on click
-      results?.songs?.slice(0, 5).forEach((song) => {
-        if (song.art) Image.prefetch(song.art).catch(() => {});
-      });
-    }
-  }, [results, isLoading, hasResults]);
 
   const categoryFilteredSongs = useMemo(() => {
     if (activeCategory !== "All" && activeCategory !== "Songs") return [];
@@ -1705,7 +1686,6 @@ export default function SearchScreen() {
             song={item.data}
             onPlay={handlePlaySong}
             goArtistByName={goArtistByName}
-            delay={40}
           />
         );
       case 'section_header':
@@ -1726,21 +1706,6 @@ export default function SearchScreen() {
                 art: item.song.art || "",
               }}
               onPlay={handlePlaySong}
-              onPlayNext={() => {
-                const pTrack = createPlayerTrack(item.song);
-                playNext(pTrack);
-                Haptics.notificationAsync(
-                  Haptics.NotificationFeedbackType.Success,
-                );
-              }}
-              onAddToQueue={() => {
-                const pTrack = createPlayerTrack(item.song);
-                addToQueue(pTrack);
-                Haptics.notificationAsync(
-                  Haptics.NotificationFeedbackType.Success,
-                );
-              }}
-              delay={80 + item.idx * 32}
             />
           </View>
         );
@@ -1754,7 +1719,6 @@ export default function SearchScreen() {
                 art: item.artist.art || "",
                 followers: item.artist.subscribers || "",
               }}
-              delay={100 + item.idx * 45}
               onPress={() => handlePressArtist(item.artist)}
             />
           </View>
@@ -1771,7 +1735,6 @@ export default function SearchScreen() {
                   art: album.art || "",
                   artist: album.artist,
                 }}
-                delay={140 + item.idx * 45}
                 onPress={() => handlePressAlbum(album)}
               />
             ))}
@@ -1786,9 +1749,6 @@ export default function SearchScreen() {
     handleDeleteRecent,
     handlePlaySong,
     goArtistByName,
-    createPlayerTrack,
-    playNext,
-    addToQueue,
     handlePressArtist,
     handlePressAlbum,
     query,
@@ -1845,8 +1805,8 @@ export default function SearchScreen() {
               style={s.searchInput}
               placeholder="Songs, artists, albums…"
               placeholderTextColor={C.dim}
-              value={query}
-              onChangeText={setQuery}
+              value={localQuery}
+              onChangeText={handleQueryChange}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               returnKeyType="search"
@@ -1856,9 +1816,12 @@ export default function SearchScreen() {
               accessibilityLabel="Search input"
               accessibilityHint="Type to search for songs, artists, and albums"
             />
-            {query.length > 0 && (
+            {localQuery.length > 0 && (
               <TouchableOpacity
-                onPress={() => setQuery("")}
+                onPress={() => {
+                  setLocalQuery("");
+                  setQuery("");
+                }}
                 style={{ paddingHorizontal: 14, paddingVertical: 4 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 accessibilityLabel="Clear search"
@@ -1894,14 +1857,16 @@ export default function SearchScreen() {
         data={listData}
         renderItem={renderSearchItem}
         keyExtractor={(item) => item.id}
+        // @ts-ignore
+        estimatedItemSize={100}
         contentContainerStyle={{
           paddingHorizontal: PAD,
           paddingBottom: scrollBottom + 30,
         }}
-        showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         onScrollBeginDrag={Keyboard.dismiss}
+        {...ScrollPhysics.STANDARD}
       />
     </View>
   );
@@ -1953,7 +1918,7 @@ const s = StyleSheet.create({
     alignItems: "center",
   },
 
-  // ── Filter bar (category tabs replica of library TabBar)
+  // ── Filter bar
   tabBarOuter: {
     height: 54,
     overflow: "hidden",
@@ -1993,320 +1958,227 @@ const s = StyleSheet.create({
     alignItems: "center",
     zIndex: 1,
     minWidth: 44,
-    minHeight: 44,
   },
   tabText: {
-    fontSize: isTablet ? 13 : 11,
-    fontWeight: "600",
     color: C.muted,
-    letterSpacing: 0.6,
-    fontFamily: Platform.OS === "android" ? "sans-serif-medium" : "System",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 0.5,
   },
-  tabActive: { color: C.text, fontWeight: "800" },
+  tabActive: { color: "#FFF" },
 
-  // ── Sections
-  section: { marginBottom: 24 },
-
+  // ── Section
+  section: { marginBottom: 32 },
   secHeadRow: {
     flexDirection: "row",
     alignItems: "center",
+    marginBottom: 16,
     gap: 10,
-    marginBottom: 14,
   },
-  secAccentBar: { width: 3.5, height: 20, borderRadius: 2 },
+  secAccentBar: { width: 4, height: 18, borderRadius: 2 },
   secTitle: {
-    fontSize: isTablet ? 21 : 18,
+    fontSize: 18,
     fontWeight: "800",
-    color: C.text,
+    color: "#FFF",
     letterSpacing: -0.3,
-    fontFamily: Platform.OS === "ios" ? "System" : "sans-serif-medium",
   },
   clearAllText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
     color: C.primary,
   },
 
-  // ── Recent
-  recentGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  recentCard: {},
-  recentInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 10,
-    gap: 10,
-  },
-  recentArt: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-  },
-  recentTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: C.text,
-  },
-  recentSub: {
-    fontSize: 11,
-    color: C.muted,
-    marginTop: 2,
-  },
-
-  // ── Song row
-  songCard: {},
-  songInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 13,
-  },
-  songArt: {
-    width: ART_SIZE,
-    height: ART_SIZE,
-    borderRadius: 12,
-    flexShrink: 0,
-  },
-  songMeta: { flex: 1 },
-  songTitle: {
-    fontSize: isTablet ? 16 : 15,
-    fontWeight: "700",
-    color: C.text,
-    fontFamily: Platform.OS === "ios" ? "System" : "sans-serif-medium",
-  },
-  songArtist: {
-    fontSize: 12,
-    color: C.muted,
-    marginTop: 3,
-    fontWeight: "500",
-  },
-  songTime: {
-    fontSize: 12,
-    color: C.dim,
-    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
-    flexShrink: 0,
-  },
-
-  // ── Artist row
-  artistCard: {},
-  artistInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 14,
-  },
-  avatarWrap: { position: "relative", flexShrink: 0 },
-  artistAvatar: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: AVATAR_SIZE / 2,
-  },
-  artistMeta: { flex: 1 },
-  artistName: {
-    fontSize: isTablet ? 16 : 15,
-    fontWeight: "700",
-    color: C.text,
-    fontFamily: Platform.OS === "ios" ? "System" : "sans-serif-medium",
-  },
-  artistFollowers: {
-    fontSize: 12,
-    color: C.accent,
-    fontWeight: "600",
-    marginTop: 3,
-  },
-  followPill: {
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 16,
-    overflow: "hidden",
-    flexShrink: 0,
-  },
-  followText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: C.primary,
-    zIndex: 2,
-  },
-
-  // ── Album grid
-  albumGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: ALBUM_GAP,
-    marginBottom: 8,
-  },
-  albumArtWrap: {
-    marginBottom: 8,
-    overflow: "hidden",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.36,
-        shadowRadius: 14,
-      },
-      android: { elevation: 10 },
-    }),
-  },
-  albumTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: C.text,
-    fontFamily: Platform.OS === "ios" ? "System" : "sans-serif-medium",
-    paddingHorizontal: 2,
-  },
-
-  // ── Top result
-  topCard: {},
-  topInner: { padding: 22 },
+  // ── Top Result Card
+  topCard: { marginBottom: 12 },
+  topInner: { padding: 20 },
   topArtWrap: {
     width: SW * 0.54,
-    aspectRatio: 1,
-    borderRadius: 22,
+    height: SW * 0.54,
     alignSelf: "center",
     marginBottom: 22,
-    overflow: "hidden",
-    ...Platform.select({
-      ios: {
-        shadowColor: C.primary,
-        shadowOffset: { width: 0, height: 16 },
-        shadowOpacity: 0.48,
-        shadowRadius: 24,
-      },
-      android: { elevation: 18 },
-    }),
+    elevation: 20,
+    shadowColor: C.primary,
+    shadowRadius: 30,
+    shadowOpacity: 0.35,
   },
-  topArt: { width: "100%", height: "100%", borderRadius: 22 },
+  topArt: { flex: 1, borderRadius: 22 },
   topArtGlow: {
     position: "absolute",
-    bottom: -12,
-    left: "22%",
-    right: "22%",
-    height: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: C.primary,
-        shadowRadius: 14,
-        shadowOpacity: 0.52,
-        shadowOffset: { width: 0, height: 0 },
-      },
-    }),
+    bottom: -10,
+    left: 20,
+    right: 20,
+    height: 20,
+    backgroundColor: h2r(C.primary, 0.4),
+    borderRadius: 20,
+    filter: "blur(20px)",
+    zIndex: -1,
   },
   topLabelPill: {
-    borderRadius: 10,
-    overflow: "hidden",
     paddingHorizontal: 10,
     paddingVertical: 5,
+    borderRadius: 10,
+    overflow: "hidden",
   },
   topLabel: {
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: "900",
     color: C.accent,
-    letterSpacing: 1.3,
-    fontFamily: Platform.OS === "ios" ? "System" : "sans-serif-medium",
+    letterSpacing: 1.2,
+    zIndex: 1,
   },
   topTitle: {
-    fontSize: isTablet ? 32 : 26,
+    fontSize: 28,
     fontWeight: "900",
-    color: C.text,
-    letterSpacing: -0.8,
-    marginBottom: 5,
-    fontFamily: Platform.OS === "ios" ? "System" : "sans-serif-medium",
+    color: "#FFF",
+    letterSpacing: -0.6,
+    marginBottom: 6,
+    textAlign: "center",
   },
   topArtist: {
-    fontSize: 17,
-    color: C.muted,
-    fontWeight: "500",
-    marginBottom: 22,
+    fontSize: 16,
+    fontWeight: "600",
+    color: C.primary,
+    marginBottom: 24,
+    textAlign: "center",
   },
-  topActions: { flexDirection: "row", alignItems: "center", gap: 12 },
+  topActions: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "center",
+  },
   topPlayBtn: {
-    height: 50,
-    borderRadius: 25,
+    height: 48,
+    borderRadius: 24,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
     gap: 8,
-    ...Platform.select({
-      ios: {
-        shadowColor: C.primary,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.52,
-        shadowRadius: 12,
-      },
-      android: { elevation: 10 },
-    }),
   },
   topPlayText: {
     fontSize: 15,
     fontWeight: "800",
     color: "#FFF",
     zIndex: 2,
-    fontFamily: Platform.OS === "ios" ? "System" : "sans-serif-medium",
   },
   topIconBtn: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    overflow: "hidden",
-    justifyContent: "center",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
   },
 
-  // ── State panels
-  statePanel: { paddingTop: 16 },
-  statePanelGlass: {
-    padding: 28,
+  // ── Song Row
+  songCard: { marginBottom: 2 },
+  songInner: {
+    flexDirection: "row",
     alignItems: "center",
-    overflow: "hidden",
-    borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.09)",
+    padding: 12,
+    gap: 14,
   },
-  stateIconWrap: { marginBottom: 22 },
+  songArt: { width: ART_SIZE, height: ART_SIZE, borderRadius: 12 },
+  songMeta: { flex: 1 },
+  songTitle: { fontSize: 15, fontWeight: "700", color: "#FFF" },
+  songArtist: { fontSize: 13, color: C.muted, marginTop: 2 },
+  songTime: { fontSize: 12, color: C.dim, fontWeight: "600" },
+
+  // ── Artist Row
+  artistCard: { marginBottom: 2 },
+  artistInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    gap: 14,
+  },
+  avatarWrap: { width: AVATAR_SIZE, height: AVATAR_SIZE },
+  artistAvatar: { flex: 1, borderRadius: AVATAR_SIZE / 2 },
+  artistMeta: { flex: 1 },
+  artistName: { fontSize: 16, fontWeight: "800", color: "#FFF" },
+  artistFollowers: { fontSize: 12, color: C.muted, marginTop: 2 },
+  followPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    overflow: "hidden",
+  },
+  followText: { fontSize: 13, fontWeight: "800", color: C.primary, zIndex: 1 },
+
+  // ── Album Card
+  albumGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: ALBUM_GAP,
+    marginBottom: 20,
+  },
+  albumArtWrap: {
+    borderRadius: 18,
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    marginBottom: 8,
+  },
+  albumTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#FFF",
+    paddingHorizontal: 4,
+  },
+
+  // ── Recent Grid
+  recentGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  recentCard: { marginBottom: 2 },
+  recentInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    gap: 12,
+  },
+  recentArt: { width: 44, height: 44, borderRadius: 10 },
+  recentTitle: { fontSize: 14, fontWeight: "700", color: "#FFF" },
+  recentSub: { fontSize: 11, color: C.muted, marginTop: 1 },
+
+  // ── State Panel
+  statePanel: { paddingVertical: 40, alignItems: "center" },
+  statePanelGlass: {
+    width: SW - PAD * 4,
+    padding: 32,
+    alignItems: "center",
+  },
+  stateIconWrap: { marginBottom: 20 },
   stateIconBg: {
     width: 72,
     height: 72,
-    borderRadius: 22,
-    justifyContent: "center",
+    borderRadius: 36,
     alignItems: "center",
+    justifyContent: "center",
   },
   stateTitle: {
-    fontSize: isTablet ? 22 : 19,
+    fontSize: 20,
     fontWeight: "900",
-    color: C.text,
-    letterSpacing: -0.5,
+    color: "#FFF",
     textAlign: "center",
-    marginBottom: 8,
-    fontFamily: Platform.OS === "ios" ? "System" : "sans-serif-medium",
   },
   stateSub: {
     fontSize: 14,
     color: C.muted,
-    lineHeight: 21,
     textAlign: "center",
-    marginBottom: 24,
-    paddingHorizontal: 6,
+    marginTop: 8,
+    lineHeight: 20,
   },
   retryBtn: {
-    height: 50,
-    borderRadius: 25,
-    overflow: "hidden",
-    justifyContent: "center",
+    height: 48,
+    borderRadius: 24,
+    marginTop: 24,
     alignItems: "center",
-    width: "100%",
-    ...Platform.select({
-      ios: {
-        shadowColor: C.primary,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.4,
-        shadowRadius: 12,
-      },
-      android: { elevation: 8 },
-    }),
+    justifyContent: "center",
+    overflow: "hidden",
   },
-  retryBtnText: { fontSize: 15, fontWeight: "800", color: "#FFF" },
+  retryBtnText: { fontSize: 15, fontWeight: "800", color: "#FFF", zIndex: 1 },
 
   // Results label
   resultsFor: {

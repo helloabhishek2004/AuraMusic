@@ -20,7 +20,9 @@
  */
 
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
-import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
+import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
+import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
+import { AuraArtwork } from "@/src/components/ui/aura-artwork";
 import { getLikedTracks } from "@/src/features/likes/utils/get-liked-tracks";
 import { useMusic } from "@/src/context/MusicContext";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
@@ -189,30 +191,20 @@ const Glass = memo(({
   </View>
 ));
 
+import AnimatedReanimated, { FadeInUp } from 'react-native-reanimated';
+
 // ─── Mat: staggered entrance ──────────────────────────────────────────────────
 
 const Mat = memo(({ children, delay = 0, style }: {
   children: React.ReactNode; delay?: number; style?: any;
 }) => {
-  const sc = useRef(new Animated.Value(0.94)).current;
-  const op = useRef(new Animated.Value(0)).current;
-  const ty = useRef(new Animated.Value(16)).current;
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      Animated.parallel([
-        Animated.spring(sc, { toValue: 1, ...SPR_SLIDE, useNativeDriver: true }),
-        Animated.timing(op, { toValue: 1, duration: 400, easing: EASE_EXPO, useNativeDriver: true }),
-        Animated.timing(ty, { toValue: 0, duration: 400, easing: EASE_EXPO, useNativeDriver: true }),
-      ]).start();
-    }, delay);
-    return () => clearTimeout(t);
-  }, []);
-
   return (
-    <Animated.View style={[{ opacity: op, transform: [{ scale: sc }, { translateY: ty }] }, style]}>
+    <AnimatedReanimated.View 
+      entering={FadeInUp.delay(delay).duration(400)} 
+      style={style}
+    >
       {children}
-    </Animated.View>
+    </AnimatedReanimated.View>
   );
 });
 
@@ -417,10 +409,11 @@ const HeroCard = memo(({ onPress }: { onPress: () => void }) => {
           <Glass style={{ height: HERO_H }} radius={26} blur={62}>
             {/* Art fill */}
             <Image
-              source={{ uri: artworkSource }}
+              source={{ uri: getArtworkUrl({ art: artworkSource }, 'album') }}
               style={[StyleSheet.absoluteFill, { borderRadius: 26 }]}
               contentFit="cover"
               transition={350}
+              cachePolicy="memory-disk"
             />
             {/* Dark vignette */}
             <LinearGradient
@@ -762,8 +755,7 @@ const TrackRow = memo(({
   }, [track]);
 
   return (
-    <Mat delay={delay}>
-      <Animated.View style={{ transform: [{ scale: p.sc }] }}>
+    <Animated.View style={{ transform: [{ scale: p.sc }] }}>
         <TouchableOpacity
           onPress={handlePlay}
           onPressIn={p.onIn} onPressOut={p.onOut}
@@ -795,11 +787,15 @@ const TrackRow = memo(({
 
               {/* Art */}
               <View style={s.trackArtWrap}>
-                <Image
-                  source={{ uri: `https://picsum.photos/seed/${track.id}/200` }}
+                <AuraArtwork
+                  source={resolveArtwork(track, 'card')}
+                  entityName={track?.title}
+                  entityType="song"
                   style={s.trackArt}
                   contentFit="cover"
                   transition={220}
+                  cachePolicy="memory-disk"
+                  borderRadius={12}
                 />
                 <View style={[StyleSheet.absoluteFillObject, { borderRadius:12, borderWidth:0.7, borderColor:"rgba(255,255,255,0.10)" }]} />
               </View>
@@ -834,7 +830,6 @@ const TrackRow = memo(({
           </Glass>
         </TouchableOpacity>
       </Animated.View>
-    </Mat>
   );
 });
 
@@ -1048,8 +1043,7 @@ const DownloadedTrackRow = memo(({
   }, [track]);
 
   return (
-    <Mat delay={delay}>
-      <Animated.View style={{ transform: [{ scale: p.sc }] }}>
+    <Animated.View style={{ transform: [{ scale: p.sc }] }}>
         <TouchableOpacity
           onPress={handlePlay}
           onPressIn={p.onIn} onPressOut={p.onOut}
@@ -1073,11 +1067,15 @@ const DownloadedTrackRow = memo(({
               </View>
 
               <View style={s.trackArtWrap}>
-                <Image
-                  source={{ uri: getTrackArtwork(track) }}
+                <AuraArtwork
+                  source={resolveArtwork(track, 'card')}
+                  entityName={track?.title}
+                  entityType="song"
                   style={s.trackArt}
                   contentFit="cover"
                   transition={220}
+                  cachePolicy="memory-disk"
+                  borderRadius={12}
                 />
                 <View style={[StyleSheet.absoluteFillObject, { borderRadius:12, borderWidth:0.7, borderColor:"rgba(255,255,255,0.10)" }]} />
               </View>
@@ -1109,7 +1107,6 @@ const DownloadedTrackRow = memo(({
           </Glass>
         </TouchableOpacity>
       </Animated.View>
-    </Mat>
   );
 });
 
@@ -1245,6 +1242,7 @@ export default function LibraryScreen() {
         contentContainerStyle={{ paddingBottom: bottomPadding + 40 }}
         showsVerticalScrollIndicator={false}
         overScrollMode="never"
+        removeClippedSubviews={true}
       />
     </View>
   );

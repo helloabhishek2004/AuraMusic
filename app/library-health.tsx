@@ -11,6 +11,10 @@ import {
   Dimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { BlurView } from 'expo-blur';
+import { getArtworkUrl } from '@/src/features/player/utils/track-identity';
+import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
+import { AuraArtwork } from '@/src/components/ui/aura-artwork';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +29,14 @@ import { LibraryHealthService } from '@/src/services/library-health.service';
 import { DuplicateGroup, PendingDeletion } from '@/src/features/library-health/types/library-health';
 
 const { width: SW } = Dimensions.get('window');
+
+function formatBytes(bytes: number) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
 
 export default function LibraryHealthScreen() {
   const insets = useSafeAreaInsets();
@@ -154,491 +166,337 @@ export default function LibraryHealthScreen() {
     LibraryHealthService.registerDeletions(pending);
   }, [selectedGroupToMerge]);
 
-  // Trigger merge all confirmation sheet
-  const handleMergeAllSafe = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setShowMergeAllConfirm(true);
-  }, []);
-
-  // Commit merge all safe duplicates
   const executeMergeAllSafe = useCallback(() => {
-    setShowMergeAllConfirm(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    LibraryHealthService.mergeAllSafeDuplicates();
-  }, []);
+    setShowMergeAllConfirm(false);
+
+    const allPending: PendingDeletion[] = [];
+    for (const group of safeGroups) {
+      const recId = group.recommendedTrackId;
+      const dups = group.tracks.filter((t) => t.id !== recId);
+      
+      dups.forEach((dup) => {
+        const isDownload = !!(!dup.isLocal || dup.localUri?.includes('documentDirectory') || dup.localUri?.includes('aura/audio'));
+        allPending.push({
+          groupId: group.id,
+          trackId: dup.id,
+          filePath: dup.localUri || dup.url || '',
+          isDownload,
+        });
+      });
+    }
+
+    if (allPending.length > 0) {
+      LibraryHealthService.registerDeletions(allPending);
+    }
+  }, [safeGroups]);
 
   const handleUndo = useCallback(() => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     LibraryHealthService.rollbackDeletions();
   }, []);
 
-  // Format Helper
-  const formatBytes = (bytes: number): string => {
-    if (bytes <= 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  const getConfidenceLabel = (score: number) => {
+    if (score >= 98) return 'IDENTICAL';
+    if (score >= 95) return 'VERY LIKELY';
+    if (score >= 90) return 'LIKELY';
+    return 'UNCERTAIN';
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 90) return palette.success;
-    if (score >= 80) return palette.cyan;
-    if (score >= 60) return palette.amber;
-    return palette.coral;
-  };
-
-  const getScoreDescription = (score: number) => {
-    if (score >= 90) return 'Excellent';
-    if (score >= 80) return 'Good';
-    if (score >= 60) return 'Fair';
-    return 'Needs Attention';
-  };
-
-  // Calculate trends: current score - closest score from 30 days ago
-  const trendText = useMemo(() => {
-    if (!healthHistory || healthHistory.length < 2 || !healthReport) return null;
-    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    
-    let closestEntry = healthHistory[0];
-    let minDiff = Math.abs(closestEntry.timestamp - thirtyDaysAgo);
-    
-    for (const entry of healthHistory) {
-      const diff = Math.abs(entry.timestamp - thirtyDaysAgo);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestEntry = entry;
-      }
-    }
-
-    const diff = healthReport.healthScore - closestEntry.score;
-    if (diff > 0) return `↑ +${diff} this month`;
-    if (diff < 0) return `↓ ${diff} this month`;
-    return 'Score stable this month';
-  }, [healthHistory, healthReport]);
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <Ionicons name="shield-checkmark-outline" size={80} color="rgba(71, 227, 154, 0.35)" />
+      <Text style={styles.emptyTitle}>Your library is healthy</Text>
+      <Text style={styles.emptySubtitle}>
+        No duplicates or issues found. We'll let you know if that changes during the next scan.
+      </Text>
+      <PressScale onPress={handleManualScan} style={styles.rescanBtn}>
+        <LiquidGlass borderRadius={24} style={styles.rescanGlass}>
+          <Text style={styles.rescanText}>Run Manual Scan</Text>
+        </LiquidGlass>
+      </PressScale>
+    </View>
+  );
 
   return (
-    <View style={styles.root}>
-      <AtmosphericBackground intensity={0.85} />
-
-      {/* Header Bar */}
-      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <Ionicons name="chevron-back" size={24} color={palette.ink} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Library Health</Text>
-        <TouchableOpacity
-          onPress={handleClearCache}
-          style={styles.resetButton}
-          accessibilityRole="button"
-          accessibilityLabel="Reset health database"
-        >
-          <Ionicons name="refresh-circle-outline" size={24} color={palette.inkDim} />
-        </TouchableOpacity>
-      </View>
-
+    <View style={styles.container}>
+      <AtmosphericBackground colors={[palette.success, palette.primary]} />
+      
       <ScrollView
-        showsVerticalScrollIndicator={false}
         contentContainerStyle={[
-          styles.scrollContainer,
-          { paddingBottom: insets.bottom + (undoExpiresAt ? 110 : 30) },
+          styles.scrollContent,
+          { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 40 },
         ]}
+        showsVerticalScrollIndicator={false}
       >
-        {isScanning ? (
-          /* Scanning Loader State */
-          <LiquidGlass style={styles.scoreCard}>
-            <View style={styles.loaderContainer}>
-              <Text style={styles.loaderTitle}>Scanning Library...</Text>
-              <Text style={styles.loaderStage}>Stage: {scanStage.toUpperCase()}</Text>
-              <View style={styles.loaderTrack}>
-                <View style={[styles.loaderBar, { width: `${scanProgress}%` }]} />
-              </View>
-              <Text style={styles.loaderProgressText}>{scanProgress}% Complete</Text>
-            </View>
-          </LiquidGlass>
-        ) : healthReport ? (
-          /* Health Overview Summary */
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color="#FFF" />
+          </TouchableOpacity>
           <View>
-            <LiquidGlass style={styles.scoreCard}>
-              <View style={styles.scoreHeader}>
-                <View style={styles.scoreTextSection}>
-                  <Text style={styles.scoreSub}>HEALTH SCORE</Text>
-                  <Text
-                    style={[styles.scoreDesc, { color: getScoreColor(healthReport.healthScore) }]}
-                  >
-                    {getScoreDescription(healthReport.healthScore)}
-                  </Text>
-                  {!!trendText && <Text style={styles.trendText}>{trendText}</Text>}
-                </View>
+            <Text style={styles.title}>Library Health</Text>
+            <Text style={styles.subtitle}>Smart Clean & Optimization</Text>
+          </View>
+          <View style={{ flex: 1 }} />
+          <TouchableOpacity onPress={handleClearCache} style={styles.clearBtn}>
+            <Ionicons name="refresh-outline" size={22} color="rgba(255,255,255,0.4)" />
+          </TouchableOpacity>
+        </View>
 
-                {/* Score Progress Ring */}
-                <View
-                  style={[
-                    styles.scoreRing,
-                    { borderColor: getScoreColor(healthReport.healthScore) },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.scoreNumber,
-                      { color: getScoreColor(healthReport.healthScore) },
-                    ]}
-                  >
-                    {healthReport.healthScore}
-                  </Text>
-                  <Text style={styles.scoreOutOf}>/100</Text>
-                </View>
+        {/* Status Card */}
+        <LiquidGlass style={styles.statusCard}>
+          <View style={styles.statusRow}>
+            <View style={styles.scoreContainer}>
+              <View style={[styles.scoreRing, { borderColor: healthReport?.healthScore && healthReport.healthScore > 90 ? palette.success : palette.primary }]}>
+                <Text style={styles.scoreValue}>{healthReport?.healthScore || '--'}</Text>
               </View>
+              <Text style={styles.scoreLabel}>Health Score</Text>
+            </View>
+            
+            <View style={styles.statsDivider} />
+            
+            <View style={styles.statsColumn}>
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{healthReport?.totalTracks || 0}</Text>
+                <Text style={styles.statLabel}>Total Tracks</Text>
+              </View>
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{formatBytes(healthReport?.storageWasteBytes || 0)}</Text>
+                <Text style={styles.statLabel}>Optimization Potential</Text>
+              </View>
+            </View>
+          </View>
 
-              {/* Recovery Banner & Safe Deduplicate Option */}
-              <View style={styles.savingsRow}>
-                <View style={styles.savingsTextColumn}>
-                  <Text style={styles.savingsLabel}>POTENTIAL SAVINGS</Text>
-                  <Text style={styles.savingsVal}>
-                    Recover {formatBytes(healthReport.storageWasteBytes)}
-                  </Text>
+          {isScanning && (
+            <View style={styles.scanProgressContainer}>
+              <View style={styles.scanLabelRow}>
+                <Text style={styles.scanStageText}>{scanStage || 'Analyzing...'}</Text>
+                <Text style={styles.scanPercentText}>{Math.round(scanProgress)}%</Text>
+              </View>
+              <View style={styles.progressBarBg}>
+                <View style={[styles.progressBarFill, { width: `${scanProgress}%` }]} />
+              </View>
+            </View>
+          )}
+        </LiquidGlass>
+
+        {/* Quick Actions */}
+        {safeGroups.length > 0 && (
+          <PressScale onPress={() => setShowMergeAllConfirm(true)} style={styles.quickActionBtn}>
+            <LiquidGlass borderRadius={24} style={styles.quickActionGlass} gradient accentColor={palette.success} accentOpacity={0.15}>
+              <View style={styles.quickActionContent}>
+                <Ionicons name="sparkles" size={24} color={palette.success} />
+                <View style={{ flex: 1, marginLeft: 16 }}>
+                  <Text style={styles.quickActionTitle}>One-Tap Optimization</Text>
+                  <Text style={styles.quickActionSub}>Recover {formatBytes(safeRecoveryBytes)} from {safeGroups.length} safe groups</Text>
                 </View>
-                {safeGroups.length > 0 ? (
-                  <TouchableOpacity
-                    onPress={handleMergeAllSafe}
-                    style={styles.mergeButton}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.mergeButtonText}>Merge Safe</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    onPress={handleManualScan}
-                    style={styles.rescanButton}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.rescanButtonText}>Rescan</Text>
-                  </TouchableOpacity>
-                )}
+                <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.3)" />
               </View>
             </LiquidGlass>
+          </PressScale>
+        )}
 
-            {/* Health Indicators (Broken files, missing artwork) */}
-            <View style={styles.indicatorRow}>
-              <LiquidGlass style={styles.indicatorCard}>
-                <Ionicons name="image-outline" size={24} color={palette.cyan} />
-                <Text style={styles.indicatorCount}>
-                  {healthReport.totalTracks > 0
-                    ? healthReport.duplicateTracks // placeholder or compute missing
-                    : 0}
-                </Text>
-                <Text style={styles.indicatorLabel}>Dups Detected</Text>
-              </LiquidGlass>
+        {/* Duplicate Groups */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Potential Duplicates ({visibleGroups.length})</Text>
+        </View>
 
-              <LiquidGlass style={styles.indicatorCard}>
-                <Ionicons name="alert-circle-outline" size={24} color={palette.coral} />
-                <Text style={styles.indicatorCount}>
-                  {healthReport.duplicateGroups}
-                </Text>
-                <Text style={styles.indicatorLabel}>Duplicate Groups</Text>
-              </LiquidGlass>
-            </View>
+        {visibleGroups.length === 0 && !isScanning ? (
+          renderEmptyState()
+        ) : (
+          <View style={styles.groupsList}>
+            {visibleGroups.map((group) => {
+              const recTrack = group.tracks.find((t) => t.id === group.recommendedTrackId) || group.tracks[0];
+              const duplicateTracks = group.tracks.filter((t) => t.id !== group.recommendedTrackId);
 
-            {/* Duplicate Groups Header */}
-            <View style={styles.sectionTitleRow}>
-              <Text style={styles.sectionTitle}>Duplicate Groups ({visibleGroups.length})</Text>
-              {visibleGroups.length > 0 && (
-                <Text style={styles.sectionSubtitle}>Select keep recommended or ignore</Text>
-              )}
-            </View>
+              const getSeverityColor = (sev: string) => {
+                if (sev === 'low') return palette.success;
+                if (sev === 'medium') return palette.amber;
+                return palette.coral;
+              };
 
-            {/* Duplicate Groups List */}
-            {visibleGroups.length > 0 ? (
-              visibleGroups.map((group) => {
-                const recId = group.recommendedTrackId;
-                const recTrack = group.tracks.find((t) => t.id === recId);
-                const duplicateTracks = group.tracks.filter((t) => t.id !== recId);
-
-                if (!recTrack) return null;
-
-                // Tonal badges based on confidence
-                const getConfidenceLabel = (conf: number) => {
-                  if (conf >= 95) return 'Exact Duplicate';
-                  if (conf >= 85) return 'Metadata Duplicate';
-                  return 'Duration Duplicate';
-                };
-
-                const getSeverityColor = (sev: string) => {
-                  if (sev === 'low') return palette.success;
-                  if (sev === 'medium') return palette.amber;
-                  return palette.coral;
-                };
-
-                return (
-                  <LiquidGlass key={group.id} style={styles.groupCard}>
-                    {/* Group Card Header */}
-                    <View style={styles.groupHeader}>
-                      <View style={styles.groupMetaColumn}>
-                        <View style={styles.badgeRow}>
-                          <View
-                            style={[
-                              styles.typeBadge,
-                              {
-                                borderColor:
-                                  group.confidence >= 95 ? palette.success : palette.primary,
-                              },
-                            ]}
-                          >
-                            <Text style={styles.typeBadgeText}>
-                              {getConfidenceLabel(group.confidence)}
-                            </Text>
-                          </View>
-                          <View
-                            style={[
-                              styles.sevBadge,
-                              { borderColor: getSeverityColor(group.severity) },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.sevBadgeText,
-                                { color: getSeverityColor(group.severity) },
-                              ]}
-                            >
-                              {group.severity.toUpperCase()}
-                            </Text>
-                          </View>
-                        </View>
-                        <Text style={styles.groupTrackTitle} numberOfLines={1}>
-                          {recTrack.title}
-                        </Text>
-                        <Text style={styles.groupTrackArtist} numberOfLines={1}>
-                          {recTrack.artist}
-                        </Text>
-                      </View>
-                      <Image
-                        source={{ uri: recTrack.art || '' }}
-                        style={styles.groupArt}
-                        contentFit="cover"
-                        transition={120}
-                      />
-                    </View>
-
-                    {/* Recommended Version */}
-                    <View style={styles.versionContainer}>
-                      <View style={styles.versionLabelRow}>
-                        <Text style={styles.versionLabel}>RECOMMENDED TO KEEP</Text>
-                        <View style={styles.recommendedTag}>
-                          <Text style={styles.recommendedTagText}>HIGHEST QUALITY</Text>
-                        </View>
-                      </View>
-                      <Text style={styles.trackDetailsText} numberOfLines={1}>
-                        {formatBytes(recTrack.fileSize || 0)} · {recTrack.album || 'No Album'}
-                      </Text>
-                      <Text style={styles.trackPathText} numberOfLines={1}>
-                        {recTrack.localUri || recTrack.url || ''}
-                      </Text>
-                    </View>
-
-                    {/* Duplicates to Delete */}
-                    {duplicateTracks.map((dup) => (
-                      <View key={dup.id} style={styles.dupVersionContainer}>
-                        <View style={styles.versionLabelRow}>
-                          <Text style={styles.dupVersionLabel}>DUPLICATE VERSION</Text>
-                          <Text style={styles.wasteLabel}>
-                            Waste: {formatBytes(dup.fileSize || 0)}
+              return (
+                <LiquidGlass key={group.id} style={styles.groupCard}>
+                  {/* Group Card Header */}
+                  <View style={styles.groupHeader}>
+                    <View style={styles.groupMetaColumn}>
+                      <View style={styles.badgeRow}>
+                        <View
+                          style={[
+                            styles.typeBadge,
+                            {
+                              borderColor:
+                                group.confidence >= 95 ? palette.success : palette.primary,
+                            },
+                          ]}
+                        >
+                          <Text style={styles.typeBadgeText}>
+                            {getConfidenceLabel(group.confidence)}
                           </Text>
                         </View>
-                        <Text style={styles.trackDetailsText} numberOfLines={1}>
-                          {formatBytes(dup.fileSize || 0)} · {dup.album || 'No Album'}
-                        </Text>
-                        <Text style={styles.trackPathText} numberOfLines={1}>
-                          {dup.localUri || dup.url || ''}
+                        <View
+                          style={[
+                            styles.sevBadge,
+                            { borderColor: getSeverityColor(group.severity) },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.sevBadgeText,
+                              { color: getSeverityColor(group.severity) },
+                            ]}
+                          >
+                            {group.severity.toUpperCase()}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.groupTrackTitle} numberOfLines={1}>
+                        {recTrack.title}
+                      </Text>
+                      <Text style={styles.groupTrackArtist} numberOfLines={1}>
+                        {recTrack.artist}
+                      </Text>
+                    </View>
+
+                    <AuraArtwork
+                      source={resolveArtwork({ art: recTrack.art, title: recTrack.title }, 'card')}
+                      entityName={recTrack.title}
+                      entityType="song"
+                      style={styles.groupArt}
+                      contentFit="cover"
+                      transition={120}
+                      cachePolicy="memory-disk"
+                      borderRadius={10}
+                    />
+                  </View>
+
+                  {/* Recommended Version */}
+                  <View style={styles.versionContainer}>
+                    <View style={styles.versionLabelRow}>
+                      <Text style={styles.versionLabel}>RECOMMENDED TO KEEP</Text>
+                      <View style={styles.recommendedTag}>
+                        <Text style={styles.recommendedTagText}>HIGHEST QUALITY</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.trackDetailsText} numberOfLines={1}>
+                      {formatBytes(recTrack.fileSize || 0)} · {recTrack.album || 'No Album'}
+                    </Text>
+                    <Text style={styles.trackPathText} numberOfLines={1}>
+                      {recTrack.localUri || recTrack.url || ''}
+                    </Text>
+                  </View>
+
+                  {/* Duplicates to Delete */}
+                  {duplicateTracks.map((dup) => (
+                    <View key={dup.id} style={styles.dupVersionContainer}>
+                      <View style={styles.versionLabelRow}>
+                        <Text style={styles.dupVersionLabel}>DUPLICATE VERSION</Text>
+                        <Text style={styles.wasteLabel}>
+                          Waste: {formatBytes(dup.fileSize || 0)}
                         </Text>
                       </View>
-                    ))}
-
-                    {/* Action Bar */}
-                    <View style={styles.groupActions}>
-                      <TouchableOpacity
-                        onPress={() => handleIgnoreGroup(group.id)}
-                        style={styles.ignoreBtn}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.ignoreBtnText}>Ignore Group</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => handleKeepRecommended(group)}
-                        style={styles.dedupeBtn}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={styles.dedupeBtnText}>Keep Recommended</Text>
-                      </TouchableOpacity>
+                      <Text style={styles.trackDetailsText} numberOfLines={1}>
+                        {formatBytes(dup.fileSize || 0)} · {dup.album || 'No Album'}
+                      </Text>
+                      <Text style={styles.trackPathText} numberOfLines={1}>
+                        {dup.localUri || dup.url || ''}
+                      </Text>
                     </View>
-                  </LiquidGlass>
-                );
-              })
-            ) : (
-              /* No Duplicates State */
-              <View style={styles.emptyContainer}>
-                <Ionicons name="sparkles" size={48} color={palette.success} />
-                <Text style={styles.emptyTitle}>Your library is healthy</Text>
-                <Text style={styles.emptySub}>No duplicate songs or unreferenced audio files detected.</Text>
-                <TouchableOpacity
-                  onPress={handleManualScan}
-                  style={styles.emptyRescanBtn}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.emptyRescanBtnText}>Force Rescan</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        ) : (
-          /* Empty/Initial scan needed */
-          <View style={styles.emptyContainer}>
-            <Ionicons name="shield-outline" size={48} color={palette.inkDim} />
-            <Text style={styles.emptyTitle}>Analyze Library Health</Text>
-            <Text style={styles.emptySub}>Scan your library for duplicates, broken tracks, and recovers storage.</Text>
-            <TouchableOpacity
-              onPress={handleManualScan}
-              style={styles.emptyRescanBtn}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.emptyRescanBtnText}>Start Health Audit</Text>
-            </TouchableOpacity>
+                  ))}
+
+                  {/* Action Bar */}
+                  <View style={styles.groupActions}>
+                    <TouchableOpacity
+                      onPress={() => handleIgnoreGroup(group.id)}
+                      style={styles.ignoreBtn}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.ignoreBtnText}>Ignore Group</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => handleKeepRecommended(group)}
+                      style={styles.mergeBtn}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.mergeBtnText}>Keep Recommended Only</Text>
+                    </TouchableOpacity>
+                  </View>
+                </LiquidGlass>
+              );
+            })}
           </View>
         )}
       </ScrollView>
 
-      {/* Floating Undo Toast Notification */}
-      {!!undoExpiresAt && timeLeft > 0 && (
+      {/* Undo Toast */}
+      {pendingDeletions.length > 0 && timeLeft > 0 && (
         <View style={[styles.undoToastContainer, { bottom: insets.bottom + 20 }]}>
-          <LiquidGlass borderRadius={20} intensity={30} style={styles.undoToastGlass}>
+          <LiquidGlass borderRadius={20} style={styles.undoToastGlass} gradient accentColor={palette.primary} accentOpacity={0.2}>
             <View style={styles.undoToastContent}>
-              <Ionicons name="trash-outline" size={20} color={palette.coral} />
-              <View style={styles.undoToastTextWrap}>
-                <Text style={styles.undoToastTitle}>Duplicates scheduled for removal</Text>
-                <Text style={styles.undoToastSubtitle}>
-                  Physical file deletion in {Math.ceil(timeLeft / 1000)}s
-                </Text>
+              <View style={styles.undoIcon}>
+                <Ionicons name="trash-outline" size={22} color="#FFF" />
               </View>
-              <TouchableOpacity
-                onPress={handleUndo}
-                style={styles.undoBtn}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.undoBtnText}>Undo</Text>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.undoTitle}>Cleaned {pendingDeletions.length} files</Text>
+                <Text style={styles.undoSub}>Reversing in {Math.ceil(timeLeft / 1000)}s...</Text>
+              </View>
+              <TouchableOpacity onPress={handleUndo} style={styles.undoBtn}>
+                <Text style={styles.undoBtnText}>UNDO</Text>
               </TouchableOpacity>
-            </View>
-            {/* Undo countdown bar */}
-            <View style={styles.undoProgressTrack}>
-              <View style={[styles.undoProgressBar, { width: `${(timeLeft / 15000) * 100}%` }]} />
             </View>
           </LiquidGlass>
         </View>
       )}
 
-      {/* Manual Deduplicate Apple Confirmation Sheet */}
-      <Modal
-        visible={selectedGroupToMerge !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSelectedGroupToMerge(null)}
-      >
+      {/* Merge Confirmation Modal */}
+      <Modal visible={!!selectedGroupToMerge} transparent animationType="fade" onRequestClose={() => setSelectedGroupToMerge(null)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCentered}>
-            <LiquidGlass borderRadius={24} style={styles.modalGlass}>
-              <View style={styles.modalContent}>
-                <Ionicons name="checkmark-circle-outline" size={36} color={palette.primary} style={styles.modalIcon} />
-                <Text style={styles.modalTitle}>Deduplicate song</Text>
-                <Text style={styles.modalSub}>
-                  You'll keep the recommended version.
-                </Text>
-                <View style={styles.modalDetailBox}>
-                  <Text style={styles.modalDetailText}>
-                    • 1 duplicate file will be removed.
-                  </Text>
-                  <Text style={styles.modalDetailText}>
-                    • Playlists references will be updated.
-                  </Text>
-                  {selectedGroupToMerge && (
-                    <Text style={styles.modalDetailText}>
-                      • Recover{' '}
-                      {formatBytes(
-                        selectedGroupToMerge.tracks
-                          .filter((t) => t.id !== selectedGroupToMerge.recommendedTrackId)
-                          .reduce((sum, t) => sum + (t.fileSize || 0), 0)
-                      )}{' '}
-                      of storage.
-                    </Text>
-                  )}
-                </View>
-                <View style={styles.modalButtonRow}>
-                  <TouchableOpacity
-                    onPress={() => setSelectedGroupToMerge(null)}
-                    style={styles.modalCancelBtn}
-                  >
-                    <Text style={styles.modalCancelBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={executeSingleGroupDeduplicate}
-                    style={styles.modalConfirmBtn}
-                  >
-                    <Text style={styles.modalConfirmBtnText}>Deduplicate</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setSelectedGroupToMerge(null)}>
+             <BlurView intensity={20} style={StyleSheet.absoluteFill} tint="dark" />
+          </TouchableOpacity>
+          <View style={styles.modalContainer}>
+            <LiquidGlass borderRadius={32} style={styles.confirmCard}>
+               <Ionicons name="trash-outline" size={40} color={palette.coral} style={{ marginBottom: 16 }} />
+               <Text style={styles.modalTitle}>Confirm Cleanup</Text>
+               <Text style={styles.modalSub}>
+                 This will permanently delete the duplicate files from your device. You will keep the highest quality version.
+               </Text>
+               <View style={styles.modalButtons}>
+                 <TouchableOpacity onPress={() => setSelectedGroupToMerge(null)} style={styles.modalCancelBtn}>
+                   <Text style={styles.modalCancelText}>Cancel</Text>
+                 </TouchableOpacity>
+                 <TouchableOpacity onPress={executeSingleGroupDeduplicate} style={styles.modalDeleteBtn}>
+                   <Text style={styles.modalDeleteText}>Delete Duplicates</Text>
+                 </TouchableOpacity>
+               </View>
             </LiquidGlass>
           </View>
         </View>
       </Modal>
 
-      {/* Merge All Safe Confirmation Sheet */}
-      <Modal
-        visible={showMergeAllConfirm}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowMergeAllConfirm(false)}
-      >
+      {/* Merge All Confirmation */}
+      <Modal visible={showMergeAllConfirm} transparent animationType="fade" onRequestClose={() => setShowMergeAllConfirm(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCentered}>
-            <LiquidGlass borderRadius={24} style={styles.modalGlass}>
-              <View style={styles.modalContent}>
-                <Ionicons name="sparkles-outline" size={36} color={palette.success} style={styles.modalIcon} />
-                <Text style={styles.modalTitle}>Merge All Safe Duplicates</Text>
-                <Text style={styles.modalSub}>
-                  Merge all duplicate song groups with {'>'}=95% confidence.
-                </Text>
-                <View style={styles.modalDetailBox}>
-                  <Text style={styles.modalDetailText}>
-                    • Keep the highest quality version of each song.
-                  </Text>
-                  <Text style={styles.modalDetailText}>
-                    • {safeGroups.length} duplicate groups will be resolved.
-                  </Text>
-                  <Text style={styles.modalDetailText}>
-                    • Playlists references will be preserved.
-                  </Text>
-                  <Text style={styles.modalDetailText}>
-                    • Recover {formatBytes(safeRecoveryBytes)} of storage.
-                  </Text>
-                </View>
-                <View style={styles.modalButtonRow}>
-                  <TouchableOpacity
-                    onPress={() => setShowMergeAllConfirm(false)}
-                    style={styles.modalCancelBtn}
-                  >
-                    <Text style={styles.modalCancelBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={executeMergeAllSafe}
-                    style={styles.modalConfirmBtn}
-                  >
-                    <Text style={styles.modalConfirmBtnText}>Merge All</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowMergeAllConfirm(false)}>
+             <BlurView intensity={20} style={StyleSheet.absoluteFill} tint="dark" />
+          </TouchableOpacity>
+          <View style={styles.modalContainer}>
+            <LiquidGlass borderRadius={32} style={styles.confirmCard} accentColor={palette.success} accentOpacity={0.1}>
+               <Ionicons name="sparkles-outline" size={44} color={palette.success} style={{ marginBottom: 16 }} />
+               <Text style={styles.modalTitle}>Smart Cleanup</Text>
+               <Text style={styles.modalSub}>
+                 Optimizing {safeGroups.length} groups of duplicates. We've verified these matches with 95%+ confidence.
+                 {'\n\n'}You'll recover {formatBytes(safeRecoveryBytes)} instantly.
+               </Text>
+               <View style={styles.modalButtons}>
+                 <TouchableOpacity onPress={() => setShowMergeAllConfirm(false)} style={styles.modalCancelBtn}>
+                   <Text style={styles.modalCancelText}>Cancel</Text>
+                 </TouchableOpacity>
+                 <TouchableOpacity onPress={executeMergeAllSafe} style={[styles.modalDeleteBtn, { backgroundColor: palette.success }]}>
+                   <Text style={[styles.modalDeleteText, { color: '#000' }]}>Recover Space</Text>
+                 </TouchableOpacity>
+               </View>
             </LiquidGlass>
           </View>
         </View>
@@ -648,302 +506,266 @@ export default function LibraryHealthScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
     backgroundColor: palette.background,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-    zIndex: 100,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.03)',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: palette.ink,
-    letterSpacing: -0.3,
-  },
-  resetButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scrollContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  scoreCard: {
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  scoreHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  scoreTextSection: {
-    flex: 1,
-  },
-  scoreSub: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: palette.inkDim,
-    letterSpacing: 1.2,
-    marginBottom: 4,
-  },
-  scoreDesc: {
-    fontSize: 24,
-    fontWeight: '900',
-    letterSpacing: -0.5,
-    marginBottom: 4,
-  },
-  trendText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: palette.inkMuted,
-  },
-  scoreRing: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.02)',
-  },
-  scoreNumber: {
-    fontSize: 24,
-    fontWeight: '900',
-  },
-  scoreOutOf: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: palette.inkDim,
-    marginTop: -2,
-  },
-  savingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    paddingTop: 16,
-  },
-  savingsTextColumn: {
-    flex: 1,
-  },
-  savingsLabel: {
-    fontSize: 9,
-    fontWeight: '900',
-    color: palette.inkDim,
-    letterSpacing: 1,
-    marginBottom: 2,
-  },
-  savingsVal: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: palette.ink,
-    letterSpacing: -0.3,
-  },
-  mergeButton: {
-    height: 38,
-    paddingHorizontal: 16,
-    borderRadius: 19,
-    backgroundColor: palette.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  mergeButtonText: {
-    color: '#FFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  rescanButton: {
-    height: 38,
-    paddingHorizontal: 16,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  rescanButtonText: {
-    color: palette.ink,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  indicatorRow: {
-    flexDirection: 'row',
-    gap: 12,
     marginBottom: 24,
   },
-  indicatorCard: {
-    flex: 1,
-    padding: 16,
+  backBtn: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+    marginRight: 8,
   },
-  indicatorCount: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: palette.ink,
-    marginTop: 8,
-    marginBottom: 2,
+  title: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#FFF',
+    letterSpacing: -0.5,
   },
-  indicatorLabel: {
-    fontSize: 11,
-    color: palette.inkDim,
+  subtitle: {
+    fontSize: 14,
+    color: palette.inkMuted,
     fontWeight: '500',
   },
-  sectionTitleRow: {
-    marginBottom: 12,
-    paddingHorizontal: 4,
+  clearBtn: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  sectionTitle: {
+  statusCard: {
+    padding: 24,
+    marginBottom: 20,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  scoreContainer: {
+    alignItems: 'center',
+  },
+  scoreRing: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  scoreValue: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#FFF',
+  },
+  scoreLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: palette.inkMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  statsDivider: {
+    width: 1,
+    height: 60,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginHorizontal: 32,
+  },
+  statsColumn: {
+    flex: 1,
+    gap: 16,
+  },
+  statItem: {
+    flexDirection: 'column',
+  },
+  statValue: {
     fontSize: 18,
     fontWeight: '800',
-    color: palette.ink,
-    letterSpacing: -0.3,
+    color: '#FFF',
   },
-  sectionSubtitle: {
-    fontSize: 12,
-    color: palette.inkDim,
+  statLabel: {
+    fontSize: 11,
+    color: palette.inkMuted,
     fontWeight: '500',
+  },
+  scanProgressContainer: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  scanLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  scanStageText: {
+    fontSize: 12,
+    color: '#FFF',
+    fontWeight: '600',
+  },
+  scanPercentText: {
+    fontSize: 12,
+    color: palette.primary,
+    fontWeight: '800',
+  },
+  progressBarBg: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: palette.primary,
+  },
+  quickActionBtn: {
+    marginBottom: 32,
+  },
+  quickActionGlass: {
+    padding: 16,
+  },
+  quickActionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  quickActionTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#FFF',
+  },
+  quickActionSub: {
+    fontSize: 12,
+    color: palette.inkMuted,
     marginTop: 2,
+  },
+  sectionHeader: {
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#FFF',
+    opacity: 0.6,
+  },
+  groupsList: {
+    gap: 16,
   },
   groupCard: {
     padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   groupHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 16,
   },
   groupMetaColumn: {
     flex: 1,
-    paddingRight: 12,
   },
   badgeRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 8,
     marginBottom: 8,
   },
   typeBadge: {
-    borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 6,
+    borderWidth: 1,
   },
   typeBadgeText: {
     fontSize: 9,
-    fontWeight: '800',
-    color: palette.inkMuted,
+    fontWeight: '900',
+    color: '#FFF',
   },
   sevBadge: {
-    borderWidth: 1,
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 6,
+    borderWidth: 1,
   },
   sevBadgeText: {
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '900',
   },
   groupTrackTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '800',
-    color: palette.ink,
-    letterSpacing: -0.2,
+    color: '#FFF',
   },
   groupTrackArtist: {
     fontSize: 13,
-    color: palette.inkDim,
-    fontWeight: '500',
+    color: palette.inkMuted,
     marginTop: 2,
   },
   groupArt: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    backgroundColor: palette.backgroundRaised,
+    width: 64,
+    height: 64,
+    borderRadius: 12,
+    marginLeft: 16,
   },
   versionContainer: {
-    padding: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: 12,
-    backgroundColor: 'rgba(191,90,242,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(191,90,242,0.12)',
-    marginBottom: 12,
+    padding: 12,
+    marginBottom: 8,
   },
   versionLabelRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    alignItems: 'center',
+    marginBottom: 6,
   },
   versionLabel: {
     fontSize: 9,
     fontWeight: '900',
-    color: palette.primary,
-    letterSpacing: 0.8,
+    color: palette.success,
+    letterSpacing: 0.5,
   },
   recommendedTag: {
+    backgroundColor: 'rgba(71, 227, 154, 0.15)',
     paddingHorizontal: 6,
-    paddingVertical: 1,
+    paddingVertical: 2,
     borderRadius: 4,
-    backgroundColor: 'rgba(191,90,242,0.15)',
   },
   recommendedTagText: {
     fontSize: 8,
     fontWeight: '900',
-    color: palette.primary,
+    color: palette.success,
   },
   trackDetailsText: {
     fontSize: 13,
-    color: palette.ink,
+    color: '#FFF',
     fontWeight: '600',
   },
   trackPathText: {
     fontSize: 10,
-    color: palette.inkDim,
+    color: palette.inkMuted,
     marginTop: 4,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   dupVersionContainer: {
-    padding: 12,
+    backgroundColor: 'rgba(255, 69, 58, 0.04)',
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    padding: 12,
+    marginBottom: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-    marginBottom: 12,
+    borderColor: 'rgba(255, 69, 58, 0.1)',
   },
   dupVersionLabel: {
     fontSize: 9,
     fontWeight: '900',
-    color: palette.inkDim,
-    letterSpacing: 0.8,
+    color: palette.coral,
+    letterSpacing: 0.5,
   },
   wasteLabel: {
     fontSize: 9,
@@ -952,230 +774,161 @@ const styles = StyleSheet.create({
   },
   groupActions: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 4,
+    gap: 8,
+    marginTop: 12,
   },
   ignoreBtn: {
     flex: 1,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   ignoreBtnText: {
-    fontSize: 13,
+    fontSize: 12,
     color: palette.inkMuted,
     fontWeight: '700',
   },
-  dedupeBtn: {
-    flex: 1.5,
+  mergeBtn: {
+    flex: 2,
     height: 40,
     borderRadius: 20,
     backgroundColor: palette.primary,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  dedupeBtnText: {
-    fontSize: 13,
-    color: '#FFF',
-    fontWeight: '700',
+  mergeBtnText: {
+    fontSize: 12,
+    color: '#000',
+    fontWeight: '800',
   },
   emptyContainer: {
-    padding: 40,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 60,
+    paddingVertical: 64,
   },
   emptyTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: palette.ink,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptySub: {
-    fontSize: 13,
-    color: palette.inkDim,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 24,
-  },
-  emptyRescanBtn: {
-    height: 44,
-    paddingHorizontal: 24,
-    borderRadius: 22,
-    backgroundColor: palette.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyRescanBtnText: {
     color: '#FFF',
+    marginTop: 20,
+  },
+  emptySubtitle: {
     fontSize: 14,
-    fontWeight: '700',
+    color: palette.inkMuted,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
+    paddingHorizontal: 40,
   },
-  loaderContainer: {
-    alignItems: 'center',
-    padding: 20,
+  rescanBtn: {
+    marginTop: 32,
   },
-  loaderTitle: {
-    fontSize: 18,
+  rescanGlass: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  rescanText: {
+    color: '#FFF',
     fontWeight: '800',
-    color: palette.ink,
-    marginBottom: 4,
-  },
-  loaderStage: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: palette.primary,
-    letterSpacing: 1.2,
-    marginBottom: 16,
-  },
-  loaderTrack: {
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 2,
-    width: '100%',
-    marginBottom: 10,
-  },
-  loaderBar: {
-    height: '100%',
-    backgroundColor: palette.primary,
-    borderRadius: 2,
-  },
-  loaderProgressText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: palette.inkDim,
+    fontSize: 14,
   },
   undoToastContainer: {
     position: 'absolute',
-    left: 16,
-    right: 16,
-    zIndex: 99999,
+    left: 20,
+    right: 20,
+    zIndex: 1000,
   },
   undoToastGlass: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 16,
   },
   undoToastContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    gap: 12,
   },
-  undoToastTextWrap: {
-    flex: 1,
+  undoIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  undoToastTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: palette.ink,
+  undoTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFF',
   },
-  undoToastSubtitle: {
-    fontSize: 11,
-    color: palette.inkDim,
+  undoSub: {
+    fontSize: 12,
+    color: palette.inkMuted,
     marginTop: 2,
   },
   undoBtn: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 16,
+    backgroundColor: '#FFF',
   },
   undoBtnText: {
     fontSize: 12,
-    fontWeight: '700',
-    color: palette.ink,
-  },
-  undoProgressTrack: {
-    height: 3,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    width: '100%',
-  },
-  undoProgressBar: {
-    height: '100%',
-    backgroundColor: palette.coral,
+    fontWeight: '900',
+    color: '#000',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
-  modalCentered: {
-    width: SW - 40,
-    maxWidth: 400,
+  modalContainer: {
+    width: SW * 0.85,
   },
-  modalGlass: {
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  modalContent: {
-    padding: 24,
+  confirmCard: {
+    padding: 32,
     alignItems: 'center',
   },
-  modalIcon: {
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#FFF',
+    textAlign: 'center',
     marginBottom: 12,
   },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: palette.ink,
-    letterSpacing: -0.4,
-    marginBottom: 6,
-  },
   modalSub: {
-    fontSize: 13,
+    fontSize: 14,
     color: palette.inkMuted,
     textAlign: 'center',
-    marginBottom: 16,
+    lineHeight: 20,
+    marginBottom: 32,
   },
-  modalDetailBox: {
-    width: '100%',
-    padding: 16,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 16,
-    marginBottom: 24,
-    gap: 8,
-  },
-  modalDetailText: {
-    fontSize: 12,
-    color: palette.inkDim,
-    fontWeight: '500',
-    lineHeight: 16,
-  },
-  modalButtonRow: {
+  modalButtons: {
     flexDirection: 'row',
     gap: 12,
-    width: '100%',
   },
   modalCancelBtn: {
     flex: 1,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalCancelBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: palette.inkMuted,
-  },
-  modalConfirmBtn: {
-    flex: 1.5,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: palette.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalConfirmBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
+  modalCancelText: {
     color: '#FFF',
+    fontWeight: '700',
+  },
+  modalDeleteBtn: {
+    flex: 1.5,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: palette.coral,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalDeleteText: {
+    color: '#FFF',
+    fontWeight: '900',
   },
 });

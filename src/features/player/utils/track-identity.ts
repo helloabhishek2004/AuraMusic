@@ -55,8 +55,47 @@ export function verifyTrackIdentity(
   return selectedId === resolvedId && resolvedId === nativeId;
 }
 
-export function getTrackArtwork(track: any): string {
+export type ArtworkSize = 'card' | 'album' | 'player' | 'artist' | 'full';
+
+const SIZE_MAP: Record<ArtworkSize, number> = {
+  card: 160,
+  album: 300,
+  player: 600,
+  artist: 800,
+  full: 1024,
+};
+
+/**
+ * Appends sizing parameters to YouTube/YTMusic image URLs to optimize texture memory.
+ */
+export function getArtworkUrl(track: any, size: ArtworkSize = 'album'): string {
   if (!track) return "";
-  return track.art || track.artwork || track.artworkUrl || track.thumbnail || track.image || "";
+  let url = track.art || track.artwork || track.artworkUrl || track.thumbnail || track.image || "";
+  
+  if (!url) return "";
+
+  // YouTube / YTMusic sizing logic
+  if (url.includes('googleusercontent.com') || url.includes('ggpht.com')) {
+    const s = SIZE_MAP[size];
+    const originalUrl = url;
+    
+    // Safely remove existing sizing parameters without destroying base64url hyphens
+    url = url.split('=')[0];
+    
+    const finalUrl = `${url}=w${s}-h${s}-l90-rj`;
+    
+    if (__DEV__) {
+      console.log("[ARTWORK INPUT]", originalUrl);
+      console.log("[ARTWORK OUTPUT]", finalUrl);
+    }
+    
+    return finalUrl;
+  }
+
+  return url;
+}
+
+export function getTrackArtwork(track: any): string {
+  return getArtworkUrl(track, 'album');
 }
 

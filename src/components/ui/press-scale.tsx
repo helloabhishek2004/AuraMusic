@@ -1,6 +1,5 @@
-import React, { memo, useCallback, useRef } from 'react';
+import React, { memo, useCallback } from 'react';
 import {
-  Animated,
   GestureResponderEvent,
   Pressable,
   PressableProps,
@@ -8,9 +7,13 @@ import {
   ViewStyle,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { motion } from '@/src/design/tokens';
 import { useReducedMotionPreference } from '@/src/hooks/use-accessibility-preferences';
 import { impact } from '@/src/utils/haptics';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+} from 'react-native-reanimated';
 
 type PressScaleProps = PressableProps & {
   children: React.ReactNode;
@@ -29,17 +32,16 @@ function PressScaleComponent({
   disabled,
   ...pressableProps
 }: PressScaleProps) {
-  const scale = useRef(new Animated.Value(1)).current;
+  const scale = useSharedValue(1);
   const reduceMotion = useReducedMotionPreference();
 
   const animateTo = useCallback(
     (value: number) => {
       if (reduceMotion) return;
-      Animated.spring(scale, {
-        toValue: value,
-        ...motion.spring.press,
-        useNativeDriver: true,
-      }).start();
+      scale.value = withSpring(value, {
+        stiffness: 260,
+        damping: 18,
+      });
     },
     [reduceMotion, scale]
   );
@@ -63,9 +65,16 @@ function PressScaleComponent({
     [animateTo, disabled, onPressOut]
   );
 
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: scale.value }],
+    };
+  });
+
   return (
-    <Animated.View style={[wrapperStyle, { transform: [{ scale }] }]}>
+    <Animated.View style={[wrapperStyle, animatedStyle]}>
       <Pressable
+        {...({ unstable_pressDelay: 90 } as any)}
         {...pressableProps}
         disabled={disabled}
         onPressIn={handlePressIn}
@@ -80,28 +89,32 @@ function PressScaleComponent({
 
 export const PressScale = memo(PressScaleComponent);
 
-// Hook variant: returns an object with `scale`, `onIn`, and `onOut` to match legacy callers
+// Hook variant: returns an object with `scale` (SharedValue), `onIn`, `onOut`, and `style` (animated style)
 export const usePressScale = (scaleTo = 0.96) => {
-  const scale = useRef(new Animated.Value(1)).current;
+  const scale = useSharedValue(1);
   const reduceMotion = useReducedMotionPreference();
 
-  const onIn = () => {
+  const onIn = useCallback(() => {
     if (reduceMotion) return;
-    Animated.spring(scale, {
-      toValue: scaleTo,
-      ...motion.spring.press,
-      useNativeDriver: true,
-    }).start();
-  };
+    scale.value = withSpring(scaleTo, {
+      stiffness: 260,
+      damping: 18,
+    });
+  }, [reduceMotion, scaleTo]);
 
-  const onOut = () => {
+  const onOut = useCallback(() => {
     if (reduceMotion) return;
-    Animated.spring(scale, {
-      toValue: 1,
-      ...motion.spring.press,
-      useNativeDriver: true,
-    }).start();
-  };
+    scale.value = withSpring(1, {
+      stiffness: 260,
+      damping: 18,
+    });
+  }, [reduceMotion]);
 
-  return { scale, onIn, onOut };
+  const style = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: scale.value }],
+    };
+  });
+
+  return { scale, onIn, onOut, style };
 };

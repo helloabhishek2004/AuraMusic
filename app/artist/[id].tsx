@@ -120,22 +120,41 @@ import {
   Dimensions,
   Easing,
   FlatList,
+  InteractionManager,
   Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from "react-native";
+import { FlashList } from '@shopify/flash-list';
+import AnimatedReanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  useAnimatedScrollHandler,
+  useAnimatedReaction,
+  runOnJS,
+  interpolate,
+  Extrapolation,
+  withTiming,
+  withSpring,
+  SharedValue,
+} from 'react-native-reanimated';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // ─── Core imports (UNCHANGED) ────────────────────────────────────────────────
-import { useMusicActions, usePlaybackState } from "@/src/context/MusicContext";
+import { useMusicActions, usePlaybackState, useNowPlayingTrack } from "@/src/context/MusicContext";
 import { useReducedMotionPreference } from "@/src/hooks/use-accessibility-preferences";
-import { useResponsiveMetrics } from "@/src/hooks/use-responsive-metrics";
-import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
+import { MotionTiming, MotionSpring, MotionEasing } from "@/src/design/motion";
+import { ScrollPhysics } from "@/src/design/scroll-physics";
+import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
+import { AuraArtwork } from "@/src/components/ui/aura-artwork";
+import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
+import { requestIdleTask } from "@/src/utils/idle-task";
 import { musicService } from "@/src/services/api/music";
 
 // ─── Design system (UNCHANGED) ───────────────────────────────────────────────
@@ -169,9 +188,7 @@ const CACHE_PREFIX = "artist_cache_";
 const IN_MEMORY_CACHE: Record<string, ArtistDetails> = {};
 
 // ─── SpringButton ─────────────────────────────────────────────────────────────
-// AUDIT FIX: was creating a new Animated.Value on every SpringButton instance
-// correctly (via useRef), so no change needed there. However we tighten the
-// spring parameters to feel snappier on Android (shorter settling time).
+// Converted to Reanimated for locked 120Hz/60fps thread safety and instant responsiveness.
 const SpringButton = memo(
   ({
     onPress,
@@ -190,28 +207,22 @@ const SpringButton = memo(
     disabled?: boolean;
     children: React.ReactNode;
   }) => {
-    const scale = useRef(new Animated.Value(1)).current;
+    const scale = useSharedValue(1);
 
     const onPressIn = useCallback(() => {
-      Animated.spring(scale, {
-        toValue: 0.93,
-        useNativeDriver: true,
-        speed: 60,      // faster press-in (was 50)
-        bounciness: 0,  // no over-shoot on press-in (feels crisper)
-      }).start();
+      scale.value = withSpring(0.93, { damping: 10, stiffness: 300 });
     }, [scale]);
 
     const onPressOut = useCallback(() => {
-      Animated.spring(scale, {
-        toValue: 1,
-        useNativeDriver: true,
-        speed: 45,
-        bounciness: 7,
-      }).start();
+      scale.value = withSpring(1, { damping: 12, stiffness: 200 });
     }, [scale]);
 
+    const animatedStyle = useAnimatedStyle(() => ({
+      transform: [{ scale: scale.value }],
+    }));
+
     return (
-      <Pressable
+      <TouchableOpacity
         onPress={onPress}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
@@ -219,12 +230,13 @@ const SpringButton = memo(
         hitSlop={hitSlop}
         accessibilityLabel={accessibilityLabel}
         accessibilityRole={accessibilityRole}
-        accessible
+        activeOpacity={1}
+        delayPressIn={100}
       >
-        <Animated.View style={[style, { transform: [{ scale }] }]}>
+        <AnimatedReanimated.View style={[style, animatedStyle]}>
           {children}
-        </Animated.View>
-      </Pressable>
+        </AnimatedReanimated.View>
+      </TouchableOpacity>
     );
   },
 );
@@ -234,11 +246,12 @@ function ArtistPage() {
   const params = useLocalSearchParams();
   const { bottomPadding } = usePlaybackInsets();
   const router = useRouter();
-  const { width, height } = useWindowDimensions();
-  const responsive = useResponsiveMetrics();
+  const width = SCREEN_WIDTH;
+  const height = SCREEN_HEIGHT;
   const reduceMotion = useReducedMotionPreference();
   const navigation = useMusicNavigation("artist");
-  const { currentTrack, isPlaying } = usePlaybackState();
+  const { isPlaying } = usePlaybackState();
+  const currentTrack = useNowPlayingTrack();
   const { play, setQueue } = useMusicActions();
 
   const artistId = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -249,9 +262,19 @@ function ArtistPage() {
   const [isFollowing, setIsFollowing] = useState(false);
 
   // Animation values
-  const pageOpacity = useRef(new Animated.Value(0)).current;
-  const scrollY = useRef(new Animated.Value(0)).current;
+  const pageOpacity = useSharedValue(0);
+  const scrollY = useSharedValue(0);
   const [isLeaving, setIsLeaving] = useState(false);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollY.value = event.contentOffset.y;
+    },
+  });
+
+  const pageOpacityStyle = useAnimatedStyle(() => ({
+    opacity: pageOpacity.value,
+  }));
 
   // Bottom Sheet State (UNCHANGED)
   const [bottomSheetVisible, setBottomSheetVisible] = useState(false);
@@ -266,44 +289,30 @@ function ArtistPage() {
   // Expanded Content Cache (UNCHANGED)
   const expandedCache = useRef<Record<string, any[]>>({});
 
-  // ─── AUDIT FIX: removed scrollY.addListener for sticky toggle.
-  // Instead we drive sticky visibility purely via Animated interpolation.
-  // This eliminates JS-thread pressure on every scroll event.
   const stickyThreshold = height * 0.25;
 
-  const headerOverlayOpacity = scrollY.interpolate({
-    inputRange: [height * 0.08, height * 0.20],
-    outputRange: [1, 0],
-    extrapolate: "clamp",
-  });
+  const headerOverlayStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [height * 0.08, height * 0.20], [1, 0], Extrapolation.CLAMP),
+  }));
 
-  const stickyHeaderOpacity = scrollY.interpolate({
-    inputRange: [height * 0.26, height * 0.36],
-    outputRange: [0, 1],
-    extrapolate: "clamp",
-  });
+  const stickyHeaderStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [height * 0.26, height * 0.36], [0, 1], Extrapolation.CLAMP),
+    transform: [
+      {
+        translateY: interpolate(scrollY.value, [height * 0.26, height * 0.36], [-8, 0], Extrapolation.CLAMP),
+      },
+    ],
+  }));
 
-  const stickyHeaderTranslateY = scrollY.interpolate({
-    inputRange: [height * 0.26, height * 0.36],
-    outputRange: [-8, 0],
-    extrapolate: "clamp",
-  });
-
-  // AUDIT FIX: stickyPointerEvents derived without addListener
-  // We use a state variable updated by scrollY listener but deduplicated
-  // with a ref to avoid setState on every tick.
-  const stickyActiveRef = useRef(false);
   const [showSticky, setShowSticky] = useState(false);
-  useEffect(() => {
-    const id = scrollY.addListener(({ value }) => {
-      const shouldShow = value > stickyThreshold;
-      if (shouldShow !== stickyActiveRef.current) {
-        stickyActiveRef.current = shouldShow;
-        setShowSticky(shouldShow);
+  useAnimatedReaction(
+    () => scrollY.value > stickyThreshold,
+    (isSticky, wasSticky) => {
+      if (isSticky !== wasSticky) {
+        runOnJS(setShowSticky)(isSticky);
       }
-    });
-    return () => scrollY.removeListener(id);
-  }, [scrollY, stickyThreshold]);
+    }
+  );
 
   // Derived data (UNCHANGED)
   const latestTracks = useMemo(() => {
@@ -326,47 +335,47 @@ function ArtistPage() {
 
   const releaseItems = useMemo(() => allReleases.slice(0, 6), [allReleases]);
 
-  // Page enter animation (UNCHANGED logic)
+  // Page enter animation
   useEffect(() => {
     if (reduceMotion) {
-      pageOpacity.setValue(1);
+      pageOpacity.value = 1;
       return;
     }
-    Animated.timing(pageOpacity, {
-      toValue: 1,
+    pageOpacity.value = withTiming(1, {
       duration: motion.duration.base,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
+    });
   }, [pageOpacity, reduceMotion]);
 
   // Data Fetching (UNCHANGED)
   const fetchArtistData = useCallback(async (id: string, useCache = true) => {
     if (!id) return;
-    if (useCache && IN_MEMORY_CACHE[id]) {
-      setArtist(IN_MEMORY_CACHE[id]);
-      setIsLoading(false);
-      refreshArtistData(id);
-      return;
-    }
-    if (useCache) {
-      try {
-        const cachedData = await AsyncStorage.getItem(CACHE_PREFIX + id);
-        if (cachedData) {
-          const parsed = JSON.parse(cachedData);
-          setArtist(parsed);
-          IN_MEMORY_CACHE[id] = parsed;
-          setIsLoading(false);
-          refreshArtistData(id);
-          return;
-        }
-      } catch (e) {
-        console.warn("[Artist Page] Cache read failed:", e);
+
+    requestIdleTask(async () => {
+      if (useCache && IN_MEMORY_CACHE[id]) {
+        setArtist(IN_MEMORY_CACHE[id]);
+        setIsLoading(false);
+        refreshArtistData(id);
+        return;
       }
-    }
-    setIsLoading(true);
-    await refreshArtistData(id);
-    setIsLoading(false);
+      if (useCache) {
+        try {
+          const cachedData = await AsyncStorage.getItem(CACHE_PREFIX + id);
+          if (cachedData) {
+            const parsed = JSON.parse(cachedData);
+            setArtist(parsed);
+            IN_MEMORY_CACHE[id] = parsed;
+            setIsLoading(false);
+            refreshArtistData(id);
+            return;
+          }
+        } catch (e) {
+          console.warn("[Artist Page] Cache read failed:", e);
+        }
+      }
+      setIsLoading(true);
+      await refreshArtistData(id);
+      setIsLoading(false);
+    });
   }, []);
 
   const refreshArtistData = async (id: string) => {
@@ -405,12 +414,13 @@ function ArtistPage() {
       router.back();
       return;
     }
-    Animated.timing(pageOpacity, {
-      toValue: 0,
+    pageOpacity.value = withTiming(0, {
       duration: motion.duration.fast,
-      easing: Easing.in(Easing.cubic),
-      useNativeDriver: true,
-    }).start(() => router.back());
+    }, (finished) => {
+      if (finished) {
+        runOnJS(router.back)();
+      }
+    });
   }, [isLeaving, pageOpacity, router, reduceMotion]);
 
   const handleArtistPress = useCallback(
@@ -659,7 +669,7 @@ function ArtistPage() {
   }
 
   // ─── Loading State ─────────────────────────────────────────────────────────
-  if (isLoading || !artist) {
+  if (isLoading) {
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
@@ -678,6 +688,18 @@ function ArtistPage() {
     );
   }
 
+  if (!artist) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Ionicons name="person-outline" size={48} color="#ffffff80" />
+        <AuraText variant="headline" style={{ color: '#fff', marginTop: 16 }}>Artist unavailable</AuraText>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={{ marginTop: 24, paddingVertical: 12, paddingHorizontal: 24, backgroundColor: '#ffffff20', borderRadius: 24 }}>
+          <AuraText variant="body" style={{ color: '#fff' }}>Return Home</AuraText>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   // ─── Main Render ───────────────────────────────────────────────────────────
   // AUDIT FIX: reduced MotionReveal delays (max was 580 → now 370)
   // so the last section doesn't feel abandoned on first load.
@@ -687,8 +709,8 @@ function ArtistPage() {
       <AtmosphericBackground />
 
       {/* ── Floating back button (visible near top) */}
-      <Animated.View
-        style={[styles.headerOverlay, { opacity: headerOverlayOpacity }]}
+      <AnimatedReanimated.View
+        style={[styles.headerOverlay, headerOverlayStyle]}
         pointerEvents={showSticky ? "none" : "auto"}
       >
         <SpringButton
@@ -699,16 +721,13 @@ function ArtistPage() {
         >
           <Ionicons name="chevron-back" size={20} color={palette.ink} />
         </SpringButton>
-      </Animated.View>
+      </AnimatedReanimated.View>
 
       {/* ── Sticky Header */}
-      <Animated.View
+      <AnimatedReanimated.View
         style={[
           styles.stickyHeader,
-          {
-            opacity: stickyHeaderOpacity,
-            transform: [{ translateY: stickyHeaderTranslateY }],
-          },
+          stickyHeaderStyle,
         ]}
         pointerEvents={showSticky ? "auto" : "none"}
       >
@@ -729,10 +748,13 @@ function ArtistPage() {
           </SpringButton>
 
           <View style={styles.stickyHeaderInfo}>
-            <Image
-              source={{ uri: artist.thumbnail }}
+            <AuraArtwork
+              source={resolveArtwork({ art: artist.thumbnail, artist: artist.name, type: 'artist' }, 'card')}
+              entityName={artist.name}
+              entityType="artist"
               style={styles.stickyAvatar}
               contentFit="cover"
+              borderRadius={11}
             />
             <AuraText variant="headline" numberOfLines={1} style={styles.stickyTitle}>
               {artist.name}
@@ -748,22 +770,18 @@ function ArtistPage() {
             <Ionicons name="shuffle" size={16} color="#fff" />
           </SpringButton>
         </LiquidGlass>
-      </Animated.View>
+      </AnimatedReanimated.View>
 
       {/* ── Page content */}
-      <Animated.View style={[styles.pageTransition, { opacity: pageOpacity }]}>
-        <Animated.ScrollView
+      <AnimatedReanimated.View style={[styles.pageTransition, pageOpacityStyle]}>
+        <AnimatedReanimated.ScrollView
           style={styles.scrollView}
           contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
           scrollIndicatorInsets={{ bottom: bottomPadding }}
-          scrollEventThrottle={16}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: true },
-          )}
-          showsVerticalScrollIndicator={false}
+          onScroll={scrollHandler}
           overScrollMode="never"
           bounces={Platform.OS === "ios"}
+          {...ScrollPhysics.STANDARD}
         >
           <HeroSection artist={artist} scrollY={scrollY} />
 
@@ -842,8 +860,8 @@ function ArtistPage() {
           )}
 
           <View style={{ height: 140 }} />
-        </Animated.ScrollView>
-      </Animated.View>
+        </AnimatedReanimated.ScrollView>
+      </AnimatedReanimated.View>
 
       {/* ── Bottom Sheet */}
       <SeeAllBottomSheet
@@ -884,79 +902,66 @@ function ArtistPage() {
 //  • Verified badge gets a glow ring
 //  • Entry animation for artist name and metadata (mount-only, native driver)
 const HeroSection = memo(
-  ({ artist, scrollY }: { artist: ArtistDetails; scrollY: Animated.Value }) => {
-    const { width } = useWindowDimensions();
+  ({ artist, scrollY }: { artist: ArtistDetails; scrollY: SharedValue<number> }) => {
+    const width = SCREEN_WIDTH;
 
     // Scale image container relative to screen width for tablet support
     const imageSize = Math.min(256, width * 0.62);
 
-    // Parallax transforms (AUDIT FIX: kept native driver, reduced range
-    // to prevent image getting too small on scroll)
-    const imageScale = scrollY.interpolate({
-      inputRange: [-100, 0, 150],
-      outputRange: [1.10, 1, 0.96],
-      extrapolate: "clamp",
+    // Parallax transforms using Reanimated
+    const imageStyle = useAnimatedStyle(() => {
+      const scale = interpolate(scrollY.value, [-100, 0, 150], [1.10, 1, 0.96], Extrapolation.CLAMP);
+      const translateY = interpolate(scrollY.value, [0, 200], [0, 44], Extrapolation.CLAMP);
+      return {
+        transform: [{ scale }, { translateY }],
+      };
     });
 
-    const imageTranslateY = scrollY.interpolate({
-      inputRange: [0, 200],
-      outputRange: [0, 44],
-      extrapolate: "clamp",
+    const infoStyle = useAnimatedStyle(() => {
+      const translateY = interpolate(scrollY.value, [0, 200], [0, -12], Extrapolation.CLAMP);
+      const opacity = interpolate(scrollY.value, [0, 140], [1, 0], Extrapolation.CLAMP);
+      return {
+        transform: [{ translateY }],
+        opacity,
+      };
     });
 
-    // ENHANCED: heroInfo counter-parallax for depth
-    const infoTranslateY = scrollY.interpolate({
-      inputRange: [0, 200],
-      outputRange: [0, -12],
-      extrapolate: "clamp",
-    });
-
-    const contentOpacity = scrollY.interpolate({
-      inputRange: [0, 140],
-      outputRange: [1, 0],
-      extrapolate: "clamp",
-    });
-
-    // ENHANCED: mount-only entry for hero text (native driver, one-shot)
-    const nameEntryAnim = useRef(new Animated.Value(0)).current;
+    // Mount-only entrance animation for name and metadata using Reanimated
+    const entryProgress = useSharedValue(0);
+    const hasMounted = useRef(false);
     useEffect(() => {
-      Animated.spring(nameEntryAnim, {
-        toValue: 1,
-        useNativeDriver: true,
-        damping: 22,
-        stiffness: 180,
-        mass: 0.7,
-      }).start();
-    }, [nameEntryAnim]);
+      if (hasMounted.current) return;
+      hasMounted.current = true;
+      entryProgress.value = withSpring(1, { damping: 22, stiffness: 180, mass: 0.7 });
+    }, []);
 
-    const nameTranslateY = nameEntryAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [18, 0],
-    });
-    const nameOpacity = nameEntryAnim.interpolate({
-      inputRange: [0, 0.5, 1],
-      outputRange: [0, 0.7, 1],
-    });
+    const nameStyle = useAnimatedStyle(() => ({
+      opacity: entryProgress.value,
+      transform: [{ translateY: interpolate(entryProgress.value, [0, 1], [18, 0], Extrapolation.CLAMP) }],
+    }));
 
     return (
       <View style={[styles.heroSection, { paddingTop: Platform.OS === "ios" ? 68 : 44 }]}>
         {/* ── Image with glass rim layers */}
-        <Animated.View
+        <AnimatedReanimated.View
           style={[
             styles.heroImageContainer,
             {
               width: imageSize,
               height: imageSize,
               borderRadius: radius.xl + 4,
-              transform: [{ scale: imageScale }, { translateY: imageTranslateY }],
             },
+            imageStyle,
           ]}
         >
-          <Image
-            source={{ uri: artist.thumbnail }}
+          <AuraArtwork
+            source={resolveArtwork({ art: artist.thumbnail, artist: artist.name, type: 'artist' }, 'artist')}
+            entityName={artist.name}
+            entityType="artist"
             style={[StyleSheet.absoluteFill, { borderRadius: radius.xl + 4 }]}
             contentFit="cover"
             transition={400}
+            cachePolicy="memory-disk"
             accessibilityLabel={`${artist.name} artist photo`}
           />
 
@@ -966,28 +971,25 @@ const HeroSection = memo(
           <View style={[styles.heroImageRim, { borderRadius: radius.xl + 4 }]} pointerEvents="none" />
           {/* Glow ring — slightly larger, very subtle */}
           <View style={[styles.heroGlowRing, { borderRadius: radius.xl + 10, width: imageSize + 12, height: imageSize + 12 }]} pointerEvents="none" />
-        </Animated.View>
+        </AnimatedReanimated.View>
 
         {/* ── Text info */}
-        <Animated.View
+        <AnimatedReanimated.View
           style={[
             styles.heroInfo,
-            {
-              opacity: contentOpacity,
-              transform: [{ translateY: infoTranslateY }],
-            },
+            infoStyle,
           ]}
         >
           {/* Verified badge — enhanced with glow */}
-          <Animated.View style={[styles.verifiedBadge, { opacity: nameOpacity, transform: [{ translateY: nameTranslateY }] }]}>
+          <AnimatedReanimated.View style={[styles.verifiedBadge, nameStyle]}>
             <Ionicons name="checkmark-circle" size={13} color={palette.primary} />
             <AuraText variant="caption" style={styles.verifiedText}>
               Verified Artist
             </AuraText>
-          </Animated.View>
+          </AnimatedReanimated.View>
 
           {/* Artist name */}
-          <Animated.View style={{ opacity: nameOpacity, transform: [{ translateY: nameTranslateY }] }}>
+          <AnimatedReanimated.View style={nameStyle}>
             <AuraText
               variant="display"
               style={styles.artistName}
@@ -995,17 +997,17 @@ const HeroSection = memo(
             >
               {artist.name}
             </AuraText>
-          </Animated.View>
+          </AnimatedReanimated.View>
 
-          <Animated.View style={{ opacity: nameOpacity }}>
+          <AnimatedReanimated.View style={nameStyle}>
             <AuraText variant="body" style={styles.listenersText}>
               {artist.subscribers} monthly listeners
             </AuraText>
-          </Animated.View>
+          </AnimatedReanimated.View>
 
           {/* Genre pills — enhanced border */}
           {artist.genres && artist.genres.length > 0 && (
-            <Animated.View style={[styles.genreRow, { opacity: nameOpacity }]}>
+            <AnimatedReanimated.View style={[styles.genreRow, nameStyle]}>
               {artist.genres.map((g: string, i: number) => (
                 <View key={i} style={styles.genrePillOuter}>
                   <View style={styles.genrePill}>
@@ -1015,15 +1017,15 @@ const HeroSection = memo(
                   </View>
                 </View>
               ))}
-            </Animated.View>
+            </AnimatedReanimated.View>
           )}
 
-          <Animated.View style={{ opacity: nameOpacity }}>
+          <AnimatedReanimated.View style={nameStyle}>
             <AuraText variant="headline" style={styles.taglineText}>
               {artist.tagline}
             </AuraText>
-          </Animated.View>
-        </Animated.View>
+          </AnimatedReanimated.View>
+        </AnimatedReanimated.View>
       </View>
     );
   },
@@ -1049,26 +1051,22 @@ const FloatingControlPanel = memo(
     isFollowing: boolean;
     onFollow: () => void;
   }) => {
-    const followScale = useRef(new Animated.Value(1)).current;
+    const followScale = useSharedValue(1);
 
-    // AUDIT FIX: single spring, interruptible
+    // Converted to Reanimated for performance and thread safety.
     const animateFollow = useCallback(() => {
-      followScale.stopAnimation();
-      Animated.spring(followScale, {
-        toValue: 1.22,
-        useNativeDriver: true,
-        speed: 80,
-        bounciness: 14,
-      }).start(() => {
-        Animated.spring(followScale, {
-          toValue: 1,
-          useNativeDriver: true,
-          speed: 40,
-          bounciness: 5,
-        }).start();
+      followScale.value = 1;
+      followScale.value = withSpring(1.22, { damping: 6, stiffness: 200 }, (finished) => {
+        if (finished) {
+          followScale.value = withSpring(1, { damping: 10, stiffness: 150 });
+        }
       });
       onFollow();
     }, [followScale, onFollow]);
+
+    const followStyle = useAnimatedStyle(() => ({
+      transform: [{ scale: followScale.value }],
+    }));
 
     // AUDIT FIX: useMemo so array isn't recreated on every render
     const secondaryActions = useMemo(
@@ -1156,13 +1154,13 @@ const FloatingControlPanel = memo(
                   accessibilityLabel={action.label}
                 >
                   {action.animated ? (
-                    <Animated.View style={{ transform: [{ scale: followScale }] }}>
+                    <AnimatedReanimated.View style={followStyle}>
                       <Ionicons
                         name={action.icon as any}
                         size={20}
                         color={action.active ? palette.primary : palette.inkDim}
                       />
-                    </Animated.View>
+                    </AnimatedReanimated.View>
                   ) : (
                     <Ionicons
                       name={action.icon as any}
@@ -1267,7 +1265,7 @@ const TopTracksSection = memo(
             key={track.id}
             title={track.title}
             subtitle={track.artist}
-            image={getTrackArtwork(track)}
+            image={getArtworkUrl(track, 'card')}
             meta={track.duration}
             active={currentTrack?.id === track.id}
             onPress={() => onTrackPress(track)}
@@ -1276,7 +1274,7 @@ const TopTracksSection = memo(
               id: track.id,
               title: track.title,
               artist: track.artist,
-              art: getTrackArtwork(track),
+              art: getArtworkUrl(track, 'card'),
               url: "",
               duration: parseDuration(track.duration),
             }}
@@ -1309,6 +1307,7 @@ const PopularReleasesSection = memo(
         decelerationRate="fast"
         nestedScrollEnabled
         disableIntervalMomentum
+        removeClippedSubviews={true}
       >
         {releases.map((release) => (
           <SpringButton
@@ -1319,10 +1318,13 @@ const PopularReleasesSection = memo(
           >
             {/* Art with rim */}
             <View style={styles.releaseArtContainer}>
-              <Image
-                source={{ uri: release.thumbnail }}
+              <AuraArtwork
+                source={resolveArtwork({ art: release.thumbnail, title: release.title }, 'card')}
+                entityName={release.title}
+                entityType="album"
                 style={styles.releaseArt}
                 contentFit="cover"
+                cachePolicy="memory-disk"
               />
               <View style={styles.artRim} pointerEvents="none" />
               {/* Type badge */}
@@ -1374,10 +1376,13 @@ const AlbumShowcaseSection = memo(
             accessibilityLabel={`${album.title}, ${album.year || "2024"}`}
           >
             <View style={styles.albumArtContainer}>
-              <Image
-                source={{ uri: album.thumbnail }}
+              <AuraArtwork
+                source={resolveArtwork({ art: album.thumbnail, title: album.title }, 'card')}
+                entityName={album.title}
+                entityType="album"
                 style={styles.albumArt}
                 contentFit="cover"
+                cachePolicy="memory-disk"
               />
               <View style={styles.artRim} pointerEvents="none" />
             </View>
@@ -1445,11 +1450,12 @@ const AboutArtistSection = memo(({ artist }: { artist: ArtistDetails }) => {
           {displayText}
         </AuraText>
         {(artist.description?.length ?? 0) > 220 && (
-          <SpringButton
+          <TouchableOpacity
             onPress={toggleExpand}
             accessibilityLabel={expanded ? "Show less about artist" : "Show more about artist"}
             accessibilityRole="button"
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            activeOpacity={0.7}
           >
             <View style={styles.expandButton}>
               <AuraText variant="caption" style={styles.expandText}>
@@ -1461,7 +1467,7 @@ const AboutArtistSection = memo(({ artist }: { artist: ArtistDetails }) => {
                 color={palette.primary}
               />
             </View>
-          </SpringButton>
+          </TouchableOpacity>
         )}
 
         <View style={styles.aboutMeta}>
@@ -1513,10 +1519,14 @@ const RelatedArtistsSection = memo(
             {/* Gradient ring around avatar */}
             <View style={styles.relatedRingOuter}>
               <View style={styles.relatedRingInner}>
-                <Image
-                  source={{ uri: item.thumbnail }}
+                <AuraArtwork
+                  source={resolveArtwork({ art: item.thumbnail, artist: item.title, type: 'artist' }, 'card')}
+                  entityName={item.title}
+                  entityType="artist"
                   style={styles.relatedArt}
                   contentFit="cover"
+                  cachePolicy="memory-disk"
+                  borderRadius={60}
                 />
               </View>
             </View>
@@ -1571,65 +1581,42 @@ const SeeAllBottomSheet = memo(
     onAlbumPress,
     onArtistPress,
   }: SeeAllBottomSheetProps) => {
-    const { height, width } = useWindowDimensions();
+    const height = SCREEN_HEIGHT;
+    const width = SCREEN_WIDTH;
 
-    const backdropOpacity = useRef(new Animated.Value(0)).current;
-    const sheetTranslateY = useRef(new Animated.Value(height)).current;
-    const handleWidth = useRef(new Animated.Value(38)).current;
+    const backdropOpacity = useSharedValue(0);
+    const sheetTranslateY = useSharedValue(height);
+    const handleWidth = useSharedValue(38);
     const [renderModal, setRenderModal] = useState(false);
 
     useEffect(() => {
       if (visible) {
         setRenderModal(true);
-        Animated.parallel([
-          Animated.timing(backdropOpacity, {
-            toValue: 1,
-            duration: 360,
-            easing: Easing.bezier(0.25, 1, 0.5, 1),
-            useNativeDriver: true,
-          }),
-          Animated.spring(sheetTranslateY, {
-            toValue: 0,
-            damping: 28,
-            stiffness: 230,
-            mass: 0.75,
-            useNativeDriver: true,
-          }),
-          // ENHANCED: handle widens on open
-          Animated.spring(handleWidth, {
-            toValue: 52,
-            damping: 20,
-            stiffness: 200,
-            mass: 0.5,
-            useNativeDriver: false, // width not natively driveable — use low cost
-          }),
-        ]).start();
+        backdropOpacity.value = withTiming(1, { duration: 360 });
+        sheetTranslateY.value = withSpring(0, { damping: 28, stiffness: 230, mass: 0.75 });
+        handleWidth.value = withSpring(52, { damping: 20, stiffness: 200, mass: 0.5 });
       } else {
-        Animated.parallel([
-          Animated.timing(backdropOpacity, {
-            toValue: 0,
-            duration: 280,
-            easing: Easing.bezier(0.25, 1, 0.5, 1),
-            useNativeDriver: true,
-          }),
-          Animated.timing(sheetTranslateY, {
-            toValue: height,
-            duration: 310,
-            easing: Easing.bezier(0.25, 1, 0.5, 1),
-            useNativeDriver: true,
-          }),
-          Animated.spring(handleWidth, {
-            toValue: 38,
-            damping: 20,
-            stiffness: 200,
-            mass: 0.5,
-            useNativeDriver: false,
-          }),
-        ]).start(({ finished }) => {
-          if (finished) setRenderModal(false);
+        backdropOpacity.value = withTiming(0, { duration: 280 });
+        sheetTranslateY.value = withTiming(height, { duration: 310 }, (finished) => {
+          if (finished) {
+            runOnJS(setRenderModal)(false);
+          }
         });
+        handleWidth.value = withSpring(38, { damping: 20, stiffness: 200, mass: 0.5 });
       }
     }, [visible, height]);
+
+    const backdropStyle = useAnimatedStyle(() => ({
+      opacity: backdropOpacity.value,
+    }));
+
+    const sheetStyle = useAnimatedStyle(() => ({
+      transform: [{ translateY: sheetTranslateY.value }],
+    }));
+
+    const handleStyle = useAnimatedStyle(() => ({
+      width: handleWidth.value,
+    }));
 
     const renderItem = useCallback(
       ({ item }: { item: any }) => {
@@ -1638,7 +1625,7 @@ const SeeAllBottomSheet = memo(
             <MediaListItem
               title={item.title}
               subtitle={item.artist}
-              image={getTrackArtwork(item)}
+              image={getArtworkUrl(item, 'card')}
               meta={item.duration}
               active={currentTrack?.id === item.id}
               onPress={() => onTrackPress(item)}
@@ -1647,7 +1634,7 @@ const SeeAllBottomSheet = memo(
                 id: item.id,
                 title: item.title,
                 artist: item.artist,
-                art: getTrackArtwork(item),
+                art: getArtworkUrl(item, 'card'),
                 url: "",
                 duration: parseDuration(item.duration),
               }}
@@ -1666,13 +1653,17 @@ const SeeAllBottomSheet = memo(
               styles.modalGridArtContainer,
               type === "artists" && { borderRadius: width * 0.22 },
             ]}>
-              <Image
-                source={{ uri: item.thumbnail || item.art }}
+              <AuraArtwork
+                source={resolveArtwork({ art: item.thumbnail || item.art, title: item.title, type: type === 'artists' ? 'artist' : 'album' }, 'card')}
+                entityName={item.title}
+                entityType={type === 'artists' ? 'artist' : 'album'}
                 style={[
                   styles.modalGridArt,
                   type === "artists" && { borderRadius: width * 0.22 },
                 ]}
                 contentFit="cover"
+                cachePolicy="memory-disk"
+                borderRadius={type === 'artists' ? width * 0.22 : radius.lg}
               />
               <View
                 style={[
@@ -1711,8 +1702,8 @@ const SeeAllBottomSheet = memo(
         animationType="none"
       >
         <View style={styles.modalOverlay}>
-          <Animated.View
-            style={[styles.modalBackdrop, { opacity: backdropOpacity }]}
+          <AnimatedReanimated.View
+            style={[styles.modalBackdrop, backdropStyle]}
           >
             <TouchableOpacity
               style={StyleSheet.absoluteFill}
@@ -1721,15 +1712,15 @@ const SeeAllBottomSheet = memo(
               accessibilityLabel="Close panel"
               accessibilityRole="button"
             />
-          </Animated.View>
+          </AnimatedReanimated.View>
 
-          <Animated.View
+          <AnimatedReanimated.View
             style={[
               styles.modalContent,
               {
                 height: height * 0.85,
-                transform: [{ translateY: sheetTranslateY }],
               },
+              sheetStyle,
             ]}
           >
             <LiquidGlass
@@ -1742,7 +1733,7 @@ const SeeAllBottomSheet = memo(
               {/* Header */}
               <View style={styles.modalHeader}>
                 {/* ENHANCED: animated handle width */}
-                <Animated.View style={[styles.modalHandle, { width: handleWidth }]} />
+                <AnimatedReanimated.View style={[styles.modalHandle, handleStyle]} />
                 <View style={styles.modalHeaderRow}>
                   <AuraText variant="title" style={styles.modalTitle}>
                     {title}
@@ -1768,20 +1759,18 @@ const SeeAllBottomSheet = memo(
                   </AuraText>
                 </View>
               ) : (
-                <FlatList
+                <FlashList
                   data={data}
                   renderItem={renderItem}
                   keyExtractor={keyExtractor}
                   contentContainerStyle={styles.modalScrollContent}
                   showsVerticalScrollIndicator={false}
                   numColumns={type === "tracks" ? 1 : 2}
-                  columnWrapperStyle={type !== "tracks" ? styles.modalGrid : undefined}
                   onScroll={onScroll}
                   scrollEventThrottle={16}
-                  removeClippedSubviews
-                  initialNumToRender={12}
-                  maxToRenderPerBatch={10}
-                  windowSize={5}
+                  removeClippedSubviews={true}
+                  // @ts-expect-error FlashList types mismatch in this version
+                  estimatedItemSize={64}
                   ListFooterComponent={
                     isFetching || isLoadingMore ? (
                       <View style={styles.modalLoading}>
@@ -1797,7 +1786,7 @@ const SeeAllBottomSheet = memo(
                 />
               )}
             </LiquidGlass>
-          </Animated.View>
+          </AnimatedReanimated.View>
         </View>
       </Modal>
     );
@@ -1846,7 +1835,6 @@ const TracksSkeleton = () => (
 export default memo(ArtistPage);
 
 // ─── Styles ────────────────────────────────────────────────────────────────────
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const styles = StyleSheet.create({
   // ── Layout

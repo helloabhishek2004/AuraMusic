@@ -56,6 +56,11 @@ const h2r = (hex: string, a: number) => {
    return `rgba(${r},${g},${b},${a})`;
 };
 
+import { getTrackArtwork, getArtworkUrl } from '@/src/features/player/utils/track-identity';
+import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
+import { AuraArtwork } from '@/src/components/ui/aura-artwork';
+import AnimatedReanimated, { FadeInUp } from 'react-native-reanimated';
+
 // ── ID generator ─────────────────────────────────────────────────────────────
 function generatePlaylistId(): string {
    return `pl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -82,20 +87,14 @@ const Glass = ({ children, style, r = 20, blur = 60, accent = false }: any) => (
 
 // ── Materialise entrance ──────────────────────────────────────────────────────
 const Mat = ({ children, delay = 0, style }: any) => {
-   const sc = useRef(new Animated.Value(0.94)).current;
-   const op = useRef(new Animated.Value(0)).current;
-   const ty = useRef(new Animated.Value(14)).current;
-   useEffect(() => {
-      const t = setTimeout(() => {
-         Animated.parallel([
-            Animated.spring(sc, { toValue: 1, ...SP, useNativeDriver: true }),
-            Animated.timing(op, { toValue: 1, duration: 380, useNativeDriver: true }),
-            Animated.spring(ty, { toValue: 0, ...SP, useNativeDriver: true }),
-         ]).start();
-      }, delay);
-      return () => clearTimeout(t);
-   }, []);
-   return <Animated.View style={[{ opacity: op, transform: [{ scale: sc }, { translateY: ty }] }, style]}>{children}</Animated.View>;
+   return (
+      <AnimatedReanimated.View 
+         entering={FadeInUp.delay(delay).duration(400)} 
+         style={style}
+      >
+         {children}
+      </AnimatedReanimated.View>
+   );
 };
 
 // ── Press scale hook ──────────────────────────────────────────────────────────
@@ -167,7 +166,16 @@ const TrackRow = ({ track, added, onToggle }: any) => {
                onPressIn={p.onIn} onPressOut={p.onOut}
                activeOpacity={1}
             >
-               <Image source={{ uri: track.art }} style={s.trackArt} contentFit="cover" transition={200} />
+               <AuraArtwork 
+                  source={resolveArtwork(track, 'card')} 
+                  entityName={track.title}
+                  entityType="song"
+                  style={s.trackArt} 
+                  contentFit="cover" 
+                  transition={200}
+                  cachePolicy="memory-disk"
+                  borderRadius={12}
+               />
                <View style={s.trackMeta}>
                   <Text style={s.trackTitle} numberOfLines={1}>{track.title}</Text>
                   <Text style={s.trackArtist} numberOfLines={1}>{track.artist}</Text>
@@ -224,9 +232,16 @@ const CoverArt = ({ addedTracks, allSongs }: { addedTracks: string[]; allSongs: 
                </View>
             ) : (
                <View style={s.coverGrid}>
-                  {displayTracks.map((t: any) => (
-                     t.art ? <Image key={t.id} source={{ uri: t.art }} style={[s.coverGridImg, firstFour.length === 1 && { width: 180, height: 180, borderRadius: 20 }]} contentFit="cover" />
-                           : <View key={t.id} style={[s.coverGridImg, { backgroundColor: 'rgba(255,255,255,0.05)' }]} />
+                  {displayTracks.map((t: any, i: number) => (
+                     <AuraArtwork 
+                        key={`${t.id}-${i}`} 
+                        source={resolveArtwork(t, 'card')} 
+                        entityName={t.title || 'Track'}
+                        entityType="song"
+                        style={[s.coverGridImg, firstFour.length === 1 && { width: 180, height: 180, borderRadius: 20 }]} 
+                        contentFit="cover" 
+                        cachePolicy="memory-disk" 
+                     />
                   ))}
                </View>
             )}
@@ -295,6 +310,11 @@ export default function CreatePlaylistScreen() {
    const [isSearching, setIsSearching] = useState(false);
    const abortControllerRef = useRef<AbortController | null>(null);
 
+   const allSongsRef = useRef(allSongs);
+   useEffect(() => {
+      allSongsRef.current = allSongs;
+   }, [allSongs]);
+
    useEffect(() => {
       const trimmed = query.trim();
       if (trimmed.length < 2) {
@@ -317,7 +337,7 @@ export default function CreatePlaylistScreen() {
          try {
             const results = await musicService.searchSongs(query);
             if (!ac.signal.aborted) {
-               const downloadedIds = new Set(allSongs.map(s => s.id));
+               const downloadedIds = new Set(allSongsRef.current.map(s => s.id));
                const newTracks: PlayerTrack[] = results
                   .filter(r => !downloadedIds.has(r.id))
                   .slice(0, 5)
@@ -330,7 +350,12 @@ export default function CreatePlaylistScreen() {
                      albumId: r.albumId,
                      album: r.album,
                      source: r.source || 'ytmusic',
-                     duration: typeof r.duration === 'string' ? r.duration.split(':').reduce((acc, time) => (60 * acc) + +time, 0) * 1000 : 0,
+                     duration: typeof r.duration === 'string' && r.duration.includes(':')
+                        ? r.duration.split(':').reduce((acc, time) => {
+                             const parsed = parseInt(time, 10);
+                             return isNaN(parsed) ? acc : (60 * acc) + parsed;
+                          }, 0) * 1000
+                        : 0,
                      isLocal: false
                   }));
                setOnlineResults(newTracks);
@@ -548,17 +573,17 @@ export default function CreatePlaylistScreen() {
 
             {/* Track list */}
             <View style={s.trackList}>
-               {allSongs.length === 0 ? (
+               {allSongs.length === 0 && !query.trim() ? (
                   <Mat delay={0}>
                      <View style={s.emptySearch}>
                         <Ionicons name="cloud-download-outline" size={36} color={C.dim} />
                         <Text style={s.emptyText}>No downloaded songs</Text>
                         <Text style={[s.emptyText, { fontSize: 13, marginTop: 4 }]}>
-                           Download tracks first to add them here
+                           Search online or download tracks first
                         </Text>
                      </View>
                   </Mat>
-               ) : filtered.length === 0 && onlineResults.length === 0 && !isSearching ? (
+               ) : filtered.length === 0 && onlineResults.length === 0 && !isSearching && query.trim().length > 0 ? (
                   <Mat delay={0}>
                      <View style={s.emptySearch}>
                         <Ionicons name="search-outline" size={36} color={C.dim} />
@@ -571,7 +596,7 @@ export default function CreatePlaylistScreen() {
                         <View style={{ marginBottom: query.length >= 2 ? 24 : 0 }}>
                            <Text style={[s.sectionTitle, { marginLeft: 4, marginBottom: 8, fontSize: 13, color: C.dim }]}>Downloaded</Text>
                            {filtered.map((track, idx) => (
-                              <Mat key={track.id} delay={idx * 40}>
+                              <Mat key={`filtered-${track.id}-${idx}`} delay={idx * 40}>
                                  <TrackRow track={track} added={added.includes(track.id)} onToggle={toggleAdded} />
                               </Mat>
                            ))}
@@ -587,7 +612,7 @@ export default function CreatePlaylistScreen() {
                            
                            {onlineResults.length > 0 ? (
                               onlineResults.map((track, idx) => (
-                                 <Mat key={track.id} delay={(filtered.length + idx) * 40}>
+                                 <Mat key={`online-${track.id}-${idx}`} delay={(filtered.length + idx) * 40}>
                                     <TrackRow track={track} added={added.includes(track.id)} onToggle={toggleAdded} />
                                  </Mat>
                               ))

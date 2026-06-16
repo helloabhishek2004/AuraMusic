@@ -12,24 +12,41 @@ import React, {
   useRef,
   useState
 } from "react";
+import { MotionTiming, MotionSpring, MotionEasing } from "@/src/design/motion";
+import { ScrollPhysics } from "@/src/design/scroll-physics";
 import {
-  Animated,
-  Easing,
+  ActivityIndicator,
+  Dimensions,
+  InteractionManager,
   Platform,
-  ScrollView,
-  Share,
   StyleSheet,
+  Text,
   TouchableOpacity,
-  useWindowDimensions,
-  View
+  View,
+  Share,
+  ScrollView
 } from "react-native";
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  useAnimatedScrollHandler,
+  useAnimatedReaction,
+  withTiming,
+  Easing as REasing,
+  interpolate,
+  Extrapolation,
+  runOnJS,
+  SharedValue
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePlaybackInsets } from "@/src/hooks/use-playback-insets";
 
 // Core imports
-import { useMusicActions, usePlaybackState } from "@/src/context/MusicContext";
+import { useMusicActions, usePlaybackState, useNowPlayingTrack } from "@/src/context/MusicContext";
 import { useReducedMotionPreference } from "@/src/hooks/use-accessibility-preferences";
-import { useResponsiveMetrics } from "@/src/hooks/use-responsive-metrics";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
 import { musicService } from "@/src/services/api/music";
 
@@ -38,7 +55,9 @@ import { glass, motion, palette, radius, spacing } from "@/src/design/tokens";
 
 // Utils
 import { parseDuration } from "@/src/utils/time";
-import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
+import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
+import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
+import { requestIdleTask } from "@/src/utils/idle-task";
 
 // Components
 import { AtmosphericBackground } from "@/src/components/ui/atmospheric-background";
@@ -50,6 +69,7 @@ import {
 } from "@/src/components/ui/aura-primitives";
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { PressScale } from "@/src/components/ui/press-scale";
+import { AuraArtwork } from "@/src/components/ui/aura-artwork";
 
 // Types
 import { AlbumDetails, MusicTrack } from "@/src/types/music";
@@ -59,17 +79,18 @@ const IN_MEMORY_CACHE: Record<string, AlbumDetails> = {};
 
 const AnimatedFlashList = Animated.createAnimatedComponent(
   FlashList,
-) as unknown as typeof FlashList;
+) as any;
 
 function AlbumScreen() {
   const params = useLocalSearchParams();
   const { bottomPadding } = usePlaybackInsets();
   const router = useRouter();
-  const { width, height } = useWindowDimensions();
-  const responsive = useResponsiveMetrics();
+  const width = SCREEN_WIDTH;
+  const height = SCREEN_HEIGHT;
   const reduceMotion = useReducedMotionPreference();
   const navigation = useMusicNavigation("album");
-  const { currentTrack, isPlaying, isShuffle } = usePlaybackState();
+  const { isPlaying, isShuffle } = usePlaybackState();
+  const currentTrack = useNowPlayingTrack();
   const { setQueue, toggleShuffle } = useMusicActions();
 
   const albumId = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -78,519 +99,229 @@ function AlbumScreen() {
   const [error, setError] = useState<string | null>(null);
 
   // Animation values
-  const pageOpacity = useRef(new Animated.Value(0)).current;
-  const scrollY = useRef(new Animated.Value(0)).current;
+  const pageOpacity = useSharedValue(0);
+  const scrollY = useSharedValue(0);
   const [isLeaving, setIsLeaving] = useState(false);
   const [showSticky, setShowSticky] = useState(false);
-
-  // Sticky header threshold
-  useEffect(() => {
-    const id = scrollY.addListener(({ value }) => {
-      const threshold = height * 0.22;
-      if (value > threshold) {
-        if (!showSticky) setShowSticky(true);
-      } else {
-        if (showSticky) setShowSticky(false);
-      }
-    });
-    return () => scrollY.removeListener(id);
-  }, [height, scrollY, showSticky]);
 
   // Page enter animation
   useEffect(() => {
     if (reduceMotion) {
-      pageOpacity.setValue(1);
+      pageOpacity.value = 1;
       return;
     }
-    Animated.timing(pageOpacity, {
-      toValue: 1,
+    pageOpacity.value = withTiming(1, {
       duration: motion.duration.base,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
+      easing: REasing.out(REasing.cubic),
+    });
   }, [pageOpacity, reduceMotion]);
 
   // Data Fetching
   const fetchAlbumData = useCallback(async (id: string, useCache = true) => {
     if (!id) return;
 
-    if (id.startsWith("local-album-")) {
-      setIsLoading(true);
-      try {
-        const decodedName = decodeURIComponent(id.replace("local-album-", ""));
-        const { useDownloadStore } = await import("@/src/features/download/store/download.store");
-        const downloaded = Object.values(useDownloadStore.getState().downloadedTracks);
-        const albumTracks = downloaded.filter(t => t.album === decodedName);
+    // Use requestIdleTask to ensure the transition animation completes before starting heavy work
+    requestIdleTask(async () => {
+      if (id.startsWith("local-album-")) {
+        setIsLoading(true);
+        try {
+          const decodedName = decodeURIComponent(id.replace("local-album-", ""));
+          const { useDownloadStore } = await import("@/src/features/download/store/download.store");
+          const downloaded = Object.values(useDownloadStore.getState().downloadedTracks);
+          const albumTracks = downloaded.filter(t => t.album === decodedName);
 
-        if (albumTracks.length > 0) {
-          const localAlbum: AlbumDetails = {
-            id: id,
-            title: decodedName,
-            artist: albumTracks[0].artist || "Unknown Artist",
-            year: new Date(albumTracks[0].downloadedAt || Date.now()).getFullYear().toString(),
-            thumbnail: albumTracks[0].art || "",
-            trackCount: albumTracks.length,
-            tracks: albumTracks.map(t => ({
-              id: t.id,
-              title: t.title,
-              artist: t.artist,
-              art: t.art,
-              album: t.album || decodedName,
-              duration: String(t.duration || "0:00"),
-              source: t.source || "local"
-            }))
-          };
-          setAlbum(localAlbum);
-          setIsLoading(false);
-          setError(null);
-          return;
-        } else {
-          setError("Local album has no downloaded tracks.");
+          if (albumTracks.length > 0) {
+            const localAlbum: AlbumDetails = {
+              id: id,
+              title: decodedName,
+              artist: albumTracks[0].artist || "Unknown Artist",
+              year: new Date(albumTracks[0].downloadedAt || Date.now()).getFullYear().toString(),
+              thumbnail: albumTracks[0].art || "",
+              trackCount: albumTracks.length,
+              tracks: albumTracks.map(t => ({
+                id: t.id,
+                title: t.title,
+                artist: t.artist,
+                art: t.art,
+                album: t.album || decodedName,
+                duration: String(t.duration || "0:00"),
+                source: t.source || "local"
+              }))
+            };
+            setAlbum(localAlbum);
+            setIsLoading(false);
+            setError(null);
+            return;
+          } else {
+            setError("Local album has no downloaded tracks.");
+            setIsLoading(false);
+            return;
+          }
+        } catch (e: any) {
+          console.error("[Album Page] Local album load failed:", e);
+          setError("Unable to load offline album.");
           setIsLoading(false);
           return;
         }
-      } catch (e: any) {
-        console.error("[Album Page] Local album load failed:", e);
-        setError("Unable to load offline album.");
+      }
+
+      if (useCache && IN_MEMORY_CACHE[id]) {
+        setAlbum(IN_MEMORY_CACHE[id]);
         setIsLoading(false);
         return;
       }
-    }
 
-    if (useCache && IN_MEMORY_CACHE[id]) {
-      setAlbum(IN_MEMORY_CACHE[id]);
-      setIsLoading(false);
-      return;
-    }
-
-    if (useCache) {
-      try {
-        const cachedData = await AsyncStorage.getItem(CACHE_PREFIX + id);
-        if (cachedData) {
-          const parsed = JSON.parse(cachedData);
-          setAlbum(parsed);
-          IN_MEMORY_CACHE[id] = parsed;
-          setIsLoading(false);
-          return;
+      if (useCache) {
+        try {
+          const cachedData = await AsyncStorage.getItem(CACHE_PREFIX + id);
+          if (cachedData) {
+            const parsed = JSON.parse(cachedData);
+            setAlbum(parsed);
+            IN_MEMORY_CACHE[id] = parsed;
+            setIsLoading(false);
+            return;
+          }
+        } catch (e) {
+          console.warn("[Album Page] Cache read failed:", e);
         }
-      } catch (e) {
-        console.warn("[Album Page] Cache read failed:", e);
       }
-    }
 
-    setIsLoading(true);
-    try {
-      const data = await musicService.getAlbumDetails(id);
-      if (data) {
-        setAlbum(data);
-        IN_MEMORY_CACHE[id] = data;
-        await AsyncStorage.setItem(CACHE_PREFIX + id, JSON.stringify(data));
-      } else {
-        setError("Album not found.");
+      setIsLoading(true);
+      try {
+        const data = await musicService.getAlbumDetails(id);
+        if (data) {
+          setAlbum(data);
+          IN_MEMORY_CACHE[id] = data;
+          await AsyncStorage.setItem(CACHE_PREFIX + id, JSON.stringify(data));
+        } else {
+          setError("Album not found.");
+        }
+      } catch (e: any) {
+        console.error("[Album Page] Fetch failed:", e);
+        setError(e?.message || "Unable to load album details.");
+      } finally {
+        setIsLoading(false);
       }
-    } catch (e: any) {
-      console.error("[Album Page] Fetch failed:", e);
-      setError(e?.message || "Unable to load album details.");
-    } finally {
-      setIsLoading(false);
-    }
+    });
   }, []);
 
   useEffect(() => {
-    fetchAlbumData(albumId);
+    fetchAlbumData(albumId as string);
   }, [albumId, fetchAlbumData]);
 
-  const handleBackPress = useCallback(() => {
-    if (isLeaving) return;
-    setIsLeaving(true);
-    if (reduceMotion) {
-      router.back();
-      return;
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollY.value = event.contentOffset.y;
+    },
+  });
+
+  useAnimatedReaction(
+    () => scrollY.value > 100,
+    (isSticky, wasSticky) => {
+      if (isSticky !== wasSticky) {
+        runOnJS(setShowSticky)(isSticky);
+      }
     }
-    Animated.timing(pageOpacity, {
-      toValue: 0,
-      duration: motion.duration.fast,
-      easing: Easing.in(Easing.cubic),
-      useNativeDriver: true,
-    }).start(() => router.back());
-  }, [isLeaving, pageOpacity, router, reduceMotion]);
+  );
+
+  const handlePlayTrack = useCallback(
+    (track: MusicTrack, index: number) => {
+      if (!album || !album.tracks) return;
+      setQueue(
+        album.tracks.map((t) => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          art: t.art,
+          url: "",
+          duration: parseDuration(t.duration),
+          source: t.source || "album",
+          album: album.title,
+        })),
+        index,
+      );
+    },
+    [album, setQueue],
+  );
+
+  const handlePlayAlbum = useCallback(() => {
+    if (!album || !album.tracks || album.tracks.length === 0) return;
+    handlePlayTrack(album.tracks[0], 0);
+  }, [album, handlePlayTrack]);
 
   const handleShare = useCallback(async () => {
     if (!album) return;
-    await Share.share({
-      message: `Listen to ${album.title} by ${album.artist} on Aura Music`,
-    }).catch(() => undefined);
+    try {
+      await Share.share({
+        message: `Check out ${album.title} by ${album.artist} on AuraMusic!`,
+        url: `auramusic://album/${album.id}`,
+      });
+    } catch (e) {}
   }, [album]);
 
-  const handlePlayAlbum = useCallback(
-    async (shuffle = false) => {
-      if (!album?.tracks?.length) return;
+  const stickyHeaderStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [80, 160], [0, 1], Extrapolation.CLAMP),
+    transform: [
+      {
+        translateY: interpolate(
+          scrollY.value,
+          [80, 160],
+          [-10, 0],
+          Extrapolation.CLAMP,
+        ),
+      },
+    ],
+  }));
 
-      // Toggle shuffle if requested but different from current state
-      if (shuffle !== isShuffle) {
-        await toggleShuffle();
-      }
+  const headerOverlayStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [40, 100], [1, 0], Extrapolation.CLAMP),
+  }));
 
-      const tracksToPlay = album.tracks.map((track) => ({
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        art: track.art || album.thumbnail,
-        album: album.title,
-        url: "",
-        duration: parseDuration(track.duration),
-      }));
-
-      await setQueue(tracksToPlay, 0, {
-        sourceId: album.id,
-        sourceType: "album",
-        generatedAt: Date.now()
-      });
-      navigation.goNowPlaying(tracksToPlay[0].id);
-    },
-    [album, setQueue, navigation, isShuffle, toggleShuffle],
-  );
-
-  const handleTrackPress = useCallback(
-    async (track: MusicTrack) => {
-      if (!album?.tracks) return;
-      const index = album.tracks.findIndex((t) => t.id === track.id) ?? 0;
-      const tracksToPlay = album.tracks.map((t) => ({
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        art: t.art || album.thumbnail,
-        album: album.title,
-        url: "",
-        duration: parseDuration(t.duration),
-      }));
-      await setQueue(tracksToPlay, index, {
-        sourceId: album.id,
-        sourceType: "album",
-        generatedAt: Date.now()
-      });
-      navigation.goNowPlaying(track.id);
-    },
-    [album, setQueue, navigation],
-  );
-
-  // Animations
-  const headerOverlayOpacity = scrollY.interpolate({
-    inputRange: [height * 0.1, height * 0.2],
-    outputRange: [1, 0],
-    extrapolate: "clamp",
-  });
-
-  const stickyHeaderOpacity = scrollY.interpolate({
-    inputRange: [height * 0.22, height * 0.32],
-    outputRange: [0, 1],
-    extrapolate: "clamp",
-  });
-
-  const stickyHeaderTranslateY = scrollY.interpolate({
-    inputRange: [height * 0.22, height * 0.32],
-    outputRange: [-12, 0],
-    extrapolate: "clamp",
-  });
+  const pageStyle = useAnimatedStyle(() => ({
+    opacity: pageOpacity.value,
+    transform: [
+      {
+        scale: interpolate(
+          pageOpacity.value,
+          [0, 1],
+          [0.98, 1],
+          Extrapolation.CLAMP,
+        ),
+      },
+    ],
+  }));
 
   const renderTrackItem = useCallback(
-    ({ item }: { item: MusicTrack }) => (
-      <MediaListItem
-        title={item.title}
-        subtitle={item.artist}
-        image={getTrackArtwork(item)}
-        meta={item.duration}
-        active={currentTrack?.id === item.id}
-        onPress={() => handleTrackPress(item)}
-        style={styles.trackItem}
-      />
-    ),
-    [currentTrack?.id, handleTrackPress],
-  );
-
-  if (error) {
-    return (
-      <View style={styles.container}>
-        <StatusBar style="light" />
-        <AtmosphericBackground />
-        <View style={styles.errorContainer}>
-          <Ionicons
-            name="alert-circle-outline"
-            size={64}
-            color={palette.coral}
-          />
-          <AuraText variant="title" style={styles.errorTitle}>
-            Album Unavailable
-          </AuraText>
-          <AuraText variant="body" style={styles.errorText}>
-            {error}
-          </AuraText>
-          <PressScale
-            onPress={() => fetchAlbumData(albumId, false)}
-            style={styles.retryButton}
-          >
-            <AuraText variant="headline" style={styles.retryText}>
-              Try Again
-            </AuraText>
-          </PressScale>
-          <TouchableOpacity onPress={handleBackPress} style={styles.errorBack}>
-            <AuraText variant="caption">Go Back</AuraText>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  if (isLoading || !album) {
-    return (
-      <View style={styles.container}>
-        <StatusBar style="light" />
-        <AtmosphericBackground />
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.loadingContent}
-        >
-          <HeroSkeleton />
-          <ControlsSkeleton />
-          <TracksSkeleton />
-        </ScrollView>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      <StatusBar style="light" />
-      <AtmosphericBackground />
-
-      {/* Floating Header */}
-      <Animated.View
-        style={[styles.headerOverlay, { opacity: headerOverlayOpacity }]}
-        pointerEvents={showSticky ? "none" : "auto"}
-      >
-        <PressScale
-          onPress={handleBackPress}
-          style={styles.headerGlassButton}
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="chevron-back" size={20} color={palette.ink} />
-        </PressScale>
-        <View style={styles.headerSpacer} />
-      </Animated.View>
-
-      {/* Sticky Header */}
-      <Animated.View
-        style={[
-          styles.stickyHeader,
-          {
-            opacity: stickyHeaderOpacity,
-            transform: [{ translateY: stickyHeaderTranslateY }],
-          },
-        ]}
-        pointerEvents={showSticky ? "auto" : "none"}
-      >
-        <LiquidGlass
-          intensity={glass.navBlur}
-          borderRadius={radius.xl}
-          gradient
-          style={styles.stickyHeaderGlass}
-          contentStyle={styles.stickyHeaderContent}
-        >
-          <PressScale onPress={handleBackPress} style={styles.stickyBackButton}>
-            <Ionicons name="chevron-back" size={18} color={palette.ink} />
-          </PressScale>
-
-          <View style={styles.stickyHeaderInfo}>
-            <AuraText
-              variant="headline"
-              numberOfLines={1}
-              style={styles.stickyTitle}
-            >
-              {album.title}
-            </AuraText>
-          </View>
-
-          <PressScale
-            onPress={() => handlePlayAlbum(false)}
-            style={styles.stickyPlayButton}
-            accessibilityLabel="Play album"
-          >
-            <Ionicons name="play" size={16} color={palette.ink} />
-          </PressScale>
-        </LiquidGlass>
-      </Animated.View>
-
-      <Animated.View style={[styles.pageTransition, { opacity: pageOpacity }]}>
-        <AnimatedFlashList
-          data={album.tracks}
-          renderItem={renderTrackItem}
-          keyExtractor={(item: any) => item.id}
-          scrollEventThrottle={16}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: true },
-          )}
-          ListHeaderComponent={
-            <View>
-              <HeroSection album={album} scrollY={scrollY} />
-              <ActionButtons
-                onPlay={() => handlePlayAlbum(false)}
-                onShuffle={() => handlePlayAlbum(true)}
-                onShare={handleShare}
-                isShuffle={isShuffle}
-                tracks={album.tracks}
-                albumTitle={album.title}
-                albumId={album.id}
-              />
-              <SectionHeader title="Tracks" style={styles.sectionHeader} />
-            </View>
-          }
-
-          ListFooterComponent={<CreditsSection album={album} />}
-          contentContainerStyle={[styles.contentContainer, { paddingBottom: bottomPadding }]}
-          scrollIndicatorInsets={{ bottom: bottomPadding }}
-          showsVerticalScrollIndicator={false}
+    ({ item, index }: { item: MusicTrack; index: number }) => (
+      <Materialise delay={index * 40} style={styles.trackItemWrapper}>
+        <MediaListItem
+          title={item.title}
+          subtitle={item.artist}
+          image={item.art}
+          meta={item.duration}
+          active={currentTrack?.id === item.id}
+          onPress={() => handlePlayTrack(item, index)}
+          downloadable
+          track={{
+             id: item.id,
+             title: item.title,
+             artist: item.artist,
+             art: item.art,
+             url: item.url || "",
+             duration: parseDuration(item.duration)
+          }}
         />
-      </Animated.View>
-    </View>
+      </Materialise>
+    ),
+    [currentTrack?.id, handlePlayTrack],
   );
-}
 
-// ─── Sub-Components ──────────────────────────────────────────────────────────
-
-const HeroSection = memo(
-  ({ album, scrollY }: { album: AlbumDetails; scrollY: Animated.Value }) => {
-    const { width } = useWindowDimensions();
-    const heroSize = width * 0.65;
-
-    const imageScale = scrollY.interpolate({
-      inputRange: [-100, 0, 150],
-      outputRange: [1.1, 1, 0.9],
-      extrapolate: "clamp",
-    });
-
-    const imageTranslateY = scrollY.interpolate({
-      inputRange: [0, 200],
-      outputRange: [0, 40],
-      extrapolate: "clamp",
-    });
-
-    return (
-      <View style={styles.heroSection}>
-        <Animated.View
-          style={[
-            styles.heroImageContainer,
-            {
-              width: heroSize,
-              height: heroSize,
-              transform: [
-                { scale: imageScale },
-                { translateY: imageTranslateY },
-              ],
-            },
-          ]}
-        >
-          <Image
-            source={{ uri: album.thumbnail }}
-            style={styles.heroImage}
-            contentFit="cover"
-            transition={400}
-          />
-        </Animated.View>
-
-        <View style={styles.heroInfo}>
-          <AuraText variant="display" style={styles.albumTitle}>
-            {album.title}
-          </AuraText>
-          <TouchableOpacity onPress={() => {}} style={styles.artistLink}>
-            <AuraText variant="headline" style={styles.artistName}>
-              {album.artist}
-            </AuraText>
-          </TouchableOpacity>
-          <AuraText variant="caption" muted style={styles.albumMeta}>
-            {album.type?.toUpperCase()} • {album.year} • {album.trackCount}{" "}
-            SONGS
-          </AuraText>
-        </View>
-      </View>
-    );
-  },
-);
-
-const ActionButtons = memo(({ onPlay, onShuffle, onShare, isShuffle, tracks, albumTitle, albumId }: any) => (
-  <LiquidGlass
-    borderRadius={radius.xl}
-    intensity={glass.surfaceBlur}
-    style={styles.controlPanel}
-    contentStyle={styles.controlPanelInner}
-  >
-    <PressScale
-      onPress={onPlay}
-      style={styles.playButton}
-      accessibilityLabel="Play album"
-    >
-      <Ionicons name="play" size={20} color={palette.background} />
-      <AuraText variant="headline" style={styles.playButtonText}>
-        Play
-      </AuraText>
-    </PressScale>
-    <PressScale
-      onPress={onShuffle}
-      style={[styles.iconButton, isShuffle && styles.activeIconButton]}
-      accessibilityLabel="Shuffle album"
-    >
-      <Ionicons
-        name="shuffle"
-        size={20}
-        color={isShuffle ? palette.primary : palette.ink}
-      />
-    </PressScale>
-    <PressScale
-      onPress={onShare}
-      style={styles.iconButton}
-      accessibilityLabel="Share album"
-    >
-      <Ionicons name="share-social-outline" size={20} color={palette.ink} />
-    </PressScale>
-    <DownloadAlbumButton
-      tracks={tracks.map((t: any) => ({
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        art: t.art || "",
-        album: albumTitle,
-        albumId: albumId,
-        url: "",
-        duration: parseDuration(t.duration),
-      }))}
-    />
-  </LiquidGlass>
-));
-
-const CreditsSection = memo(({ album }: { album: AlbumDetails }) => (
-  <View style={styles.creditsContainer}>
-    <View style={styles.creditsDivider} />
-    <AuraText variant="caption" muted style={styles.creditsText}>
-      Released {album.year}
-    </AuraText>
-    <AuraText variant="caption" muted style={styles.creditsText}>
-      © {album.year} {album.artist}
-    </AuraText>
-    <View style={styles.bottomSpacing} />
-  </View>
-));
-
-// ─── Skeletons ────────────────────────────────────────────────────────────────
-
-const HeroSkeleton = () => {
-  const { width } = useWindowDimensions();
-  const heroSize = width * 0.65;
-  return (
+  const renderSkeleton = () => (
     <View style={styles.heroSkeleton}>
       <SkeletonBlock
         style={{
-          width: heroSize,
-          height: heroSize,
+          width: width * 0.65,
+          height: width * 0.65,
           borderRadius: radius.xl,
           marginBottom: 24,
         }}
@@ -608,216 +339,447 @@ const HeroSkeleton = () => {
       />
     </View>
   );
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <AtmosphericBackground />
+        <View style={styles.errorContainer}>
+          <Ionicons
+            name="alert-circle-outline"
+            size={48}
+            color={palette.primary}
+          />
+          <AuraText variant="headline" style={styles.errorText}>
+            {error}
+          </AuraText>
+          <TouchableOpacity
+            onPress={() => fetchAlbumData(albumId as string)}
+            style={styles.retryButton}
+          >
+            <AuraText variant="body" style={styles.retryText}>
+              Retry
+            </AuraText>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (!album && isLoading) {
+    return (
+      <View style={styles.container}>
+        <AtmosphericBackground />
+        {renderSkeleton()}
+      </View>
+    );
+  }
+
+  if (!album) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Ionicons name="disc-outline" size={48} color="#ffffff80" />
+        <AuraText variant="headline" style={{ color: '#fff', marginTop: 16 }}>Album unavailable</AuraText>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={{ marginTop: 24, paddingVertical: 12, paddingHorizontal: 24, backgroundColor: '#ffffff20', borderRadius: 24 }}>
+          <AuraText variant="body" style={{ color: '#fff' }}>Return Home</AuraText>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <StatusBar style="light" />
+      <AtmosphericBackground colors={album.tracks && album.tracks.length > 0 ? album.tracks[0]?.dominantColors : undefined} />
+
+      {/* Floating Header Overlay (Back Button) */}
+      <Animated.View
+        style={[styles.headerOverlay, headerOverlayStyle]}
+        pointerEvents={showSticky ? "none" : "auto"}
+      >
+        <PressScale
+          onPress={() => router.back()}
+          style={styles.headerGlassButton}
+          accessibilityLabel="Go back"
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <Ionicons name="chevron-back" size={20} color={palette.ink} />
+        </PressScale>
+      </Animated.View>
+
+      {/* Sticky Header */}
+      <Animated.View
+        style={[styles.stickyHeader, stickyHeaderStyle]}
+        pointerEvents={showSticky ? "auto" : "none"}
+      >
+        <LiquidGlass
+          intensity={glass.navBlur}
+          borderRadius={radius.xl}
+          gradient
+          style={styles.stickyHeaderGlass}
+          contentStyle={styles.stickyHeaderContent}
+        >
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
+            <Ionicons name="chevron-back" size={24} color={palette.ink} />
+          </TouchableOpacity>
+          <AuraText variant="headline" numberOfLines={1} style={styles.stickyTitle}>
+            {album.title}
+          </AuraText>
+          <View style={{ width: 44 }} />
+        </LiquidGlass>
+      </Animated.View>
+
+      <Animated.View style={[styles.pageTransition, pageStyle]}>
+        <AnimatedFlashList
+          data={album.tracks || []}
+          renderItem={renderTrackItem}
+          keyExtractor={(item: any) => item.id}
+          onScroll={scrollHandler}
+          {...ScrollPhysics.STANDARD}
+          ListHeaderComponent={
+            <>
+              <HeroSection album={album} scrollY={scrollY} />
+              <ActionButtons
+                onPlay={handlePlayAlbum}
+                onShuffle={() => toggleShuffle()}
+                onShare={handleShare}
+                isShuffle={isShuffle}
+                tracks={album.tracks || []}
+              />
+            </>
+          }
+
+          ListFooterComponent={<CreditsSection album={album} />}
+          contentContainerStyle={[styles.contentContainer, { paddingBottom: bottomPadding }]}
+          scrollIndicatorInsets={{ bottom: bottomPadding }}
+          showsVerticalScrollIndicator={false}
+        />
+      </Animated.View>
+    </View>
+  );
+}
+
+// ─── Sub-Components ──────────────────────────────────────────────────────────
+
+const HeroSection = memo(
+  ({ album, scrollY }: { album: AlbumDetails; scrollY: SharedValue<number> }) => {
+    const heroSize = SCREEN_WIDTH * 0.65;
+
+    const heroStyle = useAnimatedStyle(() => ({
+      transform: [
+        { scale: interpolate(scrollY.value, [-100, 0, 150], [1.1, 1, 0.9], Extrapolation.CLAMP) },
+        { translateY: interpolate(scrollY.value, [0, 200], [0, 40], Extrapolation.CLAMP) }
+      ]
+    }));
+
+    return (
+      <View style={styles.heroSection}>
+        <Animated.View
+          style={[
+            styles.heroImageContainer,
+            {
+              width: heroSize,
+              height: heroSize,
+            },
+            heroStyle
+          ]}
+        >
+          <AuraArtwork
+            source={resolveArtwork({ art: album.thumbnail, title: album.title }, 'album')}
+            entityName={album.title}
+            entityType="album"
+            style={styles.heroImage}
+            contentFit="cover"
+            transition={400}
+            cachePolicy="memory-disk"
+            borderRadius={radius.xl}
+          />
+        </Animated.View>
+        <View style={styles.heroInfo}>
+          <AuraText variant="display" style={styles.albumTitle}>
+            {album.title}
+          </AuraText>
+          <TouchableOpacity onPress={() => {}} style={styles.artistLink}>
+            <AuraText variant="headline" style={styles.artistName}>
+              {album.artist}
+            </AuraText>
+          </TouchableOpacity>
+          <AuraText variant="caption" muted style={styles.albumMeta}>
+            {album.type?.toUpperCase() || 'ALBUM'} • {album.year} • {album.trackCount}{" "}
+            SONGS
+          </AuraText>
+        </View>
+      </View>
+    );
+  },
+);
+
+const ActionButtons = memo(({ onPlay, onShuffle, onShare, isShuffle, tracks }: any) => (
+  <LiquidGlass
+    borderRadius={radius.xl}
+    intensity={glass.surfaceBlur}
+    style={styles.controlPanel}
+    contentStyle={styles.controlPanelInner}
+  >
+    <PressScale
+      onPress={onPlay}
+      wrapperStyle={styles.playButton}
+      style={styles.innerButton}
+      accessibilityLabel="Play album"
+    >
+      <Ionicons name="play" size={20} color={palette.background} />
+      <AuraText variant="headline" style={styles.playButtonText}>
+        Play
+      </AuraText>
+    </PressScale>
+    <PressScale
+      onPress={onShuffle}
+      wrapperStyle={[styles.iconButton, isShuffle && styles.activeIconButton]}
+      style={styles.innerButton}
+      accessibilityLabel="Shuffle album"
+    >
+      <Ionicons
+        name="shuffle"
+        size={20}
+        color={isShuffle ? palette.primary : palette.ink}
+      />
+    </PressScale>
+    <PressScale
+      onPress={onShare}
+      wrapperStyle={styles.iconButton}
+      style={styles.innerButton}
+      accessibilityLabel="Share album"
+    >
+      <Ionicons name="share-outline" size={20} color={palette.ink} />
+    </PressScale>
+    <DownloadAlbumButton
+        tracks={tracks}
+        style={styles.downloadButton}
+    />
+  </LiquidGlass>
+));
+
+const CreditsSection = memo(({ album }: { album: AlbumDetails }) => (
+  <View style={styles.creditsSection}>
+    <AuraText variant="caption" muted style={styles.creditsTitle}>
+      ALBUM CREDITS
+    </AuraText>
+    <AuraText variant="body" muted style={styles.creditsText}>
+      Released by {album.artist} • © {album.year} AuraMusic Cinematic
+    </AuraText>
+  </View>
+));
+
+const Materialise = ({
+  children,
+  delay = 0,
+  style,
+}: {
+  children: React.ReactNode;
+  delay?: number;
+  style?: any;
+}) => {
+  return (
+    <Animated.View
+      entering={FadeInDown.delay(delay).duration(400)}
+      style={style}
+    >
+      {children}
+    </Animated.View>
+  );
 };
 
-const ControlsSkeleton = () => (
-  <View style={styles.actionRow}>
-    <SkeletonBlock style={{ flex: 2, height: 54, borderRadius: 27 }} />
-    <SkeletonBlock style={{ flex: 1, height: 54, borderRadius: 27 }} />
-    <SkeletonBlock style={{ width: 54, height: 54, borderRadius: 27 }} />
-  </View>
-);
-
-const TracksSkeleton = () => (
-  <View style={{ paddingHorizontal: 20, gap: 10, marginTop: 24 }}>
-    {Array.from({ length: 6 }).map((_, i) => (
-      <SkeletonBlock key={i} style={{ height: 72, borderRadius: radius.md }} />
-    ))}
-  </View>
-);
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
+import { FadeInDown } from "react-native-reanimated";
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: palette.background },
-  scrollView: { flex: 1 },
-  pageTransition: { flex: 1 },
-  contentContainer: { paddingBottom: 100 },
-  loadingContent: { paddingTop: 60, alignItems: "center" },
-
+  container: {
+    flex: 1,
+    backgroundColor: palette.background,
+  },
+  pageTransition: {
+    flex: 1,
+  },
+  contentContainer: {
+    paddingTop: 40,
+    paddingHorizontal: 20,
+  },
+  heroSection: {
+    alignItems: "center",
+    marginBottom: 40,
+    paddingHorizontal: 0,
+  },
+  heroImageContainer: {
+    borderRadius: radius.xl,
+    backgroundColor: palette.backgroundRaised,
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.45,
+    shadowRadius: 24,
+    marginBottom: 32,
+  },
+  heroImage: {
+    flex: 1,
+  },
+  heroInfo: {
+    alignItems: "center",
+  },
+  albumTitle: {
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  artistLink: {
+    marginBottom: 12,
+  },
+  artistName: {
+    color: palette.primary,
+  },
+  albumMeta: {
+    letterSpacing: 1.5,
+  },
+  controlPanel: {
+    marginHorizontal: 0,
+    marginBottom: 32,
+  },
+  controlPanelInner: {
+    flexDirection: "row",
+    padding: 8,
+    gap: 8,
+  },
+  playButton: {
+    flex: 2,
+    height: 52,
+    backgroundColor: palette.primary,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+  },
+  playButtonText: {
+    color: palette.background,
+  },
+  iconButton: {
+    flex: 1,
+    height: 52,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: radius.lg,
+    overflow: "hidden",
+  },
+  activeIconButton: {
+    backgroundColor: "rgba(191,90,242,0.15)",
+  },
+  downloadButton: {
+    // Manually adjust the width / flex of the download button here:
+    flex: 1, // Set to 0 if you want a fixed width (e.g. width: 52)
+    width: undefined, // E.g. set to 52 for a fixed-width button
+    height: 52,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: radius.lg,
+    overflow: "hidden",
+  },
+  innerButton: {
+    width: "100%",
+    height: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
   headerOverlay: {
     position: "absolute",
-    top: Platform.OS === "ios" ? 56 : 36,
-    left: 18,
-    right: 18,
+    top: Platform.OS === "ios" ? 52 : 32,
+    left: 20,
+    right: 20,
     zIndex: 120,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 4,
   },
   headerGlassButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(10,10,18,0.44)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    elevation: 6,
+    borderColor: "rgba(255,255,255,0.13)",
   },
-  headerSpacer: {
-    width: 46,
-    height: 46,
+  creditsSection: {
+    paddingVertical: 24,
+    opacity: 0.6,
   },
-
+  trackItemWrapper: {
+    marginBottom: 10,
+  },
+  creditsTitle: {
+    marginBottom: 8,
+    letterSpacing: 1.2,
+  },
+  creditsText: {
+    lineHeight: 20,
+  },
   stickyHeader: {
     position: "absolute",
-    top: 10,
+    top: 0,
     left: 0,
     right: 0,
     zIndex: 100,
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === "ios" ? 30 : 24,
+    paddingTop: Platform.OS === "ios" ? 48 : 32,
+    paddingBottom: 8,
   },
   stickyHeaderGlass: {
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    elevation: 10,
-    backgroundColor: "rgba(18,17,28,0.72)",
+    borderColor: "rgba(255,255,255,0.09)",
+    elevation: 12,
   },
   stickyHeaderContent: {
-    paddingTop: Platform.OS === "ios" ? 28 : 20,
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: spacing.md,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
-  stickyBackButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(255,255,255,0.07)",
+  backButton: {
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },
-  stickyHeaderInfo: {
+  stickyTitle: {
     flex: 1,
-  },
-  stickyTitle: { fontSize: 15, fontWeight: "700", letterSpacing: -0.3 },
-  stickyPlayButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: palette.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  heroSection: { paddingTop: 80, alignItems: "center", marginBottom: 32 },
-  heroImageContainer: {
-    borderRadius: radius.xl,
-    overflow: "hidden",
-    marginBottom: 28,
-    backgroundColor: palette.backgroundRaised,
-    elevation: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.5,
-    shadowRadius: 28,
-  },
-  heroImage: { width: "100%", height: "100%" },
-  heroInfo: { alignItems: "center", paddingHorizontal: 32 },
-  albumTitle: {
-    fontSize: 28,
-    fontWeight: "800",
     textAlign: "center",
-    marginBottom: 8,
-    letterSpacing: -0.5,
+    marginHorizontal: 16,
   },
-  artistLink: { marginBottom: 10 },
-  artistName: { color: palette.primary, fontSize: 18, fontWeight: "600" },
-  albumMeta: { letterSpacing: 1 },
-
-  controlPanel: {
-    marginHorizontal: 20,
-    marginBottom: 30,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(22,21,34,0.6)",
-  },
-  controlPanelInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-  },
-  playButton: {
-    flex: 1.9,
-    minHeight: 56,
-    borderRadius: 29,
-    backgroundColor: palette.primary,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    paddingHorizontal: 18,
-  },
-  playButtonText: {
-    color: palette.background,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
-  iconButton: {
-    width: 54,
-    height: 54,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  activeIconButton: {
-    backgroundColor: "rgba(191,90,242,0.15)",
-    borderColor: "rgba(191,90,242,0.3)",
-  },
-
-  sectionHeader: { paddingHorizontal: 24, marginBottom: 16 },
-  trackItem: { paddingHorizontal: 12, marginBottom: 4 },
-
-  creditsContainer: { paddingHorizontal: 24, marginTop: 32 },
-  creditsDivider: {
-    height: 1,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    marginBottom: 20,
-  },
-  creditsText: { marginBottom: 4 },
-  bottomSpacing: { height: 160 },
-
   errorContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     padding: 40,
   },
-  errorTitle: { marginTop: 20, marginBottom: 10 },
-  errorText: { textAlign: "center", marginBottom: 30, opacity: 0.7 },
-  retryButton: {
-    backgroundColor: palette.primary,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: radius.pill,
-    marginBottom: 20,
+  errorText: {
+    marginTop: 20,
+    textAlign: "center",
+    opacity: 0.8,
   },
-  retryText: { color: palette.ink, fontWeight: "700" },
-  errorBack: { padding: 10 },
-  actionRow: {
-    flexDirection: "row",
+  retryButton: {
+    marginTop: 32,
     paddingHorizontal: 24,
-    gap: 12,
+    paddingVertical: 12,
+    backgroundColor: palette.primary,
+    borderRadius: 24,
+  },
+  retryText: {
+    color: palette.background,
+    fontWeight: "700",
+  },
+  heroSkeleton: {
+    paddingTop: 80,
+    alignItems: "center",
     marginBottom: 32,
   },
-  heroSkeleton: { paddingTop: 80, alignItems: "center", marginBottom: 32 },
 });
 
 export default memo(AlbumScreen);

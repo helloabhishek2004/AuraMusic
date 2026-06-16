@@ -7,6 +7,7 @@ import {
   normalizePlaybackUri,
 } from "../utils/track-resolver";
 import { transitionManager } from "./transition-manager";
+import { getArtworkUrl } from "../utils/track-identity";
 
 function validateTrack(track: PlayerTrack): boolean {
   return !!(track && track.id && track.title);
@@ -31,7 +32,7 @@ function toMediaItem(track: PlayerTrack) {
     title: track.title,
     artist: track.artist || "Local",
     type: "default" as const,
-    artworkUrl: track.art || undefined,
+    artworkUrl: getArtworkUrl(track, 'album'),
     duration: track.duration ? Number(track.duration) : undefined,
     mimeType: track.mimeType,
   };

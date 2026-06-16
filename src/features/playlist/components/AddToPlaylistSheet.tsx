@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Pressable,
+  Platform,
 } from 'react-native';
 import Animated, {
   FadeIn,
@@ -23,6 +24,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { usePlayerUIStore } from '@/src/features/player/store/player-ui.store';
@@ -31,6 +33,9 @@ import { usePlaylistStore } from '../store/playlist.store';
 import { getShortStats } from '../utils/playlist-metrics';
 import PlaylistArtwork from './PlaylistArtwork';
 import type { Playlist } from '../types/playlist';
+import { getArtworkUrl } from '@/src/features/player/utils/track-identity';
+import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
+import { AuraArtwork } from '@/src/components/ui/aura-artwork';
 
 interface AddToPlaylistSheetProps {
   visible: boolean;
@@ -115,7 +120,7 @@ const AddToPlaylistSheet = React.memo(
     if (!visible) return null;
 
     return (
-      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
         {/* Backdrop */}
         <Animated.View
           entering={FadeIn.duration(220)}
@@ -123,7 +128,7 @@ const AddToPlaylistSheet = React.memo(
           style={StyleSheet.absoluteFill}
         >
           <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
-            <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
+            {Platform.OS === 'ios' && <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />}
             <View
               style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)' }]}
             />
@@ -135,9 +140,9 @@ const AddToPlaylistSheet = React.memo(
           entering={SlideInDown.springify().damping(22).stiffness(200).mass(0.8)}
           exiting={SlideOutDown.springify().damping(22).stiffness(200).mass(0.8)}
           style={styles.sheet}
-          pointerEvents="box-none"
+          pointerEvents="auto"
         >
-          <BlurView intensity={72} tint="dark" style={StyleSheet.absoluteFill} />
+          {Platform.OS === 'ios' && <BlurView intensity={72} tint="dark" style={StyleSheet.absoluteFill} />}
           <View style={[StyleSheet.absoluteFill, styles.sheetBg]} />
 
           {/* Handle */}
@@ -155,16 +160,16 @@ const AddToPlaylistSheet = React.memo(
           {track && (
             <View style={styles.trackPreview}>
               <View style={styles.trackArtWrap}>
-                {track.art ? (
-                  <Animated.Image
-                    source={{ uri: track.art }}
-                    style={styles.trackArt}
-                  />
-                ) : (
-                  <View style={[styles.trackArt, styles.trackArtPlaceholder]}>
-                    <Ionicons name="musical-note" size={16} color="rgba(255,255,255,0.4)" />
-                  </View>
-                )}
+                <AuraArtwork
+                  source={resolveArtwork(track, 'card')}
+                  entityName={track.title}
+                  entityType="song"
+                  style={styles.trackArt}
+                  contentFit="cover"
+                  transition={250}
+                  cachePolicy="memory-disk"
+                  borderRadius={10}
+                />
               </View>
               <View style={styles.trackInfo}>
                 <Text style={styles.trackTitle} numberOfLines={1}>
@@ -239,6 +244,7 @@ const AddToPlaylistSheet = React.memo(
                     playlist={playlist}
                     size={44}
                     borderRadius={10}
+                    cachePolicy="memory-disk"
                   />
                   <View style={styles.playlistInfo}>
                     <Text style={styles.playlistName} numberOfLines={1}>
@@ -294,186 +300,184 @@ const styles = StyleSheet.create({
     bottom: 14,
     left: 14,
     right: 14,
-    maxHeight: '78%',
+    maxHeight: '80%',
     borderRadius: 32,
     overflow: 'hidden',
+    backgroundColor: 'rgba(28,28,34,0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   sheetBg: {
-    backgroundColor: 'rgba(12,12,18,0.88)',
-    borderRadius: 32,
+    backgroundColor: 'rgba(15,15,20,0.4)',
   },
   handleBar: {
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.15)',
     alignSelf: 'center',
-    marginTop: 12,
-    marginBottom: 4,
+    marginTop: 10,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingTop: 16,
+    paddingBottom: 20,
   },
   headerTitle: {
     fontSize: 17,
-    fontWeight: '700',
-    color: '#fff',
-    letterSpacing: -0.3,
+    fontWeight: '800',
+    color: '#FFF',
   },
   closeBtn: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   trackPreview: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 10,
-    borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.08)',
-    gap: 10,
+    marginHorizontal: 20,
+    padding: 12,
+    borderRadius: 20,
+    marginBottom: 20,
   },
-  trackArtWrap: { flexShrink: 0 },
+  trackArtWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    marginRight: 14,
+    overflow: 'hidden',
+  },
   trackArt: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
+    width: 48,
+    height: 48,
   },
-  trackArtPlaceholder: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  trackInfo: {
+    flex: 1,
   },
-  trackInfo: { flex: 1 },
   trackTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    letterSpacing: -0.1,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFF',
   },
   trackArtist: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.45)',
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.5)',
     marginTop: 2,
   },
   quickAddRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 16,
-    marginBottom: 8,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(191,90,242,0.08)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(191,90,242,0.2)',
-    gap: 8,
+    backgroundColor: 'rgba(191,90,242,0.1)',
+    marginHorizontal: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(191,90,242,0.15)',
   },
   quickAddLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    marginRight: 12,
   },
   quickAddLabel: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '900',
     color: '#bf5af2',
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    letterSpacing: 0.5,
+    marginLeft: 6,
   },
   quickAddName: {
     flex: 1,
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
+    color: '#FFF',
   },
-  list: { flex: 1 },
+  list: {
+    paddingHorizontal: 20,
+  },
   listContent: {
-    paddingHorizontal: 16,
     paddingBottom: 24,
-    gap: 4,
   },
   createRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 4,
-    gap: 14,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   createIconWrap: {
     width: 44,
     height: 44,
     borderRadius: 10,
-    backgroundColor: 'rgba(191,90,242,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(191,90,242,0.25)',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(191,90,242,0.1)',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
   },
   createLabel: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     color: '#bf5af2',
   },
   playlistRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    gap: 12,
-    borderRadius: 12,
+    paddingVertical: 12,
+    borderRadius: 16,
   },
   playlistRowAdded: {
-    backgroundColor: 'rgba(71,227,154,0.06)',
+    backgroundColor: 'rgba(71,227,154,0.05)',
   },
-  playlistInfo: { flex: 1 },
+  playlistInfo: {
+    flex: 1,
+    marginLeft: 14,
+  },
   playlistName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-    letterSpacing: -0.1,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFF',
   },
   playlistCount: {
-    fontSize: 12,
+    fontSize: 13,
     color: 'rgba(255,255,255,0.4)',
     marginTop: 2,
   },
   playlistRight: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 28,
+    width: 24,
+    alignItems: 'flex-end',
   },
   duplicateText: {
-    fontSize: 11,
-    color: 'rgba(255,200,0,0.8)',
+    fontSize: 12,
     fontWeight: '600',
+    color: 'rgba(255,255,255,0.3)',
+    position: 'absolute',
+    right: 0,
+    width: 100,
+    textAlign: 'right',
   },
   emptyState: {
     alignItems: 'center',
     paddingVertical: 32,
-    gap: 6,
   },
   emptyText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.4)',
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.6)',
   },
   emptySubText: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.25)',
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 4,
     textAlign: 'center',
   },
 });

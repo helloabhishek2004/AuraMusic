@@ -5,7 +5,18 @@ import { ThemeProvider as NavigationThemeProvider, DarkTheme } from '@react-navi
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { MusicProvider, useNowPlayingTrack } from '../src/context/MusicContext';
 import { palette } from '../src/design/tokens';
-import { StyleSheet } from 'react-native';
+import {
+  StyleSheet,
+  View,
+  Text,
+  Platform,
+  TouchableOpacity,
+  InteractionManager,
+  PermissionsAndroid,
+  Dimensions,
+} from 'react-native';
+
+const SW = Dimensions.get('window').width;
 import Animated, { useSharedValue, useAnimatedStyle, interpolate, Extrapolate, withSpring, withTiming, runOnJS, useFrameCallback } from 'react-native-reanimated';
 import { RenderDiagnostics } from '../src/utils/render-diagnostics';
 
@@ -29,13 +40,13 @@ import PlayerOverlay from '../src/components/PlayerOverlay';
 
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { View, Text, TouchableOpacity, PermissionsAndroid, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDownloadStore } from '../src/features/download/store/download.store';
 import { DownloadManager } from '../src/features/download/services/download.manager';
 import { LiquidGlass } from '../src/components/ui/liquid-glass';
+import { requestIdleTask } from '../src/utils/idle-task';
 import * as Haptics from 'expo-haptics';
 
 function GlobalDownloadNotification() {
@@ -64,7 +75,7 @@ function GlobalDownloadNotification() {
   // Shared values for animations
   const translateY = useSharedValue(-100);
   const opacity = useSharedValue(0);
-  const scale = useSharedValue(0.95);
+  const scale = useSharedValue(0.15); // Start tiny for camera notch expansion
   const dragX = useSharedValue(0);
   const dragY = useSharedValue(0);
 
@@ -95,7 +106,7 @@ function GlobalDownloadNotification() {
     dragX.value = 0;
     dragY.value = 0;
     opacity.value = 0;
-    scale.value = 0.95;
+    scale.value = 0.15;
     translateY.value = -100;
 
     // Process next item in queue
@@ -119,16 +130,16 @@ function GlobalDownloadNotification() {
     
     setCurrentToast(toast);
     
-    // Reset positions
+    // Reset positions to expand from top center (camera notch area)
     dragX.value = 0;
     dragY.value = 0;
     opacity.value = 0;
-    scale.value = 0.95;
-    translateY.value = -20; // Animate from 20px above target
+    scale.value = 0.15; // start tiny
+    translateY.value = -insets.top - 12; // position at top of status bar
     
-    opacity.value = withTiming(1, { duration: 300 });
-    scale.value = withSpring(1, { damping: 15, stiffness: 150 });
-    translateY.value = withSpring(0, { damping: 15, stiffness: 150 }, (finished) => {
+    opacity.value = withTiming(1, { duration: 250 });
+    scale.value = withSpring(1, { damping: 14, stiffness: 140 });
+    translateY.value = withSpring(0, { damping: 14, stiffness: 140 }, (finished) => {
       if (finished && toast.isComplete) {
         runOnJS(scheduleAutoDismiss)();
       }
@@ -145,49 +156,49 @@ function GlobalDownloadNotification() {
   };
 
   const triggerExitAnimation = () => {
-    opacity.value = withTiming(0, { duration: 250 });
-    scale.value = withTiming(0.96, { duration: 250 });
-    translateY.value = withTiming(-30, { duration: 250 }, (finished) => {
+    opacity.value = withTiming(0, { duration: 220 });
+    scale.value = withTiming(0.95, { duration: 220 });
+    translateY.value = withTiming(-30, { duration: 220 }, (finished) => {
       if (finished) {
         runOnJS(handleDismissComplete)();
       }
     });
   };
 
-  const dismissToastGesture = (direction: 'up' | 'left') => {
+  const dismissToastGesture = (direction: 'up' | 'left' | 'right') => {
     'worklet';
     runOnJS(triggerHaptic)();
     
-    opacity.value = withTiming(0, { duration: 250 });
-    scale.value = withTiming(0.96, { duration: 250 });
+    opacity.value = withTiming(0, { duration: 220 });
+    scale.value = withTiming(0.95, { duration: 220 });
     const targetY = direction === 'up' ? -50 : 0;
-    const targetX = direction === 'left' ? -200 : 0;
+    const targetX = direction === 'left' ? -SW : direction === 'right' ? SW : 0;
     
-    translateY.value = withTiming(targetY, { duration: 250 });
-    dragX.value = withTiming(targetX, { duration: 250 }, () => {
+    translateY.value = withTiming(targetY, { duration: 220 });
+    dragX.value = withTiming(targetX, { duration: 220 }, () => {
       runOnJS(handleDismissComplete)();
     });
   };
 
-  // Gesture definition
+  // Gesture definition (allow horizontal swiping left or right, and vertical swipe up)
   const panGesture = Gesture.Pan()
     .onUpdate((event) => {
-      // Only allow swipe left (dragX < 0) and swipe up (dragY < 0)
-      if (event.translationX < 0) {
-        dragX.value = event.translationX;
-      }
+      dragX.value = event.translationX;
       if (event.translationY < 0) {
         dragY.value = event.translationY;
       }
     })
     .onEnd((event) => {
-      const isSwipeUp = event.translationY < -80 || event.velocityY < -1000;
-      const isSwipeLeft = event.translationX < -80 || event.velocityX < -1000;
+      const isSwipeUp = event.translationY < -60 || event.velocityY < -800;
+      const isSwipeLeft = event.translationX < -70 || event.velocityX < -800;
+      const isSwipeRight = event.translationX > 70 || event.velocityX > 800;
       
       if (isSwipeUp) {
         dismissToastGesture('up');
       } else if (isSwipeLeft) {
         dismissToastGesture('left');
+      } else if (isSwipeRight) {
+        dismissToastGesture('right');
       } else {
         dragX.value = withSpring(0);
         dragY.value = withSpring(0);
@@ -201,14 +212,14 @@ function GlobalDownloadNotification() {
     }
 
     if (currentToast) {
-      if (currentToast.title === storeNotification.title) {
-        // Update in place smoothly without restarting animations
+      // If the incoming notification is a completion notification, show it immediately
+      if (storeNotification.isComplete) {
+        presentToast(storeNotification);
+      } else if (currentToast.title === storeNotification.title) {
+        // Update in-progress notification in-place
         setCurrentToast(storeNotification);
-        if (storeNotification.isComplete && !currentToast.isComplete) {
-          scheduleAutoDismiss();
-        }
       } else {
-        // Add to queue
+        // Queue other distinct notifications
         setQueue(prev => {
           if (prev.some(item => item.title === storeNotification.title)) {
             return prev.map(item => item.title === storeNotification.title ? storeNotification : item);
@@ -401,6 +412,12 @@ export default function RootLayout() {
     // Initialize Library Health Center (Startup Fast Scan with 8s Delay)
     import('../src/services/library-health.service').then(({ LibraryHealthService }) => {
       LibraryHealthService.scheduleStartupScan();
+    });
+
+// Deferred heavy store hydration to preserve startup frame budget
+    requestIdleTask(async () => {
+      const { useAnalyticsStore } = await import('../src/features/analytics/store/analytics.store');
+      useAnalyticsStore.getState().initialize();
     });
 
     // Start diagnostics monitoring loop

@@ -1,10 +1,12 @@
-import React, { memo, useEffect, useMemo, useRef } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, StyleSheet, View, AppState, AppStateStatus } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { palette } from '@/src/design/tokens';
 import { useReducedMotionPreference } from '@/src/hooks/use-accessibility-preferences';
-import { useResponsiveMetrics } from '@/src/hooks/use-responsive-metrics';
 import { hexToRgba } from '@/src/utils/color';
+
+import { Dimensions } from 'react-native';
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 type AtmosphericBackgroundProps = {
   colors?: string[];
@@ -16,12 +18,22 @@ function AtmosphericBackgroundComponent({
   intensity = 1,
 }: AtmosphericBackgroundProps) {
   const reduceMotion = useReducedMotionPreference();
-  const metrics = useResponsiveMetrics();
   const phase = useRef(new Animated.Value(0)).current;
+  const [appState, setAppState] = useState(AppState.currentState);
 
   useEffect(() => {
-    if (reduceMotion) {
-      phase.setValue(0.35);
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      setAppState(nextAppState);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (reduceMotion || appState !== 'active') {
+      if (reduceMotion) phase.setValue(0.35);
       return undefined;
     }
 
@@ -29,12 +41,12 @@ function AtmosphericBackgroundComponent({
       Animated.sequence([
         Animated.timing(phase, {
           toValue: 1,
-          duration: 9000,
+          duration: 12000,
           useNativeDriver: true,
         }),
         Animated.timing(phase, {
           toValue: 0,
-          duration: 9000,
+          duration: 12000,
           useNativeDriver: true,
         }),
       ])
@@ -42,7 +54,7 @@ function AtmosphericBackgroundComponent({
 
     animation.start();
     return () => animation.stop();
-  }, [phase, reduceMotion]);
+  }, [phase, reduceMotion, appState]);
 
   const meshColors = useMemo(() => {
     const [a, b, c] = colors;
@@ -78,8 +90,8 @@ function AtmosphericBackgroundComponent({
         style={[
           styles.layer,
           {
-            height: metrics.height * 0.58,
-            top: -metrics.height * 0.1,
+            height: SCREEN_HEIGHT * 0.58,
+            top: -SCREEN_HEIGHT * 0.1,
             opacity,
             transform: [{ translateY: driftA }, { rotate: '-8deg' }],
           },
@@ -96,8 +108,8 @@ function AtmosphericBackgroundComponent({
         style={[
           styles.layer,
           {
-            height: metrics.height * 0.72,
-            bottom: -metrics.height * 0.18,
+            height: SCREEN_HEIGHT * 0.72,
+            bottom: -SCREEN_HEIGHT * 0.18,
             opacity: 0.86,
             transform: [{ translateY: driftB }, { rotate: '10deg' }],
           },

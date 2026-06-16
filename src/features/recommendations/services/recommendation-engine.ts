@@ -11,6 +11,8 @@ export interface RecommendationSeed {
   seedArtists?: string[];
   confidence?: number; // 0 - 100 confidence score
   reason?: string;
+  trackIds?: string[];
+  tracks?: any[];
 }
 
 export interface TasteCluster {
@@ -80,10 +82,12 @@ export function buildTasteClusters(
 export function generateDailyMixes(
   artistAffinities: Record<string, AffinityMetric>,
   history: HistoryEntry[],
-  artistCache?: Record<string, { id: string; image: string }>
+  artistCache?: Record<string, { id: string; image: string }>,
+  existingCandidates?: RecommendationSeed[]
 ): RecommendationSeed[] {
   const clusters = buildTasteClusters(artistAffinities, history, artistCache);
   const seeds: RecommendationSeed[] = [];
+  const candidates = existingCandidates || [];
 
   for (let i = 0; i < 3; i++) {
     const cluster = clusters[i];
@@ -99,6 +103,46 @@ export function generateDailyMixes(
       }
     }
 
+    const trackIds: string[] = [];
+    const tracks: any[] = [];
+    const artistsInCluster = new Set(cluster?.artists || []);
+    
+    // 70% from history based on cluster artists
+    const historyMatches = history.filter(h => {
+        const names = h.artist.split(',').map(s => s.trim());
+        return names.some(n => artistsInCluster.has(n));
+    });
+    
+    // Deduplicate history matches by ID
+    const uniqueHistory = Array.from(new Map(historyMatches.map(h => [h.id, h])).values());
+    const historyCount = Math.min(10, uniqueHistory.length);
+    const historyTracks = uniqueHistory.slice(0, historyCount).map(h => h.id);
+    const historyTrackObjects = uniqueHistory.slice(0, historyCount).map(h => ({
+        id: h.id,
+        title: h.title,
+        artist: h.artist,
+        artwork: h.art,
+        duration: h.positionMs || 0, // Fallback, could be missing in history
+        url: '' // Resolved later by player
+    }));
+    
+    // 30% from existing candidates (discovery)
+    const discoveryTracks = candidates
+        .filter(c => c.type === 'track' && !historyTracks.includes(c.id))
+        .slice(0, 5);
+        
+    const discoveryTrackObjects = discoveryTracks.map(c => ({
+        id: c.id,
+        title: c.title,
+        artist: c.artistName || c.title,
+        artwork: c.image,
+        duration: 0,
+        url: ''
+    }));
+        
+    trackIds.push(...historyTracks, ...discoveryTracks.map(c => c.id));
+    tracks.push(...historyTrackObjects, ...discoveryTrackObjects);
+
     seeds.push({
       type: 'playlist',
       id,
@@ -108,6 +152,8 @@ export function generateDailyMixes(
       seedArtists: cluster?.artists || [],
       reason: cluster?.reason || 'Daily soundtrack tailored to your mood.',
       confidence: 85 - (i * 5), // High confidence scores 85, 80, 75
+      trackIds,
+      tracks,
     });
   }
 
@@ -120,13 +166,16 @@ export function generateDailyMixes(
 export function generateBecauseYouLike(
   artistAffinities: Record<string, AffinityMetric>,
   history: HistoryEntry[],
-  artistCache?: Record<string, { id: string; image: string }>
+  artistCache?: Record<string, { id: string; image: string }>,
+  existingCandidates?: RecommendationSeed[]
 ): RecommendationSeed[] {
   const sortedArtists = Object.keys(artistAffinities)
     .map((key) => ({ name: key, ...artistAffinities[key] }))
     .filter((a) => a.score >= 2)
     .sort((a, b) => b.score - a.score || b.playCount - a.playCount)
     .slice(0, 5);
+    
+  const candidates = existingCandidates || [];
 
   return sortedArtists.map((artist) => {
     const match = history.find((h) => h.artist === artist.name);
@@ -139,6 +188,36 @@ export function generateBecauseYouLike(
     } else if (artist.playCount >= 1 && (artist.skipCount / artist.playCount) < 0.6) {
       confidence = 70;
     }
+    
+    const trackIds: string[] = [];
+    const tracks: any[] = [];
+    const historyMatches = history.filter(h => h.artist.includes(artist.name));
+    const uniqueHistory = Array.from(new Map(historyMatches.map(h => [h.id, h])).values());
+    const historyTracks = uniqueHistory.slice(0, 10).map(h => h.id);
+    const historyTrackObjects = uniqueHistory.slice(0, 10).map(h => ({
+        id: h.id,
+        title: h.title,
+        artist: h.artist,
+        artwork: h.art,
+        duration: h.positionMs || 0,
+        url: ''
+    }));
+    
+    const discoveryTracks = candidates
+        .filter(c => c.type === 'track' && !historyTracks.includes(c.id))
+        .slice(0, 5);
+        
+    const discoveryTrackObjects = discoveryTracks.map(c => ({
+        id: c.id,
+        title: c.title,
+        artist: c.artistName || c.title,
+        artwork: c.image,
+        duration: 0,
+        url: ''
+    }));
+        
+    trackIds.push(...historyTracks, ...discoveryTracks.map(c => c.id));
+    tracks.push(...historyTrackObjects, ...discoveryTrackObjects);
 
     return {
       type: 'artist',
@@ -149,6 +228,8 @@ export function generateBecauseYouLike(
       seedArtists: [artist.name],
       reason: `Because you completed ${artist.completionCount} song${artist.completionCount !== 1 ? 's' : ''} by ${artist.name} recently.`,
       confidence,
+      trackIds,
+      tracks,
     };
   });
 }

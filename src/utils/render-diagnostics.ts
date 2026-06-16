@@ -47,6 +47,7 @@ export const RenderDiagnostics = {
   activeRefreshRate,
 
   startMonitoring() {
+    if (typeof __DEV__ === 'undefined' || !__DEV__) return;
     if (isMonitoringShared.value) return;
     isMonitoringShared.value = true;
 

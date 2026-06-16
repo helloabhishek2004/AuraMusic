@@ -1,11 +1,12 @@
-import React, { memo, useEffect, useRef } from 'react';
-import { Animated, StyleProp, StyleSheet, Text, TextProps, View, ViewStyle } from 'react-native';
+import React, { memo } from 'react';
+import { StyleProp, StyleSheet, Text, TextProps, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LiquidGlass } from '@/src/components/ui/liquid-glass';
 import { PressScale } from '@/src/components/ui/press-scale';
-import { glass, motion, palette, radius, spacing, typography } from '@/src/design/tokens';
+import { glass, palette, radius, spacing, typography } from '@/src/design/tokens';
 import { useReducedMotionPreference } from '@/src/hooks/use-accessibility-preferences';
+import Animated, { FadeInUp } from 'react-native-reanimated';
 
 type AuraTextProps = TextProps & {
   variant?: keyof typeof typography;
@@ -62,41 +63,26 @@ type MotionRevealProps = {
 
 function MotionRevealComponent({ children, delay = 0, style }: MotionRevealProps) {
   const reduceMotion = useReducedMotionPreference();
-  const opacity = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
-  const translateY = useRef(new Animated.Value(reduceMotion ? 0 : 12)).current;
 
-  useEffect(() => {
-    if (reduceMotion) {
-      opacity.setValue(1);
-      translateY.setValue(0);
-      return;
-    }
+  if (reduceMotion) {
+    return <View style={style}>{children}</View>;
+  }
 
-    const timer = setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(opacity, {
-          toValue: 1,
-          duration: motion.duration.base,
-          useNativeDriver: true,
-        }),
-        Animated.spring(translateY, {
-          toValue: 0,
-          ...motion.spring.soft,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }, delay);
-
-    return () => clearTimeout(timer);
-  }, [delay, opacity, reduceMotion, translateY]);
-
-  return <Animated.View style={[{ opacity, transform: [{ translateY }] }, style]}>{children}</Animated.View>;
+  return (
+    <Animated.View 
+      entering={FadeInUp.delay(delay).duration(400)} 
+      style={style}
+    >
+      {children}
+    </Animated.View>
+  );
 }
 
 export const MotionReveal = memo(MotionRevealComponent);
 
 import { DownloadButton } from './download-button';
 import { PlayerTrack } from '@/src/features/player/types/player';
+import { AuraArtwork } from './aura-artwork';
 
 type MediaListItemProps = {
   title: string;
@@ -147,7 +133,14 @@ function MediaListItemComponent({
         style={[styles.mediaGlass, active && styles.mediaGlassActive]}
         contentStyle={styles.mediaContent}
       >
-        <Image source={{ uri: image }} style={styles.mediaArt} contentFit="cover" transition={160} />
+        <AuraArtwork 
+          source={image} 
+          entityName={title}
+          style={styles.mediaArt} 
+          contentFit="cover" 
+          transition={160}
+          cachePolicy="memory-disk"
+        />
         <View style={styles.mediaCopy}>
           <AuraText variant="headline" numberOfLines={1} style={[styles.mediaTitle, active && styles.activeText]}>
             {title}

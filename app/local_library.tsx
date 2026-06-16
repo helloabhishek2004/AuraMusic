@@ -13,11 +13,9 @@ import {
     Animated,
     Dimensions,
     Easing,
-    FlatList,
     LayoutAnimation,
     Platform,
     Pressable,
-    ScrollView,
     StatusBar,
     StyleSheet,
     Text,
@@ -26,6 +24,7 @@ import {
     View,
     Modal,
 } from "react-native";
+import { FlashList } from "@shopify/flash-list";
 import Reanimated, {
     useSharedValue,
     useAnimatedStyle,
@@ -44,10 +43,12 @@ import { useMediaCacheStore } from "@/src/features/cache/store/media-cache.store
 import { LocalMusicService } from "@/src/services/local-music.service";
 import { MusicTrack } from "@/src/types/music";
 import { PlayerTrack } from "@/src/features/player/types/player";
-import { getTrackArtwork } from "@/src/features/player/utils/track-identity";
+import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { PressScale } from "@/src/components/ui/press-scale";
 import { palette, radius, spacing } from "@/src/design/tokens";
+import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
+import { AuraArtwork } from "@/src/components/ui/aura-artwork";
 
 // LayoutAnimation setup (handled by platform defaults in new arch)
 
@@ -339,7 +340,9 @@ const LocalTrackRow = React.memo(
         const displayTitle = cached?.title || track.title;
         const displayArtist = (cached?.artist && cached.artist !== "Local Artist" && cached.artist !== "Local") ? cached.artist : (track.artist || "Local Audio");
         const cachedAny = cached as any;
-        const displayArt = (cachedAny?.art || cachedAny?.artwork || cachedAny?.artworkUrl || cachedAny?.thumbnail || cachedAny?.image) ? getTrackArtwork(cached) : getTrackArtwork(track);
+        const displayArt = (cachedAny?.art || cachedAny?.artwork || cachedAny?.artworkUrl || cachedAny?.thumbnail || cachedAny?.image) 
+            ? getArtworkUrl(cached, 'card') 
+            : getArtworkUrl(track, 'card');
 
         const isLiked = useLikesStore((s) => !!s.likedTrackIds[track.id]);
         const toggleLike = useLikesStore((s) => s.toggleLike);
@@ -369,7 +372,14 @@ const LocalTrackRow = React.memo(
         }, []);
 
         return (
-            <Animated.View style={{ opacity: rowOpacity, transform: [{ translateY: rowTranslate }] }}>
+            <Animated.View
+                style={{
+                    opacity: rowOpacity,
+                    transform: [{ translateY: rowTranslate }],
+                    paddingHorizontal: PAD,
+                    marginBottom: SP12,
+                }}
+            >
                 <PressScale
                     onPress={() => onPlay(track)}
                     haptic={Haptics.ImpactFeedbackStyle.Light}
@@ -398,29 +408,16 @@ const LocalTrackRow = React.memo(
                         <View style={s.trackInner}>
                             {/* Artwork / fallback */}
                             <View style={s.trackArtWrap}>
-                                {displayArt ? (
-                                    <Image
-                                        source={{ uri: displayArt }}
-                                        style={s.trackArt}
-                                        contentFit="cover"
-                                        transition={250}
-                                    />
-                                ) : (
-                                    <LinearGradient
-                                        colors={
-                                            isActive
-                                                ? ["rgba(168,72,255,0.28)", "rgba(90,20,180,0.18)"]
-                                                : ["rgba(255,255,255,0.06)", "rgba(255,255,255,0.02)"]
-                                        }
-                                        style={s.trackFallback}
-                                    >
-                                        <Ionicons
-                                            name="musical-note"
-                                            size={22}
-                                            color={isActive ? palette.primary : "rgba(255,255,255,0.28)"}
-                                        />
-                                    </LinearGradient>
-                                )}
+                                <AuraArtwork
+                                    source={resolveArtwork(track, 'card')}
+                                    entityName={displayTitle}
+                                    entityType="song"
+                                    style={s.trackArt}
+                                    contentFit="cover"
+                                    transition={250}
+                                    cachePolicy="memory-disk"
+                                    borderRadius={12}
+                                />
 
                                 {/* Active badge: waveform animation */}
                                 {isActive && (
@@ -1097,33 +1094,7 @@ export default function LocalLibraryScreen() {
         }
 
         if (activeTab === "Songs") {
-            return (
-                <View style={s.songsList}>
-                    {tracks.map((t, i) => (
-                        <LocalTrackRow
-                            key={t.id}
-                            track={t}
-                            index={i}
-                            onPlay={(track) => handlePlayTrack(track, tracks)}
-                            isActive={currentTrack?.id === t.id}
-                        />
-                    ))}
-
-                    {/* Add more folders CTA */}
-                    <PressScale
-                        style={s.addMoreRow}
-                        onPress={handleGrantAccess}
-                        haptic={Haptics.ImpactFeedbackStyle.Light}
-                        accessibilityLabel="Add more folders to scan"
-                        accessibilityRole="button"
-                    >
-                        <View style={s.addMoreInner}>
-                            <Ionicons name="add-circle-outline" size={20} color={palette.primary} />
-                            <Text style={s.addMoreText}>Add more folders</Text>
-                        </View>
-                    </PressScale>
-                </View>
-            );
+            return null; // Handled by FlashList now
         }
 
         if (activeTab === "Folders") {
@@ -1133,7 +1104,7 @@ export default function LocalLibraryScreen() {
                     <View style={s.folderGrid}>
                         {sortedFolders.map(([name, folderTracks], i) => (
                             <FolderCard
-                                key={name}
+                                key={`${name}-${i}`}
                                 name={name}
                                 count={folderTracks.length}
                                 index={i}
@@ -1154,7 +1125,7 @@ export default function LocalLibraryScreen() {
                         <LiquidGlass borderRadius={20} intensity={16} style={s.managedGlass}>
                             <View style={s.managedSpecular} pointerEvents="none" />
                             {grantedFolders.map((uri, i) => (
-                                <React.Fragment key={uri}>
+                                <React.Fragment key={`${uri}-${i}`}>
                                     <ManagedFolderRow
                                         uri={uri}
                                         onRemove={() => handleRemoveFolder(uri)}
@@ -1209,75 +1180,107 @@ export default function LocalLibraryScreen() {
                 />
             </View>
 
-            <ScrollView
+            <FlashList
+                data={activeTab === "Songs" && !isLoading && grantedFolders.length > 0 && tracks.length > 0 ? tracks : []}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={[s.scroll, { paddingBottom: 140 + insets.bottom }]}
-                scrollEventThrottle={16}
-            >
-                {/* ── Header ─────────────────────────────────────────────── */}
-                <View style={[s.header, { paddingTop: insets.top + SP16 }]}>
-                    {/* Back button */}
-                    <PressScale
-                        onPress={() => router.back()}
-                        haptic={Haptics.ImpactFeedbackStyle.Light}
-                        accessibilityLabel="Go back"
-                        accessibilityRole="button"
-                    >
-                        <LiquidGlass borderRadius={20} intensity={16} style={s.iconBtn}>
-                            <View style={s.iconBtnSpec} pointerEvents="none" />
-                            <Ionicons name="chevron-back" size={20} color={palette.ink} />
-                        </LiquidGlass>
-                    </PressScale>
-
-                    {/* Title block */}
-                    <View style={s.headerMid}>
-                        <Text style={s.headerEyebrow}>Device Music</Text>
-                        <Text style={s.headerTitle}>Local Library</Text>
-                        {tracks.length > 0 && (
-                            <View style={s.headerBadge}>
-                                <View style={s.headerDot} />
-                                <Text style={s.headerSub}>{tracks.length} songs</Text>
-                            </View>
-                        )}
-                    </View>
-
-                    {/* Refresh button */}
-                    <PressScale
-                        onPress={loadLocalMedia}
-                        disabled={isLoading}
-                        haptic={Haptics.ImpactFeedbackStyle.Light}
-                        accessibilityLabel="Refresh library"
-                        accessibilityRole="button"
-                    >
-                        <LiquidGlass borderRadius={20} intensity={16} style={s.iconBtn}>
-                            <View style={s.iconBtnSpec} pointerEvents="none" />
-                            <Animated.View style={rotateStyle}>
-                                <Ionicons
-                                    name="reload"
-                                    size={18}
-                                    color={isLoading ? palette.inkDim : palette.primary}
-                                />
-                            </Animated.View>
-                        </LiquidGlass>
-                    </PressScale>
-                </View>
-
-                {/* ── Hero card (only when we have data) ─────────────────── */}
-                {!isLoading && tracks.length > 0 && (
-                    <HeroCard
-                        trackCount={tracks.length}
-                        folderCount={sortedFolders.length}
+                // @ts-expect-error FlashList types mismatch in this version
+                estimatedItemSize={70}
+                renderItem={({ item: t, index: i }) => (
+                    <LocalTrackRow
+                        track={t}
+                        index={i}
+                        onPlay={(track) => handlePlayTrack(track, tracks)}
+                        isActive={currentTrack?.id === t.id}
                     />
                 )}
+                keyExtractor={(t, idx) => `${t.id || 'local'}-${idx}`}
+                ListHeaderComponent={
+                    <View>
+                        {/* ── Header ─────────────────────────────────────────────── */}
+                        <View style={[s.header, { paddingTop: insets.top + SP16 }]}>
+                            {/* Back button */}
+                            <PressScale
+                                onPress={() => router.back()}
+                                haptic={Haptics.ImpactFeedbackStyle.Light}
+                                accessibilityLabel="Go back"
+                                accessibilityRole="button"
+                            >
+                                <LiquidGlass borderRadius={20} intensity={16} style={s.iconBtn}>
+                                    <View style={s.iconBtnSpec} pointerEvents="none" />
+                                    <Ionicons name="chevron-back" size={20} color={palette.ink} />
+                                </LiquidGlass>
+                            </PressScale>
 
-                {/* ── Tab bar (only when we have data) ───────────────────── */}
-                {!isLoading && tracks.length > 0 && (
-                    <TabBar activeTab={activeTab} onSelect={setActiveTab} />
-                )}
+                            {/* Title block */}
+                            <View style={s.headerMid}>
+                                <Text style={s.headerEyebrow}>Device Music</Text>
+                                <Text style={s.headerTitle}>Local Library</Text>
+                                {tracks.length > 0 && (
+                                    <View style={s.headerBadge}>
+                                        <View style={s.headerDot} />
+                                        <Text style={s.headerSub}>{tracks.length} songs</Text>
+                                    </View>
+                                )}
+                            </View>
 
-                {/* ── Main content ────────────────────────────────────────── */}
-                {renderContent()}
-            </ScrollView>
+                            {/* Refresh button */}
+                            <PressScale
+                                onPress={loadLocalMedia}
+                                disabled={isLoading}
+                                haptic={Haptics.ImpactFeedbackStyle.Light}
+                                accessibilityLabel="Refresh library"
+                                accessibilityRole="button"
+                            >
+                                <LiquidGlass borderRadius={20} intensity={16} style={s.iconBtn}>
+                                    <View style={s.iconBtnSpec} pointerEvents="none" />
+                                    <Animated.View style={rotateStyle}>
+                                        <Ionicons
+                                            name="reload"
+                                            size={18}
+                                            color={isLoading ? palette.inkDim : palette.primary}
+                                        />
+                                    </Animated.View>
+                                </LiquidGlass>
+                            </PressScale>
+                        </View>
+
+                        {/* ── Hero card (only when we have data) ─────────────────── */}
+                        {!isLoading && tracks.length > 0 && (
+                            <HeroCard
+                                trackCount={tracks.length}
+                                folderCount={sortedFolders.length}
+                            />
+                        )}
+
+                        {/* ── Tab bar (only when we have data) ───────────────────── */}
+                        {!isLoading && tracks.length > 0 && (
+                            <TabBar activeTab={activeTab} onSelect={setActiveTab} />
+                        )}
+
+                        {/* ── Main content ────────────────────────────────────────── */}
+                        {renderContent()}
+                    </View>
+                }
+                ListFooterComponent={
+                    activeTab === "Songs" && !isLoading && grantedFolders.length > 0 && tracks.length > 0 ? (
+                        <View style={s.songsList}>
+                            <PressScale
+                                style={s.addMoreRow}
+                                onPress={handleGrantAccess}
+                                haptic={Haptics.ImpactFeedbackStyle.Light}
+                                accessibilityLabel="Add more folders to scan"
+                                accessibilityRole="button"
+                            >
+                                <View style={s.addMoreInner}>
+                                    <Ionicons name="add-circle-outline" size={20} color={palette.primary} />
+                                    <Text style={s.addMoreText}>Add more folders</Text>
+                                </View>
+                            </PressScale>
+                        </View>
+                    ) : null
+                }
+            />
 
             {/* Onboarding Modal */}
             <OnboardingModal

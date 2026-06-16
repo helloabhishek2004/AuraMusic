@@ -31,14 +31,20 @@ import {
 
 import { HistoryEntry } from '../../analytics/store/analytics.store';
 
+import { getArtworkUrl } from '../../player/utils/track-identity';
+import { resolveArtwork } from '../../player/utils/artwork-resolver';
+
 async function resolveSeedArtworkAsync(
   seed: RecommendationSeed,
   history: HistoryEntry[],
   artistCache: Record<string, { id: string; image: string }>
-): Promise<string | null> {
+): Promise<string> {
   // If it's a track seed, it already has the track's artwork
   if (seed.type === 'track') {
-    return seed.image && !seed.image.includes('placeholder') && !seed.image.includes('picsum.photos') ? seed.image : null;
+    const url = seed.image;
+    if (url && url.length > 0 && !url.includes('placeholder')) {
+      return url;
+    }
   }
 
   // 1. Try first recommended track from history/catalog matching seed artists
@@ -47,13 +53,13 @@ async function resolveSeedArtworkAsync(
     for (const name of seed.seedArtists) {
       const clean = name.toLowerCase().trim();
       const match = history.find(h => splitArtistNames(h.artist).some(an => an.toLowerCase().trim() === clean));
-      if (match?.art && !match.art.includes('placeholder') && !match.art.includes('picsum.photos')) return match.art;
+      if (match?.art && !match.art.includes('placeholder')) return match.art;
     }
     // Check catalog
     for (const name of seed.seedArtists) {
       const clean = name.toLowerCase().trim();
       const match = catalogTracks.find(t => t.artist.toLowerCase().trim() === clean);
-      if (match?.art && !match.art.includes('placeholder') && !match.art.includes('picsum.photos')) return match.art;
+      if (match?.art && !match.art.includes('placeholder')) return match.art;
     }
   }
 
@@ -61,7 +67,7 @@ async function resolveSeedArtworkAsync(
   if (seed.seedArtists && seed.seedArtists.length > 0) {
     for (const name of seed.seedArtists) {
       const cached = artistCache[name];
-      if (cached?.image && !cached.image.includes('placeholder') && !cached.image.includes('picsum.photos')) {
+      if (cached?.image && !cached.image.includes('placeholder')) {
         return cached.image;
       }
     }
@@ -74,7 +80,7 @@ async function resolveSeedArtworkAsync(
       if (seed.seedArtists && seed.seedArtists.length > 0) {
         const topArtist = seed.seedArtists[0];
         const searchSongs = await musicService.searchSongs(topArtist);
-        if (searchSongs && searchSongs[0]?.art && !searchSongs[0].art.includes('placeholder') && !searchSongs[0].art.includes('picsum.photos')) {
+        if (searchSongs && searchSongs[0]?.art && !searchSongs[0].art.includes('placeholder')) {
           return searchSongs[0].art;
         }
       }
@@ -84,11 +90,12 @@ async function resolveSeedArtworkAsync(
   }
 
   // Fallback to seed image if it's not a generic placeholder
-  if (seed.image && !seed.image.includes('placeholder') && !seed.image.includes('picsum.photos')) {
+  if (seed.image && !seed.image.includes('placeholder')) {
     return seed.image;
   }
 
-  return null;
+  // ABSOLUTE FALLBACK: resolveArtwork will provide a deterministic aura://generated URI
+  return resolveArtwork(seed, 'album');
 }
 
 export interface TrendingSeed {
@@ -129,6 +136,8 @@ export interface RecommendationsState {
   generatedAt: number | null;
   lastRecommendationBuild: number | null;
   analyticsVersion: number;
+  
+  isHydrated: boolean;
 }
 
 export interface RecommendationsActions {
@@ -175,6 +184,8 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
       generatedAt: null,
       lastRecommendationBuild: null,
       analyticsVersion: 0,
+      
+      isHydrated: false,
 
       // Actions
       generateRecommendations: async () => {
@@ -380,7 +391,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             });
 
             // Generate other sections
-            const personalDaily = generateDailyMixes(artistAffinities, history, artistCache);
+            const personalDaily = generateDailyMixes(artistAffinities, history, artistCache, topSongs);
             
             // Loop Protection: add top Daily Mix's seed artists to the artist pool
             const firstDaily = personalDaily[0];
@@ -397,7 +408,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
                 fallbackDailyMixes[2]
               ].filter(Boolean);
 
-              const rawBYL = generateBecauseYouLike(artistAffinities, history, artistCache);
+              const rawBYL = generateBecauseYouLike(artistAffinities, history, artistCache, topSongs);
               becauseYouLike = rawBYL
                 .filter(s => {
                   const artName = s.title.toLowerCase().trim();
@@ -413,7 +424,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               console.log(`[CurationStore] Full Personalization active (Tier ${historyLength > 100 ? 4 : 3}).`);
               dailyMixes = personalDaily;
 
-              const rawBYL = generateBecauseYouLike(artistAffinities, history, artistCache);
+              const rawBYL = generateBecauseYouLike(artistAffinities, history, artistCache, topSongs);
               becauseYouLike = rawBYL.filter(s => {
                 const artName = s.title.toLowerCase().trim();
                 if (globalArtistPool.has(artName)) return false;
@@ -483,17 +494,15 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           }
 
           // Dynamic Artwork Resolution Priority (Rule 1 & Rule 4)
-          // 1. Track artwork / 2. Album artwork / 3. Artist profile / 4. Hide seed (no placeholder)
+          // Softened: resolveArtwork will provide deterministic fallbacks instead of hiding seeds
           const resolveListArtworks = async (list: RecommendationSeed[]) => {
             const result: RecommendationSeed[] = [];
             for (const seed of list) {
               const resolvedArt = await resolveSeedArtworkAsync(seed, history, artistCache);
-              if (resolvedArt) {
-                result.push({
-                  ...seed,
-                  image: resolvedArt,
-                });
-              }
+              result.push({
+                ...seed,
+                image: resolvedArt,
+              });
             }
             return result;
           };
@@ -515,7 +524,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               const { musicService } = require('../../../services/api/music');
               const charts = await musicService.getCharts();
               const songs = charts.songs?.length > 0 ? charts.songs : charts.trending;
-              if (songs && songs[0] && songs[0].art && !songs[0].art.includes('placeholder') && !songs[0].art.includes('picsum.photos')) {
+              if (songs && songs[0] && songs[0].art && !songs[0].art.includes('placeholder')) {
                 trendingArtwork = songs[0].art;
               }
             } catch (e) {
@@ -525,7 +534,8 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             if (trendingArtwork) {
               trendingForYou.image = trendingArtwork;
             } else {
-              trendingForYou = null; // Hide Trending For You if no artwork can be resolved (Rule 1 & Rule 4)
+              // FALLBACK: Don't hide, use generated
+              trendingForYou.image = resolveArtwork(trendingForYou, 'album');
             }
           }
 
@@ -778,6 +788,11 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
         generatedAt: state.generatedAt,
         lastRecommendationBuild: state.lastRecommendationBuild,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state.isHydrated = true;
+        }
+      },
     }
   )
 );

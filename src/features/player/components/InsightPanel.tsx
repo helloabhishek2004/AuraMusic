@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +18,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PlayerTrack } from '../types/player';
-import { useArtistEnrichment } from '../../../hooks/use-artist-enrichment';
+import { getArtworkUrl } from "../../player/utils/track-identity";
+import { resolveArtwork } from "../../player/utils/artwork-resolver";
+import { AuraArtwork } from "@/src/components/ui/aura-artwork";
+import { useArtistEnrichment } from "../../../hooks/use-artist-enrichment";
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -53,7 +57,11 @@ export const InsightPanel = ({ isVisible, onClose, track, accentColor }: Insight
 
   return (
     <Animated.View style={[styles.panel, panelStyle, { paddingTop: insets.top + 20 }]}>
-      <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+      {Platform.OS === 'ios' ? (
+        <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(10, 10, 15, 0.96)' }]} />
+      )}
       
       <ScrollView 
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 100 }]}
@@ -67,11 +75,14 @@ export const InsightPanel = ({ isVisible, onClose, track, accentColor }: Insight
 
         {/* Artist Card */}
         <View style={styles.artistCard}>
-          <Image
-            source={{ uri: displayArt }}
+          <AuraArtwork
+            source={resolveArtwork({ art: displayArt, artist: displayArtist, type: 'artist' }, 'album')}
+            entityName={displayArtist}
+            entityType="artist"
             style={styles.artistImage}
             contentFit="cover"
             transition={300}
+            cachePolicy="memory-disk"
           />
           <View style={styles.artistInfo}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>

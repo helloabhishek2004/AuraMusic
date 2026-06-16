@@ -10,7 +10,9 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -22,7 +24,6 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": true,
-      "usesCleartextTraffic": true,
       "package": "com.anonymous.AuraMusic",
       "permissions": [
         "android.permission.FOREGROUND_SERVICE",
@@ -41,26 +42,35 @@
               "scheme": "auramusic"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
-    },
-    "androidStatusBar": {
-      "barStyle": "light-content",
-      "backgroundColor": "#00000000",
-      "translucent": true
-    },
-    "androidNavigationBar": {
-      "barStyle": "light-content",
-      "backgroundColor": "#000000"
     },
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
       "./plugins/withAuraNative",
       "expo-router",
+      "expo-system-ui",
+      [
+        "expo-navigation-bar",
+        {
+          "hidden": true
+        }
+      ],
       [
         "expo-splash-screen",
         {
@@ -83,7 +93,8 @@
           "savePhotosPermission": "Allow AuraMusic to save music to your library.",
           "isStandard": true
         }
-      ]
+      ],
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true,

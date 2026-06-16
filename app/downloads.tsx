@@ -1,3 +1,6 @@
+import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
+import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
+import { AuraArtwork } from "@/src/components/ui/aura-artwork";
 import { CategoryTabs } from "@/src/components/CategoryTabs";
 import { useMusic } from "@/src/context/MusicContext";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
@@ -18,6 +21,7 @@ import React, {
   useMemo,
   useRef,
   useState,
+  memo,
 } from "react";
 import {
   Animated,
@@ -38,6 +42,40 @@ import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
 import { openAlbum, openArtistByName, openNowPlaying } from "@/src/navigation/music-navigation";
 import * as Haptics from "expo-haptics";
+
+import AnimatedReanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  useAnimatedProps,
+  useAnimatedScrollHandler,
+  interpolate,
+  Extrapolation,
+  withSpring,
+  withTiming,
+  withRepeat,
+  Easing as EasingReanimated,
+  runOnJS,
+  SharedValue,
+} from "react-native-reanimated";
+import { TextInput } from "react-native";
+
+const AnimatedTextInput = AnimatedReanimated.createAnimatedComponent(TextInput) as any;
+
+const ProgressText = memo(({ progress }: { progress: SharedValue<number> }) => {
+  const animatedProps = useAnimatedProps(() => {
+    return {
+      text: `${Math.round(progress.value * 100)}%`,
+    } as any;
+  });
+  return (
+    <AnimatedTextInput
+      editable={false}
+      style={s.pct}
+      animatedProps={animatedProps}
+      value=""
+    />
+  );
+});
 
 const { width: SW, height: SH } = Dimensions.get("window");
 
@@ -109,47 +147,41 @@ function useStorage(): SInfo {
 
 // ── Shimmer skeleton hook ──────────────────────────────────────────────────────
 function useShimmer() {
-  const anim = useRef(new Animated.Value(0)).current;
+  const anim = useSharedValue(0);
   useEffect(() => {
-    Animated.loop(
-      Animated.timing(anim, {
-        toValue: 1,
-        duration: 1400,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-    ).start();
-  }, [anim]);
-  const translateX = anim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-SW, SW],
-  });
-  return translateX;
+    anim.value = 0;
+    anim.value = withRepeat(
+      withTiming(1, { duration: 1400, easing: EasingReanimated.linear }),
+      -1,
+      false
+    );
+  }, []);
+  const shimmerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: interpolate(anim.value, [0, 1], [-SW, SW]) }],
+  }));
+  return shimmerStyle;
 }
 
 // ── Entrance animation hook ────────────────────────────────────────────────────
 function useEntrance(delay = 0) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(18)).current;
+  const progress = useSharedValue(0);
+  const hasMounted = useRef(false);
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 480,
-        delay,
-        easing: EASE_OUT_EXPO,
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateY, {
-        toValue: 0,
-        duration: 480,
-        delay,
-        easing: EASE_OUT_EXPO,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    if (hasMounted.current) return;
+    hasMounted.current = true;
+    progress.value = 0;
+    progress.value = withTiming(1, {
+      duration: 480,
+      easing: EasingReanimated.out(EasingReanimated.exp),
+    });
   }, []);
-  return { opacity, transform: [{ translateY }] };
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ translateY: interpolate(progress.value, [0, 1], [18, 0], Extrapolation.CLAMP) }],
+  }));
+
+  return animatedStyle;
 }
 
 // ── Ambient background orbs ────────────────────────────────────────────────────
@@ -287,29 +319,29 @@ const Glass = ({
 );
 
 // ── Storage bar ────────────────────────────────────────────────────────────────
+// ── Storage bar ────────────────────────────────────────────────────────────────
 const StorageBar = ({ used, total }: { used: number; total: number }) => {
   const width = Math.min((used / total) * 100, 100);
-  const anim = useRef(new Animated.Value(0)).current;
+  const anim = useSharedValue(0);
   useEffect(() => {
-    Animated.timing(anim, {
-      toValue: width / 100,
+    anim.value = 0;
+    anim.value = withTiming(width / 100, {
       duration: 900,
-      delay: 300,
-      easing: EASE_OUT_EXPO,
-      useNativeDriver: false,
-    }).start();
+      easing: EasingReanimated.out(EasingReanimated.exp),
+    });
   }, [width]);
-  const animWidth = anim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0%", `${width}%`],
-  });
+
+  const fillStyle = useAnimatedStyle(() => ({
+    width: `${anim.value * 100}%`,
+  }));
+
   return (
     <View
       style={s.barTrack}
       accessibilityLabel={`Storage: ${used} GB used of ${total} GB`}
       accessibilityRole="progressbar"
     >
-      <Animated.View style={[s.barFill, { width: animWidth }]}>
+      <AnimatedReanimated.View style={[s.barFill, fillStyle]}>
         <LinearGradient
           colors={[C.primary, C.primaryMid, C.accent]}
           start={{ x: 0, y: 0 }}
@@ -323,57 +355,62 @@ const StorageBar = ({ used, total }: { used: number; total: number }) => {
           end={{ x: 0, y: 1 }}
           style={[StyleSheet.absoluteFill, { borderRadius: 3 }]}
         />
-      </Animated.View>
+      </AnimatedReanimated.View>
     </View>
   );
 };
 
 // ── Progress ring ──────────────────────────────────────────────────────────────
-const Ring = ({
+const Ring = memo(({
   progress,
   size = 48,
   status,
 }: {
-  progress: number;
+  progress: SharedValue<number>;
   size?: number;
   status: string;
 }) => {
-  const spin = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.8)).current;
+  const spin = useSharedValue(0);
+  const scale = useSharedValue(0.8);
+
   useEffect(() => {
-    Animated.spring(scale, {
-      toValue: 1,
-      tension: 60,
-      friction: 9,
-      useNativeDriver: true,
-    }).start();
+    scale.value = 0.8;
+    scale.value = withSpring(1, { damping: 12, stiffness: 100 });
+
     if (status !== "paused") {
-      Animated.loop(
-        Animated.timing(spin, {
-          toValue: 1,
-          duration: 2200,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-      ).start();
+      spin.value = 0;
+      spin.value = withRepeat(
+        withTiming(1, { duration: 2200, easing: EasingReanimated.linear }),
+        -1,
+        false
+      );
     } else {
-      spin.stopAnimation();
+      spin.value = 0;
     }
   }, [status]);
-  const rotate = spin.interpolate({
-    inputRange: [0, 1],
-    outputRange: ["0deg", "360deg"],
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    width: size,
+    height: size,
+    justifyContent: "center",
+    alignItems: "center",
+    transform: [{ scale: scale.value }],
+  }));
+
+  const rotateStyle = useAnimatedStyle(() => {
+    const rotate = interpolate(spin.value, [0, 1], [0, 360]);
+    const p = progress.value;
+    return {
+      borderRightColor: p > 0.5 ? C.accent : "transparent",
+      borderBottomColor: p > 0.75 ? C.accent : "transparent",
+      transform: [{ rotate: `${rotate}deg` }],
+    };
   });
+
   return (
-    <Animated.View
-      style={{
-        width: size,
-        height: size,
-        justifyContent: "center",
-        alignItems: "center",
-        transform: [{ scale }],
-      }}
-      accessibilityLabel={`Downloading: ${Math.round(progress * 100)}%`}
+    <AnimatedReanimated.View
+      style={animatedStyle}
+      accessibilityLabel="Downloading progress"
       accessibilityRole="progressbar"
     >
       {/* Track */}
@@ -388,28 +425,28 @@ const Ring = ({
         }}
       />
       {/* Spinning fill arc */}
-      <Animated.View
-        style={{
-          position: "absolute",
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          borderWidth: 2.5,
-          borderTopColor: C.accent,
-          borderRightColor: progress > 0.5 ? C.accent : "transparent",
-          borderBottomColor: "transparent",
-          borderLeftColor: "transparent",
-          transform: [{ rotate }],
-        }}
+      <AnimatedReanimated.View
+        style={[
+          {
+            position: "absolute",
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderWidth: 2.5,
+            borderTopColor: C.accent,
+            borderLeftColor: "transparent",
+          },
+          rotateStyle,
+        ]}
       />
       <Ionicons
         name={status === "paused" ? "pause" : "arrow-down"}
         size={16}
         color={C.accent}
       />
-    </Animated.View>
+    </AnimatedReanimated.View>
   );
-};
+});
 
 // ── Skeleton row ──────────────────────────────────────────────────────────────
 const SkeletonRow = () => {
@@ -422,11 +459,11 @@ const SkeletonRow = () => {
           { backgroundColor: "rgba(255,255,255,0.06)", overflow: "hidden" },
         ]}
       >
-        <Animated.View
-          style={{
-            ...StyleSheet.absoluteFillObject,
-            transform: [{ translateX: tx }],
-          }}
+        <AnimatedReanimated.View
+          style={[
+            StyleSheet.absoluteFillObject,
+            tx,
+          ]}
         >
           <LinearGradient
             colors={[C.shimmer1, C.shimmer2, C.shimmer3]}
@@ -434,7 +471,7 @@ const SkeletonRow = () => {
             end={{ x: 1, y: 0 }}
             style={{ flex: 1 }}
           />
-        </Animated.View>
+        </AnimatedReanimated.View>
       </View>
       <View style={s.trackInfo}>
         <View
@@ -447,11 +484,8 @@ const SkeletonRow = () => {
             overflow: "hidden",
           }}
         >
-          <Animated.View
-            style={{
-              ...StyleSheet.absoluteFillObject,
-              transform: [{ translateX: tx }],
-            }}
+          <AnimatedReanimated.View
+            style={[StyleSheet.absoluteFill, tx]}
           >
             <LinearGradient
               colors={[C.shimmer1, C.shimmer2, C.shimmer3]}
@@ -459,7 +493,7 @@ const SkeletonRow = () => {
               end={{ x: 1, y: 0 }}
               style={{ flex: 1 }}
             />
-          </Animated.View>
+          </AnimatedReanimated.View>
         </View>
         <View
           style={{
@@ -470,11 +504,8 @@ const SkeletonRow = () => {
             overflow: "hidden",
           }}
         >
-          <Animated.View
-            style={{
-              ...StyleSheet.absoluteFillObject,
-              transform: [{ translateX: tx }],
-            }}
+          <AnimatedReanimated.View
+            style={[StyleSheet.absoluteFill, tx]}
           >
             <LinearGradient
               colors={[C.shimmer1, C.shimmer2, C.shimmer3]}
@@ -482,7 +513,7 @@ const SkeletonRow = () => {
               end={{ x: 1, y: 0 }}
               style={{ flex: 1 }}
             />
-          </Animated.View>
+          </AnimatedReanimated.View>
         </View>
       </View>
     </View>
@@ -505,21 +536,18 @@ const SpringPress = ({
   accessibilityHint?: string;
   accessibilityRole?: any;
 }) => {
-  const scale = useRef(new Animated.Value(1)).current;
-  const press = () =>
-    Animated.spring(scale, {
-      toValue: 0.965,
-      tension: 120,
-      friction: 8,
-      useNativeDriver: true,
-    }).start();
-  const release = () =>
-    Animated.spring(scale, {
-      toValue: 1,
-      tension: 80,
-      friction: 7,
-      useNativeDriver: true,
-    }).start();
+  const scale = useSharedValue(1);
+  const press = useCallback(() => {
+    scale.value = withSpring(0.965, { damping: 8, stiffness: 120 });
+  }, [scale]);
+  const release = useCallback(() => {
+    scale.value = withSpring(1, { damping: 7, stiffness: 80 });
+  }, [scale]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
   return (
     <TouchableOpacity
       activeOpacity={1}
@@ -530,9 +558,9 @@ const SpringPress = ({
       accessibilityHint={accessibilityHint}
       accessibilityRole={accessibilityRole || "button"}
     >
-      <Animated.View style={[style, { transform: [{ scale }] }]}>
+      <AnimatedReanimated.View style={[style, animatedStyle]}>
         {children}
-      </Animated.View>
+      </AnimatedReanimated.View>
     </TouchableOpacity>
   );
 };
@@ -552,88 +580,88 @@ const TrackRow = React.memo(
     onShowOptions: (t: any) => void;
     index: number;
   }) => {
-    const entrance = useEntrance(index * 45);
-    const trashScale = useRef(new Animated.Value(1)).current;
-    const pressTrash = () =>
-      Animated.sequence([
-        Animated.timing(trashScale, {
-          toValue: 0.78,
-          duration: 100,
-          useNativeDriver: true,
-        }),
-        Animated.spring(trashScale, {
-          toValue: 1,
-          tension: 180,
-          friction: 5,
-          useNativeDriver: true,
-        }),
-      ]).start(() => onRemove(track.id));
+    const trashScale = useSharedValue(1);
+    const pressTrash = useCallback(() => {
+      trashScale.value = 1;
+      trashScale.value = withSpring(0.78, { damping: 10, stiffness: 200 }, (finished) => {
+        if (finished) {
+          trashScale.value = withSpring(1, { damping: 10, stiffness: 150 });
+          runOnJS(onRemove)(track.id);
+        }
+      });
+    }, [trashScale, onRemove, track.id]);
 
     const isLiked = useLikesStore((s) => !!s.likedTrackIds[track.id]);
     const toggleLike = useLikesStore((s) => s.toggleLike);
 
+    const trashAnimatedStyle = useAnimatedStyle(() => ({
+      transform: [{ scale: trashScale.value }],
+    }));
+
     return (
-      <Animated.View style={entrance}>
-        <SpringPress
-          onPress={() => onPlay(track)}
-          style={[s.trackRow, track.isCurrent && { backgroundColor: 'rgba(255,255,255,0.05)' }]}
-          accessibilityLabel={`Play ${track.title} by ${track.artist}`}
-          accessibilityRole="button"
-        >
-          <Image
-            source={{ uri: track.art }}
-            style={s.trackArt}
-            contentFit="cover"
-            transition={250}
-          />
-          <View style={s.trackInfo}>
-            <Text style={[s.trackTitle, track.isCurrent && { color: C.primary }]} numberOfLines={1}>
-              {track.title}
-            </Text>
-            <Text style={[s.trackArtist, track.isCurrent && { color: C.primaryMid }]} numberOfLines={1}>
-              {track.artist}
-            </Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                toggleLike(track);
-              }}
-              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-              accessibilityLabel={isLiked ? "Unlike" : "Like"}
-              accessibilityRole="button"
-              style={{ padding: 10 }}
-            >
-              <Ionicons
-                name={isLiked ? "heart" : "heart-outline"}
-                size={20}
-                color={isLiked ? C.primary : C.muted}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => onShowOptions(track)}
-              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-              accessibilityLabel={`Options for ${track.title}`}
-              accessibilityRole="button"
-              style={{ padding: 10 }}
-            >
-              <Ionicons name="ellipsis-horizontal" size={20} color={C.muted} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={pressTrash}
-              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-              accessibilityLabel={`Remove ${track.title}`}
-              accessibilityRole="button"
-              style={{ padding: 10 }}
-            >
-              <Animated.View style={{ transform: [{ scale: trashScale }] }}>
-                <Ionicons name="trash-outline" size={20} color={C.muted} />
-              </Animated.View>
-            </TouchableOpacity>
-          </View>
-        </SpringPress>
-      </Animated.View>
+      <SpringPress
+        onPress={() => onPlay(track)}
+        style={[s.trackRow, track.isCurrent && { backgroundColor: 'rgba(255,255,255,0.05)' }]}
+        accessibilityLabel={`Play ${track.title} by ${track.artist}`}
+        accessibilityRole="button"
+      >
+        <AuraArtwork
+          source={resolveArtwork(track, 'card')}
+          entityName={track.title}
+          entityType="song"
+          style={s.trackArt}
+          contentFit="cover"
+          transition={250}
+          cachePolicy="memory-disk"
+          borderRadius={14}
+        />
+        <View style={s.trackInfo}>
+          <Text style={[s.trackTitle, track.isCurrent && { color: C.primary }]} numberOfLines={1}>
+            {track.title}
+          </Text>
+          <Text style={[s.trackArtist, track.isCurrent && { color: C.primaryMid }]} numberOfLines={1}>
+            {track.artist}
+          </Text>
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              toggleLike(track);
+            }}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+            accessibilityLabel={isLiked ? "Unlike" : "Like"}
+            accessibilityRole="button"
+            style={{ padding: 10 }}
+          >
+            <Ionicons
+              name={isLiked ? "heart" : "heart-outline"}
+              size={20}
+              color={isLiked ? C.primary : C.muted}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => onShowOptions(track)}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+            accessibilityLabel={`Options for ${track.title}`}
+            accessibilityRole="button"
+            style={{ padding: 10 }}
+          >
+            <Ionicons name="ellipsis-horizontal" size={20} color={C.muted} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={pressTrash}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+            accessibilityLabel={`Remove ${track.title}`}
+            accessibilityRole="button"
+            style={{ padding: 10 }}
+          >
+            <AnimatedReanimated.View style={trashAnimatedStyle}>
+              <Ionicons name="trash-outline" size={20} color={C.muted} />
+            </AnimatedReanimated.View>
+          </TouchableOpacity>
+        </View>
+      </SpringPress>
     );
   },
 );
@@ -649,10 +677,27 @@ const DownloadingRow = React.memo(
     onCancel: (id: string) => void;
     index: number;
   }) => {
-    const entrance = useEntrance(index * 45);
+    const taskTrackId = task.track.id;
+    // Non-reactively fetch initial progress from store to avoid full render on progress tick
+    const initialProgress = useRef(
+      useDownloadStore.getState().activeTasks[taskTrackId]?.progress || 0
+    ).current;
+
+    const progressShared = useSharedValue(initialProgress);
+
+    useEffect(() => {
+      const unsubscribe = useDownloadStore.subscribe((state) => {
+        const activeTask = state.activeTasks[taskTrackId];
+        if (activeTask) {
+          progressShared.value = activeTask.progress;
+        }
+      });
+      return unsubscribe;
+    }, [taskTrackId]);
+
     return (
-      <Animated.View style={[s.dlRow, entrance]}>
-        <Ring progress={task.progress} status={task.status} />
+      <View style={s.dlRow}>
+        <Ring progress={progressShared} status={task.status} />
         <View style={s.dlInfo}>
           <Text style={s.dlTitle} numberOfLines={1}>
             {task.track.title}
@@ -662,7 +707,7 @@ const DownloadingRow = React.memo(
           </Text>
         </View>
         <View style={{ alignItems: "flex-end" }}>
-          <Text style={s.pct}>{Math.round(task.progress * 100)}%</Text>
+          <ProgressText progress={progressShared} />
           <TouchableOpacity
             onPress={() => onCancel(task.track.id)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -672,7 +717,7 @@ const DownloadingRow = React.memo(
             <Text style={s.cancelBtn}>CANCEL</Text>
           </TouchableOpacity>
         </View>
-      </Animated.View>
+      </View>
     );
   },
 );
@@ -688,32 +733,33 @@ const AlbumRow = React.memo(
     onPress: () => void;
     index: number;
   }) => {
-    const entrance = useEntrance(index * 45);
     return (
-      <Animated.View style={entrance}>
-        <SpringPress
-          onPress={onPress}
-          style={s.trackRow}
-          accessibilityLabel={`${album.title}, ${album.tracks.length} tracks`}
-          accessibilityRole="button"
-        >
-          <Image
-            source={{ uri: album.art }}
-            style={s.trackArt}
-            contentFit="cover"
-            transition={250}
-          />
-          <View style={s.trackInfo}>
-            <Text style={s.trackTitle} numberOfLines={1}>
-              {album.title}
-            </Text>
-            <Text style={s.trackArtist} numberOfLines={1}>
-              {album.tracks.length} tracks
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={C.dim} />
-        </SpringPress>
-      </Animated.View>
+      <SpringPress
+        onPress={onPress}
+        style={s.trackRow}
+        accessibilityLabel={`${album.title}, ${album.tracks.length} tracks`}
+        accessibilityRole="button"
+      >
+        <AuraArtwork
+          source={resolveArtwork({ art: album.art, title: album.title }, 'card')}
+          entityName={album.title}
+          entityType="album"
+          style={s.trackArt}
+          contentFit="cover"
+          transition={250}
+          cachePolicy="memory-disk"
+          borderRadius={14}
+        />
+        <View style={s.trackInfo}>
+          <Text style={s.trackTitle} numberOfLines={1}>
+            {album.title}
+          </Text>
+          <Text style={s.trackArtist} numberOfLines={1}>
+            {album.tracks.length} tracks
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={C.dim} />
+      </SpringPress>
     );
   },
 );
@@ -745,7 +791,7 @@ const EmptyState = ({ message = "No downloads yet" }: { message?: string }) => {
     outputRange: [0, -8],
   });
   return (
-    <Animated.View
+    <AnimatedReanimated.View
       style={[{ padding: 48, alignItems: "center" }, entrance]}
       accessibilityLiveRegion="polite"
     >
@@ -769,7 +815,7 @@ const EmptyState = ({ message = "No downloads yet" }: { message?: string }) => {
       <Text style={{ color: C.muted, fontSize: 15, fontWeight: "500" }}>
         {message}
       </Text>
-    </Animated.View>
+    </AnimatedReanimated.View>
   );
 };
 
@@ -778,7 +824,7 @@ const StorageCard = ({ storage }: { storage: SInfo }) => {
   const entrance = useEntrance(60);
   const pct = Math.round((storage.usedGB / storage.totalGB) * 100);
   return (
-    <Animated.View style={entrance}>
+    <AnimatedReanimated.View style={entrance}>
       <Glass style={s.storageCard} r={28}>
         <View style={s.storageInner}>
           <View
@@ -843,7 +889,7 @@ const StorageCard = ({ storage }: { storage: SInfo }) => {
           <StorageBar used={storage.usedGB} total={storage.totalGB} />
         </View>
       </Glass>
-    </Animated.View>
+    </AnimatedReanimated.View>
   );
 };
 
@@ -1053,7 +1099,35 @@ export default function DownloadsScreen() {
   const [isSearchingAlbum, setIsSearchingAlbum] = useState(false);
 
   const downloadedTracks = useDownloadStore((s) => s.downloadedTracks);
-  const activeTasks = useDownloadStore((s) => s.activeTasks);
+  
+  // Custom selector with equality check to prevent re-renders on active tasks progress increments
+  const { useStoreWithEqualityFn } = require("zustand/traditional");
+  const downloading = useStoreWithEqualityFn(
+    useDownloadStore,
+    (s: any) =>
+      Object.values(s.activeTasks)
+        .filter((t: any) => s.downloadQueue.includes(t.track.id))
+        .map((t: any) => ({
+          track: {
+            id: t.track.id,
+            title: t.track.title,
+            artist: t.track.artist,
+            art: t.track.art,
+          },
+          status: t.status,
+        })),
+    (prev: any[], next: any[]) => {
+      if (prev.length !== next.length) return false;
+      return prev.every((item, i) => {
+        const nextItem = next[i];
+        return (
+          item.track.id === nextItem.track.id &&
+          item.status === nextItem.status
+        );
+      });
+    }
+  );
+
   const downloadQueue = useDownloadStore((s) => s.downloadQueue);
   const playlists = usePlaylistStore((s) => s.playlists);
 
@@ -1088,14 +1162,6 @@ export default function DownloadsScreen() {
     });
     return Object.values(map);
   }, [tracks]);
-
-  const downloading = useMemo(
-    () =>
-      Object.values(activeTasks).filter((t) =>
-        downloadQueue.includes(t.track.id),
-      ),
-    [activeTasks, downloadQueue],
-  );
 
   const downloadedPlaylists = useMemo(() => {
     return Object.values(playlists)
@@ -1294,10 +1360,11 @@ export default function DownloadsScreen() {
             ? `skel-${i}`
             : item.id || item.track?.id || `item-${i}`
         }
+        removeClippedSubviews={true}
         ListHeaderComponent={
           <View style={[s.content, { paddingTop: insets.top + 12 }]}>
             {/* Header */}
-            <Animated.View style={[s.header, headerEntrance]}>
+            <AnimatedReanimated.View style={[s.header, headerEntrance]}>
               <TouchableOpacity
                 style={s.backBtn}
                 onPress={() => router.back()}
@@ -1311,25 +1378,25 @@ export default function DownloadsScreen() {
                 Downloads
               </Text>
               <View style={{ width: 44 }} />
-            </Animated.View>
+            </AnimatedReanimated.View>
 
             {/* Storage card */}
             <StorageCard storage={storage} />
 
             {/* Category tabs */}
-            <Animated.View style={useEntrance(80)}>
+            <AnimatedReanimated.View style={useEntrance(80)}>
               <CategoryTabs
                 categories={tabs}
                 activeCategory={activeTab}
                 onCategoryChange={setActiveTab}
                 style={{ marginBottom: 20 }}
               />
-            </Animated.View>
+            </AnimatedReanimated.View>
 
             {activeTab === "Downloading" && <QueueSummaryCard />}
 
             {/* Section title + count */}
-            <Animated.View
+            <AnimatedReanimated.View
               style={[
                 {
                   flexDirection: "row",
@@ -1363,7 +1430,7 @@ export default function DownloadsScreen() {
                   </Text>
                 </View>
               )}
-            </Animated.View>
+            </AnimatedReanimated.View>
           </View>
         }
         ListEmptyComponent={

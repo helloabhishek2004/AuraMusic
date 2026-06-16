@@ -108,17 +108,9 @@ export function useSearch(initialQuery: string = '') {
       // 2. PARALLEL ENRICHMENT: Contextual Extraction
       const uniqueArtists = extractUniqueArtists(songsData);
       
-      // Update intermediate results with songs to reduce perceived delay
-      setResults(prev => ({
-        ...prev,
-        songs: songsData.slice(0, 15),
-        topResult: songsData[0],
-        isEmpty: false
-      }));
-
       setIsEnriching(true);
 
-      // Fetch artists and albums in parallel
+      // Fetch artists and albums in parallel with primary songs
       const [artistResults, albumResults] = await Promise.all([
         // Artists Enrichment
         Promise.all(uniqueArtists.slice(0, 5).map(async (name) => {
@@ -156,6 +148,7 @@ export function useSearch(initialQuery: string = '') {
         }
       });
 
+      // SINGLE COMMIT: Update all results at once to minimize render churn
       setResults({
         songs: songsData.slice(0, 15),
         artists: enrichedArtists.slice(0, 6),
@@ -178,13 +171,13 @@ export function useSearch(initialQuery: string = '') {
   }, []);
 
   useEffect(() => {
-    // 350ms debounce for typing responsiveness
+    // 150ms single debounce for optimized production latency
     const timer = setTimeout(() => {
       if (query.trim() !== lastQueryRef.current.trim()) {
         lastQueryRef.current = query;
         performSearch(query);
       }
-    }, 350);
+    }, 150);
 
     return () => {
       clearTimeout(timer);

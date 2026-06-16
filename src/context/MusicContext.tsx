@@ -6,8 +6,11 @@ import { playbackProgress } from "../features/player/services/playback-progress"
 
 export type Track = PlayerTrack;
 
-type PlaybackStateContextType = {
+type TrackContextType = {
   currentTrack: Track | null;
+};
+
+type PlaybackStateContextType = {
   isPlaying: boolean;
   isBuffering: boolean;
   isLoading: boolean;
@@ -41,10 +44,12 @@ type MusicActionsContextType = {
   preloadTrack: (track: Track) => Promise<string | null>;
 };
 
-export type MusicContextType = PlaybackStateContextType &
+export type MusicContextType = TrackContextType &
+  PlaybackStateContextType &
   MusicProgressContextType &
   MusicActionsContextType;
 
+const TrackContext = createContext<TrackContextType | undefined>(undefined);
 const PlaybackStateContext = createContext<PlaybackStateContextType | undefined>(undefined);
 const MusicProgressContext = createContext<MusicProgressContextType | undefined>(undefined);
 const MusicActionsContext = createContext<MusicActionsContextType | undefined>(undefined);
@@ -57,20 +62,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const repeatMode = usePlayerStore((s) => s.repeatMode);
   const isShuffle = usePlayerStore((s) => s.isShuffle);
 
-  const setTrackStore = usePlayerStore((s) => s.setTrack);
-  const setQueueStore = usePlayerStore((s) => s.setQueue);
-  const playStore = usePlayerStore((s) => s.play);
-  const pauseStore = usePlayerStore((s) => s.pause);
-  const nextStore = usePlayerStore((s) => s.next);
-  const previousStore = usePlayerStore((s) => s.previous);
-  const seekStore = usePlayerStore((s) => s.seek);
-  const playNextStore = usePlayerStore((s) => s.playNext);
-  const addToQueueStore = usePlayerStore((s) => s.addToQueue);
-  const setRepeatModeStore = usePlayerStore((s) => s.setRepeatMode);
-  const toggleShuffleStore = usePlayerStore((s) => s.toggleShuffle);
-  const setVolumeStore = usePlayerStore((s) => s.setVolume);
-  const preloadTrackStore = usePlayerStore((s) => s.preloadTrack);
-
   const memoizedTrack = useMemo(() => {
     if (!currentTrack) return null;
     return {
@@ -79,9 +70,13 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, [currentTrack]);
 
-  const playbackValue = useMemo<PlaybackStateContextType>(
+  const trackValue = useMemo<TrackContextType>(
+    () => ({ currentTrack: memoizedTrack }),
+    [memoizedTrack]
+  );
+
+  const playbackStateValue = useMemo<PlaybackStateContextType>(
     () => ({
-      currentTrack: memoizedTrack,
       isPlaying,
       isBuffering,
       isLoading: status === "loading",
@@ -89,7 +84,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       isShuffle,
       isPlayerReady: true,
     }),
-    [memoizedTrack, isPlaying, isBuffering, status, repeatMode, isShuffle],
+    [isPlaying, isBuffering, status, repeatMode, isShuffle],
   );
 
   const progressValue = useMemo<MusicProgressContextType>(
@@ -109,34 +104,29 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     else if (currentRepeatMode === "queue") nextMode = "track";
     else if (currentRepeatMode === "track") nextMode = "off";
 
-    setRepeatModeStore(nextMode);
-  }, [setRepeatModeStore]);
+    usePlayerStore.getState().setRepeatMode(nextMode);
+  }, []);
 
   const actionsValue = useMemo<MusicActionsContextType>(
-    () => {
-      if (typeof __DEV__ !== "undefined" && __DEV__) {
-        console.info("[MusicProvider] actionsValue recreated");
-      }
-      return {
-        play: async (track?: Track) => track ? setTrackStore(track) : playStore(),
-        pause: pauseStore,
-        next: nextStore,
-        prev: previousStore,
-        seek: async (p: number) => {
-          const duration = usePlayerStore.getState().duration;
-          await seekStore(p * duration);
-        },
-        setTrack: setTrackStore,
-        setQueue: setQueueStore,
-        playNext: playNextStore,
-        addToQueue: addToQueueStore,
-        toggleRepeat,
-        toggleShuffle: async () => { toggleShuffleStore(); },
-        setVolume: setVolumeStore,
-        preloadTrack: preloadTrackStore,
-      };
-    },
-    [setTrackStore, playStore, pauseStore, nextStore, previousStore, seekStore, setQueueStore, toggleRepeat, toggleShuffleStore, setVolumeStore, preloadTrackStore],
+    () => ({
+      play: async (track?: Track) => track ? usePlayerStore.getState().setTrack(track) : usePlayerStore.getState().play(),
+      pause: async () => usePlayerStore.getState().pause(),
+      next: async () => usePlayerStore.getState().next(),
+      prev: async (forcePrevious?: boolean) => usePlayerStore.getState().previous(forcePrevious),
+      seek: async (p: number) => {
+        const duration = usePlayerStore.getState().duration;
+        await usePlayerStore.getState().seek(p * duration);
+      },
+      setTrack: async (track: Track) => usePlayerStore.getState().setTrack(track),
+      setQueue: async (tracks: Track[], startIndex?: number, context?: QueueContext) => usePlayerStore.getState().setQueue(tracks, startIndex, context),
+      playNext: (track: Track) => usePlayerStore.getState().playNext(track),
+      addToQueue: (track: Track) => usePlayerStore.getState().addToQueue(track),
+      toggleRepeat,
+      toggleShuffle: async () => usePlayerStore.getState().toggleShuffle(),
+      setVolume: async (volume: number) => usePlayerStore.getState().setVolume(volume),
+      preloadTrack: async (track: Track) => usePlayerStore.getState().preloadTrack(track),
+    }),
+    [toggleRepeat],
   );
 
   const providerRenderCount = useRef(0);
@@ -148,13 +138,15 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   return (
-    <PlaybackStateContext.Provider value={playbackValue}>
-      <MusicProgressContext.Provider value={progressValue}>
-        <MusicActionsContext.Provider value={actionsValue}>
-          {children}
-        </MusicActionsContext.Provider>
-      </MusicProgressContext.Provider>
-    </PlaybackStateContext.Provider>
+    <TrackContext.Provider value={trackValue}>
+      <PlaybackStateContext.Provider value={playbackStateValue}>
+        <MusicProgressContext.Provider value={progressValue}>
+          <MusicActionsContext.Provider value={actionsValue}>
+            {children}
+          </MusicActionsContext.Provider>
+        </MusicProgressContext.Provider>
+      </PlaybackStateContext.Provider>
+    </TrackContext.Provider>
   );
 };
 
@@ -177,7 +169,9 @@ export function useMusicActions() {
 }
 
 export function useNowPlayingTrack() {
-  return usePlaybackState().currentTrack;
+  const context = useContext(TrackContext);
+  if (!context) throw new Error("useNowPlayingTrack must be used within MusicProvider");
+  return context.currentTrack;
 }
 
 export function useMusicControls() {
@@ -193,14 +187,22 @@ export function useMusicControls() {
       isShuffle: playback.isShuffle,
       isPlayerReady: playback.isPlayerReady,
     }),
-    [actions, playback.isPlayerReady, playback.isPlaying, playback.isBuffering, playback.isLoading, playback.isShuffle, playback.repeatMode],
+    [actions, playback],
   );
 }
 
 export function useMusic(): MusicContextType {
-  return {
-    ...usePlaybackState(),
-    ...useMusicProgress(),
-    ...useMusicActions(),
-  };
+  const track = useContext(TrackContext);
+  const playback = usePlaybackState();
+  const progress = useMusicProgress();
+  const actions = useMusicActions();
+  
+  if (!track) throw new Error("useMusic must be used within MusicProvider");
+
+  return useMemo(() => ({
+    ...track,
+    ...playback,
+    ...progress,
+    ...actions,
+  }), [track, playback, progress, actions]);
 }
