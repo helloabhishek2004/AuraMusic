@@ -46,6 +46,7 @@ import { playbackProgress } from '@/src/features/player/services/playback-progre
 import { getTrackArtwork, getArtworkUrl } from '@/src/features/player/utils/track-identity';
 import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
 import { AuraArtwork } from '@/src/components/ui/aura-artwork';
+import { Marquee } from '@/src/components/ui/marquee';
 import { MotionTiming, MotionSpring, MotionEasing } from '@/src/design/motion';
 
 const DEFAULT_ACCENT = '#BF5AF2';
@@ -234,8 +235,12 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
           <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.artRim]} />
         </Reanimated.View>
         <View style={styles.meta}>
-          <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.title} numberOfLines={1}>{track.title}</Text>
-          <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.artist} numberOfLines={1}>{formatArtistDisplay(track.artist)}</Text>
+          <Marquee style={{ width: '100%' }}>
+            <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.title} numberOfLines={1}>{track.title}</Text>
+          </Marquee>
+          <Marquee style={{ width: '100%', marginTop: 2 }}>
+            <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.artist} numberOfLines={1}>{formatArtistDisplay(track.artist)}</Text>
+          </Marquee>
         </View>
         <View style={styles.progressRail}>
           <View style={styles.progressTrack}>

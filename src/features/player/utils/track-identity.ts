@@ -66,30 +66,101 @@ const SIZE_MAP: Record<ArtworkSize, number> = {
 };
 
 /**
+ * Extracts a raw artwork URL from any track/entity object structure.
+ * Handles nested albums, trackSnapshots, thumbnail arrays, and various naming conventions.
+ */
+export function extractRawArtworkUrl(track: any): string {
+  if (!track) return "";
+
+  if (typeof track === 'string') {
+    const trimmed = track.trim();
+    if (trimmed && trimmed !== 'null' && trimmed !== 'undefined' && !trimmed.includes('placeholder')) {
+      return trimmed;
+    }
+    return "";
+  }
+
+  // 1. Direct property check
+  let url =
+    track.art ||
+    track.artwork ||
+    track.artworkUrl ||
+    track.thumbnail ||
+    track.thumbnailUrl ||
+    track.coverArt ||
+    track.albumArt ||
+    track.image ||
+    track.picture;
+
+  // Handle object source like { uri: "..." }
+  if (url && typeof url === 'object' && typeof url.uri === 'string') {
+    url = url.uri;
+  }
+
+  // 2. Nested album metadata
+  if (!url && track.album && typeof track.album === 'object') {
+    url =
+      track.album.thumbnail ||
+      track.album.thumbnailUrl ||
+      track.album.art ||
+      track.album.artwork ||
+      track.album.coverArt ||
+      track.album.image;
+    if (url && typeof url === 'object' && typeof url.uri === 'string') {
+      url = url.uri;
+    }
+  }
+
+  // 3. Nested trackSnapshot
+  if (!url && track.trackSnapshot) {
+    url = extractRawArtworkUrl(track.trackSnapshot);
+  }
+
+  // 4. Thumbnails array (e.g. YouTube API format)
+  if (!url && Array.isArray(track.thumbnails) && track.thumbnails.length > 0) {
+    const sorted = [...track.thumbnails].sort((a: any, b: any) => (b.width || 0) - (a.width || 0));
+    url = sorted[0]?.url;
+  }
+
+  // 5. Thumbnails inside trackSnapshot
+  if (!url && track.trackSnapshot && Array.isArray(track.trackSnapshot.thumbnails) && track.trackSnapshot.thumbnails.length > 0) {
+    const sorted = [...track.trackSnapshot.thumbnails].sort((a: any, b: any) => (b.width || 0) - (a.width || 0));
+    url = sorted[0]?.url;
+  }
+
+  if (typeof url !== 'string') return "";
+  url = url.trim();
+
+  if (!url || url === 'undefined' || url === 'null') return "";
+
+  // Protocol-relative URLs: //lh3.googleusercontent.com/... -> https://lh3.googleusercontent.com/...
+  if (url.startsWith('//')) {
+    url = `https:${url}`;
+  }
+
+  // Upgrade insecure http to https for known CDN domains
+  if (url.startsWith('http://') && (url.includes('googleusercontent.com') || url.includes('ggpht.com') || url.includes('ytimg.com'))) {
+    url = url.replace('http://', 'https://');
+  }
+
+  return url;
+}
+
+/**
  * Appends sizing parameters to YouTube/YTMusic image URLs to optimize texture memory.
  */
 export function getArtworkUrl(track: any, size: ArtworkSize = 'album'): string {
   if (!track) return "";
-  let url = track.art || track.artwork || track.artworkUrl || track.thumbnail || track.image || "";
+  let url = extractRawArtworkUrl(track);
   
   if (!url) return "";
 
   // YouTube / YTMusic sizing logic
-  if (url.includes('googleusercontent.com') || url.includes('ggpht.com')) {
+  if ((url.includes('googleusercontent.com') || url.includes('ggpht.com')) && !url.includes('?') && !url.includes('aida-public')) {
     const s = SIZE_MAP[size];
-    const originalUrl = url;
-    
     // Safely remove existing sizing parameters without destroying base64url hyphens
-    url = url.split('=')[0];
-    
-    const finalUrl = `${url}=w${s}-h${s}-l90-rj`;
-    
-    if (__DEV__) {
-      console.log("[ARTWORK INPUT]", originalUrl);
-      console.log("[ARTWORK OUTPUT]", finalUrl);
-    }
-    
-    return finalUrl;
+    const base = url.split('=')[0];
+    return `${base}=w${s}-h${s}-l90-rj`;
   }
 
   return url;
@@ -98,4 +169,5 @@ export function getArtworkUrl(track: any, size: ArtworkSize = 'album'): string {
 export function getTrackArtwork(track: any): string {
   return getArtworkUrl(track, 'album');
 }
+
 

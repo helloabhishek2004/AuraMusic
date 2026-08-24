@@ -24,6 +24,23 @@ export function useArtistEnrichment(artistName?: string) {
     }
 
     // 1. Check Cache First
+    try {
+      const { useAnalyticsStore } = require('../features/analytics/store/analytics.store');
+      const storeCached = useAnalyticsStore.getState().artistCache?.[artistName] || useAnalyticsStore.getState().artistProfileCache?.[artistName];
+      if (storeCached?.image && storeCached.id) {
+        const entity: SearchEntity = {
+          type: 'artist',
+          id: storeCached.id,
+          title: artistName,
+          artist: artistName,
+          art: storeCached.image,
+        };
+        artistCache[artistName] = entity;
+        setEnrichedArtist(entity);
+        return;
+      }
+    } catch (e) {}
+
     if (artistCache[artistName]) {
       setEnrichedArtist(artistCache[artistName]);
       return;
@@ -48,8 +65,17 @@ export function useArtistEnrichment(artistName?: string) {
         const result = await musicService.lookupArtistByName(artistName);
         
         if (result) {
-          // 4. Cache Result
+          // 4. Cache Result in memory and in analytics store
           artistCache[artistName] = result;
+          try {
+            const { useAnalyticsStore } = require('../features/analytics/store/analytics.store');
+            if (result.art && result.id) {
+              useAnalyticsStore.getState().cacheArtistDetails(artistName, {
+                id: result.id,
+                image: result.art,
+              });
+            }
+          } catch (e) {}
           setEnrichedArtist(result);
         } else {
           console.log(`[Artist Enrichment] No detailed metadata found for: ${artistName}`);

@@ -586,6 +586,53 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
       }
 
       case 'playlist': {
+        // 1. Made For You & Personal Models
+        if (seed.id === 'mix-made-for-you') {
+          if (seed.tracks && seed.tracks.length > 0) return seed.tracks;
+          const { useAnalyticsStore } = require('../../analytics/store/analytics.store');
+          const history = useAnalyticsStore.getState().history || [];
+          const topTracks = history.filter((h: any) => h.completionRatio >= 0.8 || !h.skipped).slice(0, 25);
+          if (topTracks.length > 0) {
+            return topTracks.map((h: any) => ({
+              id: h.id,
+              title: h.title,
+              artist: h.artist,
+              art: h.art || h.artwork || h.trackSnapshot?.art,
+              artwork: h.art || h.artwork || h.trackSnapshot?.art,
+              duration: (h.durationMs ? h.durationMs / 1000 : h.duration) || 240,
+              url: h.trackSnapshot?.url || '',
+              album: h.album || h.trackSnapshot?.album,
+              artistId: h.artistId,
+              albumId: h.albumId,
+              source: (h.trackSnapshot?.source || 'youtube') as any,
+            }));
+          }
+        }
+
+        if (seed.id === 'mix-on-repeat' || seed.id === 'mix-repeat-rewind') {
+          if (seed.tracks && seed.tracks.length > 0) return seed.tracks;
+        }
+
+        if (seed.id === 'mix-discover-weekly') {
+          if (seed.tracks && seed.tracks.length > 0) return seed.tracks;
+          try {
+            const { musicService } = require('../../../services/api/music');
+            const query = (seed.seedArtists && seed.seedArtists.length > 0) ? `${seed.seedArtists[0]} similar hits` : 'Indie Pop Chill Discovery';
+            const songs = await musicService.searchSongs(query);
+            if (songs && songs.length > 0) return applyDiversityFilter(songs, 25);
+          } catch (e) {}
+        }
+
+        if (seed.id === 'mix-deep-cuts') {
+          if (seed.tracks && seed.tracks.length > 0) return seed.tracks;
+          try {
+            const { musicService } = require('../../../services/api/music');
+            const query = (seed.seedArtists && seed.seedArtists.length > 0) ? `${seed.seedArtists[0]} album tracks` : 'Underrated Classic Album Tracks';
+            const songs = await musicService.searchSongs(query);
+            if (songs && songs.length > 0) return applyDiversityFilter(songs, 25);
+          } catch (e) {}
+        }
+
         // Daily Mix dynamic hydration
         if (seed.id.startsWith('daily-mix-')) {
           return hydrateDailyMix(seed);
@@ -593,6 +640,31 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
 
         // Time-based / Session picks hydration
         if (seed.id.startsWith('time-')) {
+          if (seed.id === 'time-night') {
+            try {
+              const { musicService } = require('../../../services/api/music');
+              const songs = await musicService.searchSongs('Late Night Chill Lo-Fi Beats Ambient');
+              if (songs && songs.length > 0) return applyDiversityFilter(songs, 25);
+            } catch (e) {}
+          } else if (seed.id === 'time-morning') {
+            try {
+              const { musicService } = require('../../../services/api/music');
+              const songs = await musicService.searchSongs('Morning Energy Acoustic Upbeat Melodies');
+              if (songs && songs.length > 0) return applyDiversityFilter(songs, 25);
+            } catch (e) {}
+          } else if (seed.id === 'time-chill') {
+            try {
+              const { musicService } = require('../../../services/api/music');
+              const songs = await musicService.searchSongs('Deep Focus Study Ambient Instrumental Flow');
+              if (songs && songs.length > 0) return applyDiversityFilter(songs, 25);
+            } catch (e) {}
+          } else if (seed.id === 'time-evening') {
+            try {
+              const { musicService } = require('../../../services/api/music');
+              const songs = await musicService.searchSongs('Evening Wind Down Relaxing Sunset Hits');
+              if (songs && songs.length > 0) return applyDiversityFilter(songs, 25);
+            } catch (e) {}
+          }
           return hydrateTimeBasedPicks(seed.id);
         }
 
@@ -605,6 +677,20 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
         }
         if (seed.id === 'mix-discovery-mix') {
           return hydrateCustomMix('discovery', seed.seedArtists || []);
+        }
+
+        // Because You Like dynamic hydration
+        if (seed.id.startsWith('byl-') || seed.id.startsWith('because-')) {
+          const artistName = (seed.seedArtists && seed.seedArtists[0]) || seed.title.replace(/^Because You Like /i, '').replace(/ Mix$/i, '');
+          try {
+            const { musicService } = require('../../../services/api/music');
+            const searchRes = await musicService.searchSongs(artistName);
+            if (searchRes && searchRes.length > 0) {
+              return applyDiversityFilter(searchRes, 25);
+            }
+          } catch (e) {}
+          const catTracks = catalogTracks.filter(t => t.artist.toLowerCase().includes(artistName.toLowerCase()));
+          if (catTracks.length > 0) return applyDiversityFilter(catTracks.map(t => ({ id: t.id, title: t.title, artist: t.artist, art: t.art, artwork: t.art, url: '', duration: t.durationSec || 240, dominantColors: t.dominantColors, artistId: t.artistId, albumId: t.albumId, source: 'local' as any })), 25);
         }
 
         // Personalized Trending Hydration
@@ -627,12 +713,35 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
           return applyDiversityFilter(songs || [], 25);
         }
 
-        return applyDiversityFilter(catalogTracks, 25);
+        if (seed.id === 'trending-synthwave') {
+          try {
+            const { musicService } = require('../../../services/api/music');
+            const songs = await musicService.searchSongs('Synthwave Retrowave Chill Electro');
+            if (songs && songs.length > 0) {
+              return applyDiversityFilter(songs, 25);
+            }
+          } catch (e) {}
+          return catalogTracks.map(t => ({ id: t.id, title: t.title, artist: t.artist, art: t.art, artwork: t.art, url: '', duration: t.durationSec || 240, dominantColors: t.dominantColors, artistId: t.artistId, albumId: t.albumId, source: 'local' as any }));
+        }
+
+        // Generic fallback for any other named seed
+        if (seed.title) {
+          try {
+            const { musicService } = require('../../../services/api/music');
+            const query = (seed.seedArtists && seed.seedArtists.length > 0) ? seed.seedArtists.join(' ') : seed.title;
+            const songs = await musicService.searchSongs(query);
+            if (songs && songs.length > 0) {
+              return applyDiversityFilter(songs, 25);
+            }
+          } catch (e) {}
+        }
+
+        return catalogTracks.map(t => ({ id: t.id, title: t.title, artist: t.artist, art: t.art, artwork: t.art, url: '', duration: t.durationSec || 240, dominantColors: t.dominantColors, artistId: t.artistId, albumId: t.albumId, source: 'local' as any }));
       }
     }
   } catch (error) {
     console.error('[RecommendationHydrator] Critical error during seed hydration:', error);
   }
 
-  return applyDiversityFilter(catalogTracks, 25);
+  return catalogTracks.map(t => ({ id: t.id, title: t.title, artist: t.artist, art: t.art, artwork: t.art, url: '', duration: t.durationSec || 240, dominantColors: t.dominantColors, artistId: t.artistId, albumId: t.albumId, source: 'local' as any }));
 }

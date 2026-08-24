@@ -29,6 +29,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { LiquidGlass } from '@/src/components/ui/liquid-glass';
+import { GlassSurface } from '@/src/components/ui/GlassSurface';
 import { PressScale } from '@/src/components/ui/press-scale';
 import { glass, motion, palette, radius } from '@/src/design/tokens';
 import { useReducedMotionPreference } from '@/src/hooks/use-accessibility-preferences';
@@ -367,7 +368,14 @@ function FloatingNav({ state, descriptors, navigation }: any) {
 
   // ── Tab change animations ─────────────────────────────────────────────────
 
+  const isFirstMount = useRef(true);
+
   useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
     const nextIdx = state.index;
     const prevIndex = prevIdx.current;
     prevIdx.current = nextIdx;
@@ -474,98 +482,15 @@ function FloatingNav({ state, descriptors, navigation }: any) {
         />
       </Animated.View>
 
-      {/* ── Glass bar ─────────────────────────────────────────────────────────── */}
-      <View style={[s.bar, { width: NAV_WIDTH }]}>
-
-        {/* Backdrop blur */}
-        {Platform.OS === 'ios' ? (
-          <BlurView
-            intensity={80}
-            tint="dark"
-            style={[StyleSheet.absoluteFill, { borderRadius: BAR_HEIGHT / 2, overflow: 'hidden' }]}
-          />
-        ) : (
-          <View 
-            style={[StyleSheet.absoluteFill, { 
-              borderRadius: BAR_HEIGHT / 2, 
-              backgroundColor: 'rgba(15, 15, 20, 0.94)',
-              overflow: 'hidden' 
-            }]} 
-          />
-        )}
-
-        {/* Dark charcoal base — the key fix for the screenshot colours */}
-        <View
-          pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              borderRadius: BAR_HEIGHT / 2,
-              backgroundColor: C.barBase,
-            },
-          ]}
-        />
-
-        {/* Top highlight (illumination, top third only) */}
-        <LinearGradient
-          colors={[C.barHighTop, C.barHighMid, C.barHighBot]}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 0.5 }}
-          style={[StyleSheet.absoluteFill, { borderRadius: BAR_HEIGHT / 2 }]}
-          pointerEvents="none"
-        />
-
-        {/* Refractive tint (very subtle purple cast, keeps it dark) */}
-        <LinearGradient
-          colors={[C.barRefr0, C.barRefr1]}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={[StyleSheet.absoluteFill, { borderRadius: BAR_HEIGHT / 2 }]}
-          pointerEvents="none"
-        />
-
-        {/*
-          ── Border fix: no uniform borderColor (which creates the left-line).
-          Instead use a top-only gradient overlay that fades to transparent
-          on sides and bottom — eliminates the left-edge artefact entirely.
-        */}
-        {/* Top border edge: bright horizontal line */}
-        <View
-          pointerEvents="none"
-          style={[
-            s.borderTopLine,
-            { borderRadius: BAR_HEIGHT / 2 },
-          ]}
-        >
-          <LinearGradient
-            colors={[
-              'rgba(255,255,255,0.00)',
-              'rgba(255,255,255,0.28)',
-              'rgba(255,255,255,0.00)',
-            ]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={StyleSheet.absoluteFill}
-          />
-        </View>
-
-        {/* Full perimeter border — transparent sides, dim to avoid left-line */}
-        <View
-          pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFillObject,
-            {
-              borderRadius: BAR_HEIGHT / 2,
-              borderWidth: 0.6,
-              borderTopColor: 'rgba(255,255,255,0.22)',
-              borderLeftColor: 'rgba(255,255,255,0.06)',   // near-invisible left
-              borderRightColor: 'rgba(255,255,255,0.06)',  // near-invisible right
-              borderBottomColor: 'rgba(255,255,255,0.04)',
-              backgroundColor: 'transparent',
-            },
-          ]}
-        />
-
+      {/* ── GlassSurface Navigation Bar Container ────────────────────────── */}
+      <GlassSurface
+        width={NAV_WIDTH}
+        height={BAR_HEIGHT}
+        borderRadius={BAR_HEIGHT / 2}
+        opacity={0.88}
+        blur={65}
+        style={s.bar}
+      >
         {/* ── Animated pill ─────────────────────────────────────────────────── */}
         <Animated.View
           pointerEvents="none"
@@ -636,7 +561,7 @@ function FloatingNav({ state, descriptors, navigation }: any) {
             );
           })}
         </View>
-      </View>
+      </GlassSurface>
     </View>
   );
 }

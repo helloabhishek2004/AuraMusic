@@ -84,10 +84,14 @@ export const catalogTracks: CatalogTrack[] = [
 ];
 
 export const catalogArtists: CatalogArtist[] = [
-  { id: 'elara', name: 'Elara Vance', followers: '12.4M', image: 'https://picsum.photos/seed/elara/640' },
-  { id: '1', name: 'Solstice', followers: '8.2M', image: 'https://picsum.photos/seed/solstice/640' },
-  { id: '2', name: 'Luna Ray', followers: '5.4M', image: 'https://picsum.photos/seed/lunaray/640' },
-  { id: '7', name: 'The Voyagers', followers: '850K', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=640' },
+  { id: 'elara', name: 'Elara Vance', followers: '12.4M', image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=480' },
+  { id: '1', name: 'Solstice', followers: '8.2M', image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=480' },
+  { id: '2', name: 'Luna Ray', followers: '5.4M', image: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=480' },
+  { id: '7', name: 'The Voyagers', followers: '850K', image: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&q=80&w=480' },
+  { id: 'lumina', name: 'Lumina Synthetics', followers: '1.2M', image: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=480' },
+  { id: 'synthwave', name: 'Synthwave Collective', followers: '980K', image: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&q=80&w=480' },
+  { id: 'cosmic', name: 'Cosmic Echo', followers: '740K', image: 'https://images.unsplash.com/photo-1463453091185-61582044d556?auto=format&fit=crop&q=80&w=480' },
+  { id: 'kavinsky', name: 'Kavinsky', followers: '3.1M', image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=480' },
 ];
 
 export const catalogAlbums: CatalogAlbum[] = [

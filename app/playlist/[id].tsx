@@ -1063,34 +1063,66 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
     if (!seed) return;
     let active = true;
     
-    // If the seed has embedded tracks from the recommendation engine
+    // 1. If the seed already has concrete tracks, display immediately
     if (seed.tracks && seed.tracks.length > 0) {
-        setIsSeedLoading(true);
-        setSeedTracks(seed.tracks);
-        setIsSeedLoading(false);
-    } else if (seed.trackIds && seed.trackIds.length > 0) {
-        setIsSeedLoading(true);
-        // Fallback for older seeds without full track objects
-        const fakeTracks = seed.trackIds.map((id: string) => ({
-            id,
-            title: "Loading...",
-            artist: "...",
-            artwork: "https://picsum.photos/200",
-            duration: 0,
-            url: ""
-        }));
-        setSeedTracks(fakeTracks);
-        setIsSeedLoading(false);
+      setSeedTracks(seed.tracks);
+      setIsSeedLoading(false);
+      return;
     }
+
+    // 2. Otherwise dynamically hydrate with matching songs
+    setIsSeedLoading(true);
+    (async () => {
+      try {
+        const { hydrateRecommendationSeed } = await import('@/src/features/recommendations/services/recommendation-hydrator');
+        const hydrated = await hydrateRecommendationSeed(seed);
+        if (active && hydrated && hydrated.length > 0) {
+          setSeedTracks(hydrated);
+          // Persist hydrated tracks in recommendation store so next open is instant
+          try {
+            const { useRecommendationsStore } = await import('@/src/features/recommendations/store/recommendations.store');
+            const state = useRecommendationsStore.getState();
+            const updateSeedInList = (list: any[]) => (list || []).map(item => item.id === seed.id ? { ...item, tracks: hydrated, trackIds: hydrated.map(t => t.id) } : item);
+            useRecommendationsStore.setState({
+              dailyMixes: updateSeedInList(state.dailyMixes),
+              madeForYou: updateSeedInList(state.madeForYou),
+              becauseYouLike: updateSeedInList(state.becauseYouLike),
+              trendingSeeds: updateSeedInList(state.trendingSeeds),
+            });
+          } catch (e) {}
+        }
+      } catch (err) {
+        console.error('[PlaylistView] Error hydrating seed:', err);
+      } finally {
+        if (active) setIsSeedLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, [seed?.id, seed?.trackIds, seed?.tracks]);
 
   const playlist = useMemo(() => {
     if (isLikedPlaylist) return { id: "liked-songs", name: "Liked Songs", description: "Your favorite tracks.", trackIds: [], gradientColors: [COLORS.primary, "#7B2FBE"] as [string, string], mood: "LIKES" };
     if (isSeedPlaylist && seed) {
-      return { id: playlistId, name: seed.title || "Mix", description: seed.type === 'playlist' ? (seed as any).reason : `Vibe playlist from ${seed.title}.`, trackIds: seed.trackIds || [], gradientColors: ['#9B38DA', '#46f5e0'] as [string, string], mood: seed.type?.toUpperCase() || "MIX", coverArt: seed.image, isSeed: true, reason: (seed as any).reason };
+      const firstArt = seedTracks[0]?.art || (seedTracks[0] as any)?.artwork || (seed.tracks && (seed.tracks[0]?.art || (seed.tracks[0] as any)?.artwork));
+      const coverArt = seed.image || firstArt;
+      return { 
+        id: playlistId, 
+        name: seed.title || "Mix", 
+        description: seed.type === 'playlist' ? (seed as any).reason : `Vibe playlist from ${seed.title}.`, 
+        trackIds: seed.trackIds || seedTracks.map(t => t.id), 
+        gradientColors: ['#9B38DA', '#46f5e0'] as [string, string], 
+        mood: seed.type?.toUpperCase() || "MIX", 
+        coverArt, 
+        isSeed: true, 
+        reason: (seed as any).reason,
+        seedArtists: seed.seedArtists || [],
+      };
     }
     return storePlaylist;
-  }, [isLikedPlaylist, isSeedPlaylist, storePlaylist, seed?.id, seed?.trackIds, playlistId]);
+  }, [isLikedPlaylist, isSeedPlaylist, storePlaylist, seed, seedTracks, playlistId]);
 
   const downloadedTracks = useDownloadStore((s) => s.downloadedTracks);
   const activeTasks = useDownloadStore((s) => s.activeTasks);
@@ -1233,10 +1265,30 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
       {isLikedPlaylist ? (
         <AnimatedFlashList data={resolvedTracks} keyExtractor={(t: any, i: number) => `${t.id}-${i}`} renderItem={renderFlashItem} estimatedItemSize={72} extraData={currentTrack?.id} onScroll={scrollHandler} {...ScrollPhysics.STANDARD} contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: bottomPadding, paddingHorizontal: 20 }}
           ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={() => {}} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} showActionSheet={showActionSheet} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
+          ListEmptyComponent={
+            isSeedLoading ? (
+              <View style={{ paddingVertical: 48, alignItems: 'center', justifyContent: 'center' }}>
+                <ActivityIndicator size="large" color={gradientColors[0]} />
+                <Text style={{ color: 'rgba(255,255,255,0.7)', marginTop: 14, fontSize: 14, fontWeight: '600' }}>
+                  Curating tracks for your mix...
+                </Text>
+              </View>
+            ) : null
+          }
         />
       ) : (
         <AnimatedDraggableFlatList data={resolvedTracks} onDragEnd={({ from, to }) => { reorderTracks(playlistId, from, to); if (activeContextId === playlistId) usePlayerStore.getState().reorderQueue(from, to); }} keyExtractor={(t, i) => `${t.id}-${i}`} renderItem={renderDraggableItem} extraData={currentTrack?.id} onScroll={scrollHandler} {...ScrollPhysics.STANDARD} contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: bottomPadding, paddingHorizontal: 20 }}
           ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={() => {}} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} showActionSheet={showActionSheet} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
+          ListEmptyComponent={
+            isSeedLoading ? (
+              <View style={{ paddingVertical: 48, alignItems: 'center', justifyContent: 'center' }}>
+                <ActivityIndicator size="large" color={gradientColors[0]} />
+                <Text style={{ color: 'rgba(255,255,255,0.7)', marginTop: 14, fontSize: 14, fontWeight: '600' }}>
+                  Curating tracks for your mix...
+                </Text>
+              </View>
+            ) : null
+          }
         />
       )}
 

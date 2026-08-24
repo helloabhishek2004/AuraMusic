@@ -17,10 +17,11 @@ class DeviceStateService {
       else if (state.type === 'wifi') type = 'wifi';
       else if (state.type === 'cellular') type = 'cellular';
       
-      useDeviceStateStore.getState().setConnection(type);
-      
-      if (typeof __DEV__ !== "undefined" && __DEV__) {
-        console.info(`[DeviceState] Connection changed: ${type}`);
+      if (prevType !== type) {
+        useDeviceStateStore.getState().setConnection(type);
+        if (typeof __DEV__ !== "undefined" && __DEV__) {
+          console.info(`[DeviceState] Connection changed: ${type}`);
+        }
       }
 
       if (prevType === 'none' && type !== 'none') {

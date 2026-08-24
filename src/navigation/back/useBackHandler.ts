@@ -51,10 +51,5 @@ export function useBackHandler({ id, enabled, priority, onBack }: UseBackHandler
   // Update enabled and priority when they change
   useEffect(() => {
     ctx.update(id, { enabled, priority });
-  }, [id, enabled, priority]);
-
-  // Update the onBack callback ref in the registration
-  useEffect(() => {
-    ctx.update(id, { onBack: () => onBackRef.current() });
-  }, [id, onBack]);
+  }, [id, enabled, priority, ctx]);
 }

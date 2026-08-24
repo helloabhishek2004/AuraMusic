@@ -10,7 +10,11 @@ import {
   generateRediscover,
   generateRecentlyLoved,
   generateMadeForYou,
-  generateTrendingForYou,
+  generateOnRepeat,
+  generateRepeatRewind,
+  generateDiscoverWeekly,
+  generateDeepCuts,
+  generateContextualTimeMix,
   buildTasteClusters,
   generateHiddenGems,
   generateForgottenFavorites
@@ -108,6 +112,12 @@ export interface TrendingSeed {
 }
 
 export interface RecommendationsState {
+  featuredHeroMix: RecommendationSeed | null;
+  onRepeat: RecommendationSeed | null;
+  repeatRewind: RecommendationSeed | null;
+  discoverWeekly: RecommendationSeed | null;
+  deepCuts: RecommendationSeed | null;
+  timeMix: RecommendationSeed | null;
   dailyMixes: RecommendationSeed[];
   madeForYou: RecommendationSeed[];
   rediscover: RecommendationSeed[];
@@ -158,12 +168,71 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
   persist(
     (set, get) => ({
       // State
-      dailyMixes: [],
+      featuredHeroMix: null,
+      onRepeat: null,
+      repeatRewind: null,
+      discoverWeekly: null,
+      deepCuts: null,
+      timeMix: null,
+      dailyMixes: [
+        {
+          type: 'playlist',
+          id: 'daily-mix-1',
+          title: 'Daily Mix 1',
+          image: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?auto=format&fit=crop&q=80&w=480',
+          score: 5.0,
+          reason: 'Atmospheric electronic & melodic beats.',
+          confidence: 100
+        },
+        {
+          type: 'playlist',
+          id: 'daily-mix-2',
+          title: 'Daily Mix 2',
+          image: 'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?auto=format&fit=crop&q=80&w=480',
+          score: 4.8,
+          reason: 'Smooth lo-fi and ambient melodies.',
+          confidence: 95
+        },
+        {
+          type: 'playlist',
+          id: 'daily-mix-3',
+          title: 'Daily Mix 3',
+          image: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&q=80&w=480',
+          score: 4.6,
+          reason: 'High energy synthwave anthems.',
+          confidence: 90
+        }
+      ],
       madeForYou: [],
       rediscover: [],
       becauseYouLike: [],
       recentlyLoved: [],
-      trendingSeeds: [],
+      trendingSeeds: [
+        {
+          type: 'playlist',
+          id: 'trending-global',
+          title: 'Global Top Hits',
+          image: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&q=80&w=480',
+          source: 'global',
+          fetchedAt: Date.now(),
+        },
+        {
+          type: 'playlist',
+          id: 'trending-india',
+          title: 'Trending in India',
+          image: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&q=80&w=480',
+          source: 'india',
+          fetchedAt: Date.now(),
+        },
+        {
+          type: 'playlist',
+          id: 'trending-synthwave',
+          title: 'Synthwave & Chill',
+          image: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?auto=format&fit=crop&q=80&w=480',
+          source: 'global',
+          fetchedAt: Date.now(),
+        }
+      ],
       trendingForYou: null,
       topSongs: [],
       topArtists: [],
@@ -185,7 +254,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
       lastRecommendationBuild: null,
       analyticsVersion: 0,
       
-      isHydrated: false,
+      isHydrated: true,
 
       // Actions
       generateRecommendations: async () => {
@@ -313,10 +382,9 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           const globalArtistPool = new Set<string>();
 
           if (historyLength === 0) {
-            // Tier 1: Cold Start fallback - clean onboarding, no fake placeholder seeds
-            console.log('[CurationStore] Tier 1 Curation: Cold-Start Fallbacks active. Hiding all personalized sections.');
-            dailyMixes = [];
-            trendingForYou = null;
+            // Tier 1: Cold Start fallback - populate starter editorial mixes with rich cover art
+            dailyMixes = fallbackDailyMixes;
+            trendingForYou = fallbackTrendingForYou;
             madeForYou = [];
             rediscover = [];
             becauseYouLike = [];
@@ -432,6 +500,36 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
                 return true;
               });
 
+              // Generate 7 Specialized Recommendation Models
+              const madeForYouSeed = generateMadeForYou(trackAffinities, history, artistAffinities, artistCache);
+              const onRepeatSeed = generateOnRepeat(history, trackAffinities);
+              const repeatRewindSeed = generateRepeatRewind(history, trackAffinities);
+              const discoverWeeklySeed = generateDiscoverWeekly(history, artistAffinities);
+              const deepCutsSeed = generateDeepCuts(history, artistAffinities, artistCache);
+              const timeMixSeed = generateContextualTimeMix(history, analytics.activeHoursMap);
+
+              madeForYou = [
+                madeForYouSeed,
+                ...(onRepeatSeed ? [onRepeatSeed] : []),
+                ...(repeatRewindSeed ? [repeatRewindSeed] : []),
+                discoverWeeklySeed,
+                deepCutsSeed,
+                timeMixSeed,
+              ];
+
+              // Determine Featured Hero Mix based on context and listening intensity
+              const hour = new Date().getHours();
+              let heroMixCandidate: RecommendationSeed = timeMixSeed;
+              if (hour >= 22 || hour < 4) {
+                heroMixCandidate = timeMixSeed;
+              } else if (onRepeatSeed && onRepeatSeed.tracks && onRepeatSeed.tracks.length > 0) {
+                heroMixCandidate = onRepeatSeed;
+              } else if (madeForYouSeed && madeForYouSeed.tracks && madeForYouSeed.tracks.length > 0) {
+                heroMixCandidate = madeForYouSeed;
+              } else if (personalDaily.length > 0) {
+                heroMixCandidate = personalDaily[0];
+              }
+
               // Track Deduplication Loops protection
               const rawRecentlyLoved = generateRecentlyLoved(history, trackAffinities);
               recentlyLoved = rawRecentlyLoved.filter(s => {
@@ -442,9 +540,6 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
 
               const rawRediscover = generateRediscover(history);
               rediscover = rawRediscover.filter(s => !globalTrackPool.has(s.id));
-
-              madeForYou = generateMadeForYou(artistAffinities, history, artistCache, listeningDNA.sessionProfile);
-              trendingForYou = generateTrendingForYou(listeningDNA.tasteConfidence, listeningDNA.primarySession);
             }
 
             // Generate Hidden Gems & Forgotten Favorites
@@ -477,24 +572,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             }
           ];
 
-          // Confidence Range Filtering: hide any seeds below 50
-          const filterConfidence = (s: RecommendationSeed) => s.confidence === undefined || s.confidence >= 50;
-          dailyMixes = dailyMixes.filter(filterConfidence);
-          becauseYouLike = becauseYouLike.filter(filterConfidence);
-          rediscover = rediscover.filter(filterConfidence);
-          recentlyLoved = recentlyLoved.filter(filterConfidence);
-          madeForYou = madeForYou.filter(filterConfidence);
-          topSongs = topSongs.filter(filterConfidence);
-          topArtists = topArtists.filter(filterConfidence);
-          hiddenGems = hiddenGems.filter(filterConfidence);
-          forgottenFavorites = forgottenFavorites.filter(filterConfidence);
-          
-          if (trendingForYou && trendingForYou.confidence !== undefined && trendingForYou.confidence < 50) {
-            trendingForYou = null;
-          }
-
-          // Dynamic Artwork Resolution Priority (Rule 1 & Rule 4)
-          // Softened: resolveArtwork will provide deterministic fallbacks instead of hiding seeds
+          // Dynamic Artwork Resolution Priority
           const resolveListArtworks = async (list: RecommendationSeed[]) => {
             const result: RecommendationSeed[] = [];
             for (const seed of list) {
@@ -517,26 +595,22 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           hiddenGems = await resolveListArtworks(hiddenGems);
           forgottenFavorites = await resolveListArtworks(forgottenFavorites);
 
-          // Resolve Trending For You artwork from top ranked track
-          if (trendingForYou) {
-            let trendingArtwork = null;
-            try {
-              const { musicService } = require('../../../services/api/music');
-              const charts = await musicService.getCharts();
-              const songs = charts.songs?.length > 0 ? charts.songs : charts.trending;
-              if (songs && songs[0] && songs[0].art && !songs[0].art.includes('placeholder')) {
-                trendingArtwork = songs[0].art;
-              }
-            } catch (e) {
-              console.warn('[RecommendationsStore] Failed to fetch charts for trending artwork:', e);
-            }
+          // Extract individual model seeds from madeForYou
+          const onRepeatSeed = madeForYou.find(s => s.id === 'mix-on-repeat') || null;
+          const repeatRewindSeed = madeForYou.find(s => s.id === 'mix-repeat-rewind') || null;
+          const discoverWeeklySeed = madeForYou.find(s => s.id === 'mix-discover-weekly') || null;
+          const deepCutsSeed = madeForYou.find(s => s.id === 'mix-deep-cuts') || null;
+          const timeMixSeed = madeForYou.find(s => s.id.startsWith('time-')) || null;
 
-            if (trendingArtwork) {
-              trendingForYou.image = trendingArtwork;
-            } else {
-              // FALLBACK: Don't hide, use generated
-              trendingForYou.image = resolveArtwork(trendingForYou, 'album');
-            }
+          // Resolve Hero Mix
+          let heroMix = timeMixSeed || (madeForYou.length > 0 ? madeForYou[0] : (dailyMixes.length > 0 ? dailyMixes[0] : null));
+          const currentHour = new Date().getHours();
+          if (currentHour >= 22 || currentHour < 4) {
+            heroMix = timeMixSeed || heroMix;
+          } else if (onRepeatSeed && onRepeatSeed.tracks && onRepeatSeed.tracks.length > 0) {
+            heroMix = onRepeatSeed;
+          } else if (madeForYou[0] && madeForYou[0].tracks && madeForYou[0].tracks.length > 0) {
+            heroMix = madeForYou[0];
           }
 
           // Fatigue Filter: Filter out fatigued seeds from sections
@@ -547,6 +621,12 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           };
 
           set((state) => ({
+            featuredHeroMix: heroMix,
+            onRepeat: onRepeatSeed,
+            repeatRewind: repeatRewindSeed,
+            discoverWeekly: discoverWeeklySeed,
+            deepCuts: deepCutsSeed,
+            timeMix: timeMixSeed,
             dailyMixes: dailyMixes.filter(filterFatigue),
             madeForYou: madeForYou.filter(filterFatigue),
             becauseYouLike: becauseYouLike.filter(filterFatigue),
@@ -563,7 +643,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             tasteSnapshots: updatedSnapshots,
             tasteDriftLevel,
             tasteDriftDetected,
-            listeningEventsCountSinceBuild: 0, // Reset counter
+            listeningEventsCountSinceBuild: 0,
             generatedAt: Date.now(),
             lastRecommendationBuild: Date.now(),
             analyticsVersion: analyticsVersion,
@@ -575,6 +655,12 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
 
       resetRecommendations: () => {
         set({
+          featuredHeroMix: null,
+          onRepeat: null,
+          repeatRewind: null,
+          discoverWeekly: null,
+          deepCuts: null,
+          timeMix: null,
           dailyMixes: [],
           madeForYou: [],
           rediscover: [],

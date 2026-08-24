@@ -42,7 +42,7 @@ import AnimatedReanimated, {
 } from 'react-native-reanimated';
 
 import { palette as P } from '@/src/design/tokens';
-import { useMusic, useNowPlayingTrack } from '@/src/context/MusicContext';
+import { useMusic, useNowPlayingTrack, useMusicActions } from '@/src/context/MusicContext';
 import { usePlayerStore } from '@/src/features/player/store/player.store';
 import { useAnalyticsStore, getContinueListeningCandidates, getRecentlyPlayedCandidates } from '@/src/features/analytics/store/analytics.store';
 import { useRecommendationsStore } from '@/src/features/recommendations/store/recommendations.store';
@@ -59,12 +59,19 @@ import { DownloadButton } from '@/src/components/ui/download-button';
 import { AuraArtwork } from '@/src/components/ui/aura-artwork';
 import { getCanonicalTrackId, getArtworkUrl } from '@/src/features/player/utils/track-identity';
 import { resolveArtwork, getDeterministicGradient } from '@/src/features/player/utils/artwork-resolver';
+import { resumeTrackFromHistory } from '@/src/features/player/utils/playback-resume';
+import { catalogTracks, catalogAlbums, catalogArtists, getArtistIdForName } from '@/src/data/music-catalog';
+import { useArtistEnrichment } from '@/src/hooks/use-artist-enrichment';
+import { useAlbumEnrichment } from '@/src/hooks/use-album-enrichment';
+
+
 
 import { MotionTiming, MotionSpring, MotionEasing } from '@/src/design/motion';
 import { ScrollPhysics } from '@/src/design/scroll-physics';
 
 import { PlayerTrack } from '@/src/features/player/types/player';
 
+const EMPTY_ARRAY: any[] = [];
 const { width: SW } = Dimensions.get('window');
 const PAD = 20;
 
@@ -242,51 +249,111 @@ const TrackCard = React.memo(({ track, onPress, onArtistPress, variant = 'compac
   );
 });
 
-// ── BENTO CARD (LARGE FEATURED) ────────────────────────────────────────────
-const BentoCard = React.memo(({
-  image,
+// ── IOS FEATURED MIX HERO CARD (APPLE MUSIC STYLE) ────────────────────────
+interface IOSFeaturedMixCardProps {
+  item: any;
+  tag: string;
+  title: string;
+  subtitle: string;
+  image: string;
+  onPress: () => void;
+  onQuickPlay?: () => void;
+  style?: any;
+}
+
+const IOSFeaturedMixCard = React.memo(({
+  item,
+  tag,
   title,
   subtitle,
-  tag,
+  image,
   onPress,
+  onQuickPlay,
   style
-}: any) => {
+}: IOSFeaturedMixCardProps) => {
+  const resolvedArt = resolveArtwork({ art: image, title }, 'album');
+
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.8}
-      style={[s.bentoCard, style]}
-    >
-      <LiquidGlass borderRadius={28} intensity={60} gradient style={s.bentoCardGlass}>
-        <View style={s.bentoCardImageContainer}>
-          <AuraArtwork 
-            source={resolveArtwork({ art: image, title }, 'album')} 
+    <View style={[s.iosHeroContainer, style]}>
+      {/* iOS Editorial Eyebrow & Header */}
+      <View style={s.iosHeroHeader}>
+        <Text style={s.iosHeroTag}>{tag}</Text>
+        <Text style={s.iosHeroTitle} numberOfLines={1}>{title}</Text>
+        <Text style={s.iosHeroSubtitle} numberOfLines={2}>{subtitle}</Text>
+      </View>
+
+      {/* iOS Stage Artwork Card */}
+      <PressScale onPress={onPress} scaleTo={0.97} style={s.iosHeroCardTouch}>
+        <View style={s.iosHeroCardWrapper}>
+          {/* Main Visual Artwork with Squircle Radius & Drop Shadow */}
+          <AuraArtwork
+            source={resolvedArt}
             entityName={title}
             entityType="playlist"
-            style={[s.bentoCardImage, { borderRadius: 28 }]} 
-            contentFit="cover" 
-            transition={MotionTiming.MEDIUM} 
+            style={s.iosHeroArtwork}
+            contentFit="cover"
+            transition={MotionTiming.MEDIUM}
             cachePolicy="memory-disk"
           />
+
+          {/* Cinematic Vignette Gradient Overlay */}
           <LinearGradient
-            colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.85)']}
+            colors={[
+              'rgba(0,0,0,0.0)',
+              'rgba(0,0,0,0.15)',
+              'rgba(0,0,0,0.85)'
+            ]}
+            locations={[0, 0.45, 1]}
             style={StyleSheet.absoluteFill}
             pointerEvents="none"
           />
-        </View>
-        <View style={s.bentoCardContent}>
-          {tag && (
-            <View style={s.bentoCardTag}>
-              <Text style={s.bentoCardTagText}>{tag}</Text>
+
+          {/* Bottom Badges Overlay */}
+          <View style={s.iosHeroBottomContent}>
+            <View style={s.iosHeroBadgesRow}>
+              <View style={s.iosHeroGlassPill}>
+                <Ionicons name="sparkles" size={11} color={P.primary} />
+                <Text style={s.iosHeroGlassPillText}>Personal Mix</Text>
+              </View>
+              {item.tracks && item.tracks.length > 0 && (
+                <View style={s.iosHeroGlassPill}>
+                  <Ionicons name="musical-notes" size={11} color="rgba(255,255,255,0.75)" />
+                  <Text style={s.iosHeroGlassPillText}>{item.tracks.length} Songs</Text>
+                </View>
+              )}
             </View>
-          )}
-          <Text style={s.bentoCardTitle} numberOfLines={2}>{title}</Text>
-          <Text style={s.bentoCardSubtitle} numberOfLines={2}>{subtitle}</Text>
+          </View>
+
+          {/* Floating iOS Quick Play Button */}
+          <TouchableOpacity
+            onPress={(e) => {
+              e.stopPropagation();
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              if (onQuickPlay) {
+                onQuickPlay();
+              } else {
+                onPress();
+              }
+            }}
+            activeOpacity={0.8}
+            style={s.iosHeroPlayButton}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <LinearGradient
+              colors={['#FFFFFF', '#E6E6E6']}
+              style={s.iosHeroPlayGradient}
+            >
+              <Ionicons name="play" size={20} color="#000" style={{ marginLeft: 2 }} />
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
-      </LiquidGlass>
-    </TouchableOpacity>
+      </PressScale>
+    </View>
   );
 });
+
+// Legacy Alias
+const BentoCard = IOSFeaturedMixCard;
 
 function formatRelativeTime(timestamp: number): string {
   const now = Date.now();
@@ -307,52 +374,116 @@ function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-// ── CONTINUE LISTENING CARD ───────────────────
+// ── CONTINUE LISTENING CARD (4:3 RATIO IOS STYLE) ─────────────────────────
 const ContinueListeningCard = React.memo(({ track, onPress }: any) => {
   const candidateCanonical = getCanonicalTrackId({ id: track.id, title: track.title, artist: track.artist });
-  const isPlaying = usePlayerStore(s => s.isPlaying && s.currentTrack && getCanonicalTrackId(s.currentTrack) === candidateCanonical);
-  const isPaused = usePlayerStore(s => !s.isPlaying && s.currentTrack && getCanonicalTrackId(s.currentTrack) === candidateCanonical);
   
+  // Connect to live player store state
+  const isCurrentTrack = usePlayerStore(s => !!(s.currentTrack && getCanonicalTrackId(s.currentTrack) === candidateCanonical));
+  const isPlaying = usePlayerStore(s => s.isPlaying && isCurrentTrack);
+  const isPaused = usePlayerStore(s => !s.isPlaying && isCurrentTrack);
+  const livePlayerPosition = usePlayerStore(s => isCurrentTrack ? s.position : null);
+  const livePlayerDuration = usePlayerStore(s => isCurrentTrack ? s.duration : null);
+
+  const colors = getDeterministicGradient(track.title || 'Aura');
+  const positionMs = (isCurrentTrack && livePlayerPosition !== null) ? livePlayerPosition : (track.positionMs || track.position || 0);
+  const durationMs = (isCurrentTrack && livePlayerDuration && livePlayerDuration > 0) ? livePlayerDuration : (track.durationMs || track.duration || 0);
+  const completionRatio = durationMs > 0 ? positionMs / durationMs : 0;
+  const progressPercent = Math.min(100, Math.max(0, completionRatio * 100));
+
+  const remainingMs = Math.max(0, durationMs - positionMs);
+  const remainingText = remainingMs > 0 ? `${formatMs(remainingMs)} left` : `${formatMs(positionMs)}`;
+
+  const handlePlayToggle = (e?: any) => {
+    if (e?.stopPropagation) e.stopPropagation();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (isCurrentTrack) {
+      if (isPlaying) {
+        usePlayerStore.getState().pause();
+      } else {
+        usePlayerStore.getState().play();
+      }
+    } else {
+      onPress();
+    }
+  };
+
   return (
     <PressScale
-      onPress={onPress}
+      onPress={handlePlayToggle}
       scaleTo={0.97}
-      haptic={Haptics.ImpactFeedbackStyle.Light}
-      wrapperStyle={s.clCardContainer}
+      haptic={Haptics.ImpactFeedbackStyle.Medium}
+      wrapperStyle={s.iosCl43CardContainer}
     >
-      <LiquidGlass borderRadius={20} intensity={40} gradient style={s.clCardGlass}>
-        <View style={s.clCardInner}>
-          <View style={s.clCardImageContainer}>
+      <LiquidGlass
+        borderRadius={22}
+        intensity={45}
+        accentColor={colors[0]}
+        accentOpacity={0.08}
+        gradient
+        style={s.iosCl43CardGlass}
+      >
+        <View style={s.iosCl43CardInner}>
+          {/* Top: 4:3 Prominent Artwork Container with Floating Play Overlay */}
+          <View style={s.iosCl43ArtworkWrapper}>
             <AuraArtwork 
               source={resolveArtwork(track, 'album')} 
               entityName={track.title}
               entityType="song"
-              style={s.clCardImage} 
+              borderRadius={16}
+              style={s.iosCl43Artwork} 
               contentFit="cover" 
               transition={200} 
               cachePolicy="memory-disk" 
+              fallbackIcon="musical-note-outline"
             />
+
+            {/* Subtle Gradient for play button legibility */}
+            <LinearGradient
+              colors={['transparent', 'rgba(0,0,0,0.45)']}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+
+            {/* Floating Live State or Play Button */}
+            <TouchableOpacity
+              onPress={handlePlayToggle}
+              activeOpacity={0.8}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={s.iosCl43PlayBadge}
+            >
+              <Ionicons 
+                name={isPlaying ? "pause" : "play"} 
+                size={14} 
+                color="#000" 
+                style={!isPlaying ? { marginLeft: 1.5 } : undefined}
+              />
+            </TouchableOpacity>
           </View>
           
-          <View style={s.clCardMetadata}>
-            <Text style={s.clCardTitle} numberOfLines={1}>
+          {/* Middle: Title & Artist Typography */}
+          <View style={s.iosCl43Info}>
+            <Text style={s.iosCl43Title} numberOfLines={1}>
               {track.title}
             </Text>
-            <Text style={s.clCardArtist} numberOfLines={1}>
+            <Text style={s.iosCl43Artist} numberOfLines={1}>
               {track.artist}
             </Text>
           </View>
-          
-          <View style={s.clProgressSection}>
-            <View style={s.clProgressBarContainer}>
-              <View style={[s.clProgressBarActive, { width: `${(track.completionRatio || 0) * 100}%` }]} />
+
+          {/* Bottom: Progress Bar & Time */}
+          <View style={s.iosCl43ProgressSection}>
+            <View style={s.iosCl43ProgressTrack}>
+              <View style={[s.iosCl43ProgressFill, { width: `${progressPercent}%` }]} />
             </View>
-            <View style={s.clProgressInfo}>
-              <Text style={s.clProgressText}>
-                {formatMs(track.positionMs)} / {formatMs(track.durationMs)}
-              </Text>
-              <Text style={s.clTimeText}>
-                {isPlaying ? 'Playing' : isPaused ? 'Paused' : formatRelativeTime(track.playedAt || Date.now())}
+
+            <View style={s.iosCl43TimeRow}>
+              <Text style={s.iosCl43RemainingText}>{remainingText}</Text>
+              <Text style={[
+                s.iosCl43StatusText,
+                isPlaying ? s.iosCl43PlayingText : isPaused ? s.iosCl43PausedText : null
+              ]}>
+                {isPlaying ? 'Playing' : isPaused ? 'Paused' : formatRelativeTime(track.playedAt || track.lastPlayed || Date.now())}
               </Text>
             </View>
           </View>
@@ -361,6 +492,7 @@ const ContinueListeningCard = React.memo(({ track, onPress }: any) => {
     </PressScale>
   );
 });
+
 
 // ── RECENTLY PLAYED CARD ─────────────────────────
 const RecentlyPlayedCard = React.memo(({ track, onPress }: any) => {
@@ -378,6 +510,7 @@ const RecentlyPlayedCard = React.memo(({ track, onPress }: any) => {
             source={resolveArtwork(track, 'card')} 
             entityName={track.title}
             entityType="song"
+            borderRadius={16}
             style={s.rpCardImage} 
             contentFit="cover" 
             transition={200} 
@@ -401,30 +534,80 @@ const RecentlyPlayedCard = React.memo(({ track, onPress }: any) => {
 });
 
 // ── CIRCULAR ARTIST CARD ───────────────────────────────────────────────────
-const CircleArtistCard = memo(({ name, image, score, onPress }: any) => {
+const CircleArtistCard = memo(({ artist, name, image, score, onPress }: any) => {
+  const artistName = name || (typeof artist === 'string' ? artist : artist?.name) || 'Unknown Artist';
+  const artistScore = score ?? (typeof artist === 'object' ? artist?.score : undefined);
+
+  // 1. Multi-tier synchronous resolution
+  const synchronousArt = useMemo(() => {
+    if (image && typeof image === 'string' && image.length > 0 && !image.includes('placeholder')) {
+      return image;
+    }
+    if (typeof artist === 'object' && (artist?.image || artist?.art || artist?.thumbnail)) {
+      const aArt = artist.image || artist.art || artist.thumbnail;
+      if (typeof aArt === 'string' && aArt.length > 0 && !aArt.includes('placeholder')) return aArt;
+    }
+    
+    // Check analytics store
+    const analytics = useAnalyticsStore.getState();
+    const cached = analytics.artistCache?.[artistName] || analytics.artistProfileCache?.[artistName];
+    if (cached?.image) return cached.image;
+
+    // Check history tracks
+    const histMatch = analytics.history?.find(h => 
+      h.artist?.toLowerCase().includes(artistName.toLowerCase()) || 
+      artistName.toLowerCase().includes(h.artist?.toLowerCase())
+    );
+    if (histMatch?.art || histMatch?.artwork) return histMatch.art || histMatch.artwork;
+
+    // Check catalog
+    const catArtist = catalogArtists.find(a => a.name.toLowerCase() === artistName.toLowerCase());
+    if (catArtist?.image) return catArtist.image;
+
+    const catTrack = catalogTracks.find(t => t.artist.toLowerCase() === artistName.toLowerCase());
+    if (catTrack?.art) return catTrack.art;
+
+    return null;
+  }, [artist, image, artistName]);
+
+  // 2. Live asynchronous YouTube Music enrichment for uncached artists
+  const { enrichedArtist } = useArtistEnrichment(!synchronousArt ? artistName : undefined);
+
+  useEffect(() => {
+    if (enrichedArtist?.art && enrichedArtist.id) {
+      useAnalyticsStore.getState().cacheArtistDetails(artistName, {
+        id: enrichedArtist.id,
+        image: enrichedArtist.art,
+      });
+    }
+  }, [enrichedArtist, artistName]);
+
+  const finalArtUrl = synchronousArt || enrichedArtist?.art || null;
+
   return (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.8}
       style={s.circleArtistContainer}
     >
-      <LiquidGlass borderRadius={64} intensity={60} gradient style={s.circleArtistGlass}>
+      <View style={s.circleArtistAvatarContainer}>
         <AuraArtwork 
-          source={resolveArtwork({ art: image, artist: name, type: 'artist' }, 'card')} 
-          entityName={name}
+          source={finalArtUrl ? { uri: finalArtUrl } : resolveArtwork({ name: artistName, artist: artistName, type: 'artist' }, 'card')} 
+          entityName={artistName}
           entityType="artist"
           style={s.circleArtistImage} 
           contentFit="cover"
           cachePolicy="memory-disk"
           borderRadius={60}
+          fallbackIcon="person"
         />
-      </LiquidGlass>
+      </View>
       <Text style={s.circleArtistName} numberOfLines={1}>
-        {name}
+        {artistName}
       </Text>
-      {score !== undefined && score > 0 && (
+      {artistScore !== undefined && artistScore > 0 && (
         <Text style={s.circleArtistScore} numberOfLines={1}>
-          Affinity: {score.toFixed(1)}
+          Affinity: {artistScore.toFixed(1)}
         </Text>
       )}
     </TouchableOpacity>
@@ -433,31 +616,92 @@ const CircleArtistCard = memo(({ name, image, score, onPress }: any) => {
 
 // ── FAVORITE ALBUM CARD ───────────────────────────────────────────────────
 const FavoriteAlbumCard = React.memo(({ album, onPress }: any) => {
+  const albumTitle = typeof album === 'string' ? album : (album?.title || album?.name || 'Unknown Album');
+  const albumArtist = typeof album === 'object' ? (album?.artist || '') : '';
+
+  // 1. Multi-tier synchronous resolution
+  const synchronousArt = useMemo(() => {
+    if (typeof album === 'object' && (album?.image || album?.art || album?.thumbnail)) {
+      const aArt = album.image || album.art || album.thumbnail;
+      if (typeof aArt === 'string' && aArt.length > 0 && !aArt.includes('placeholder')) return aArt;
+    }
+
+    const cleanTitle = albumTitle.toLowerCase().trim();
+
+    // 1. Check analytics store albumCache
+    const analytics = useAnalyticsStore.getState();
+    const cached = analytics.albumCache?.[albumTitle];
+    if (cached?.image && !cached.image.includes('placeholder')) return cached.image;
+
+    // 2. Find any song in history containing this album to grab its cover art
+    const histMatch = analytics.history?.find(h => 
+      (h.album && h.album.toLowerCase().trim() === cleanTitle) ||
+      (h.trackSnapshot?.album && h.trackSnapshot.album.toLowerCase().trim() === cleanTitle) ||
+      (h.title && h.title.toLowerCase().trim() === cleanTitle)
+    );
+    const histArt = histMatch?.art || histMatch?.artwork || histMatch?.trackSnapshot?.art;
+    if (histArt && !histArt.includes('placeholder')) return histArt;
+
+    // 3. Check catalog albums
+    const catAlbum = catalogAlbums.find(a => 
+      a.title.toLowerCase().trim() === cleanTitle || 
+      (typeof album === 'object' && a.id === album?.id)
+    );
+    if (catAlbum?.image) return catAlbum.image;
+
+    // 4. Check catalog tracks
+    const catTrack = catalogTracks.find(t => 
+      (catAlbum && t.albumId === catAlbum.id) ||
+      (albumArtist && t.artist.toLowerCase().trim() === albumArtist.toLowerCase().trim())
+    );
+    if (catTrack?.art) return catTrack.art;
+
+    return null;
+  }, [album, albumTitle, albumArtist]);
+
+  // 2. Live asynchronous YouTube Music enrichment for uncached albums
+  const { enrichedAlbum } = useAlbumEnrichment(!synchronousArt ? albumTitle : undefined, albumArtist);
+
+  useEffect(() => {
+    if (enrichedAlbum?.art && enrichedAlbum.id) {
+      useAnalyticsStore.getState().cacheAlbumDetails(albumTitle, {
+        id: enrichedAlbum.id,
+        image: enrichedAlbum.art,
+        artist: enrichedAlbum.artist || albumArtist,
+      });
+    }
+  }, [enrichedAlbum, albumTitle, albumArtist]);
+
+  const finalArtUrl = synchronousArt || enrichedAlbum?.art || null;
+  const resolvedArtist = albumArtist || enrichedAlbum?.artist || (typeof album === 'object' && album?.artist) || '';
+
   return (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.8}
       style={s.favAlbumContainer}
     >
-      <LiquidGlass borderRadius={22} intensity={45} gradient style={s.favAlbumGlass}>
-        <View style={s.favAlbumImageContainer}>
-          <AuraArtwork 
-            source={resolveArtwork(album, 'card')} 
-            entityName={album.title}
-            entityType="album"
-            style={s.favAlbumImage} 
-            contentFit="cover" 
-            transition={200} 
-            cachePolicy="memory-disk"
-          />
-        </View>
-      </LiquidGlass>
+      <View style={s.favAlbumImageContainer}>
+        <AuraArtwork 
+          source={finalArtUrl ? { uri: finalArtUrl } : resolveArtwork(typeof album === 'object' ? album : { title: albumTitle, artist: resolvedArtist, type: 'album' }, 'card')} 
+          entityName={albumTitle}
+          entityType="album"
+          borderRadius={22}
+          style={s.favAlbumImage} 
+          contentFit="cover" 
+          transition={200} 
+          cachePolicy="memory-disk"
+          fallbackIcon="disc"
+        />
+      </View>
       <Text style={s.favAlbumTitle} numberOfLines={1}>
-        {album.title}
+        {albumTitle}
       </Text>
-      <Text style={s.favAlbumArtist} numberOfLines={1}>
-        {album.artist}
-      </Text>
+      {resolvedArtist ? (
+        <Text style={s.favAlbumArtist} numberOfLines={1}>
+          {resolvedArtist}
+        </Text>
+      ) : null}
     </TouchableOpacity>
   );
 });
@@ -476,10 +720,11 @@ const DailyMixCard = React.memo(({ seed, onPress }: any) => {
             source={resolveArtwork(seed, 'card')} 
             entityName={seed.title}
             entityType="playlist"
+            borderRadius={20}
             style={s.dmCardImage} 
             contentFit="cover" 
             transition={200} 
-            cachePolicy="memory-disk"
+            cachePolicy="memory-disk" 
           />
           <View style={s.dmBadge}>
             <Ionicons name="sparkles" size={10} color={P.primary} />
@@ -491,7 +736,7 @@ const DailyMixCard = React.memo(({ seed, onPress }: any) => {
         {seed.title}
       </Text>
       <Text style={s.dmCardSubtitle} numberOfLines={1}>
-        Based on your taste
+        {seed.reason || 'Based on your taste'}
       </Text>
     </TouchableOpacity>
   );
@@ -579,28 +824,8 @@ import { requestIdleTask } from '@/src/utils/idle-task';
 
 // ── PUSH-BASED SECTION COMPONENTS ──────────────────────────────────────────
 
-// ── LAZY FLASH LIST (Staggered Mounting) ──────────────────────────────────
-const LazyFlashList = memo(({ children, delay = 0 }: { children: React.ReactNode, delay?: number }) => {
-  const [shouldRender, setShouldRender] = useState(false);
-
-  useEffect(() => {
-    // Stagger initialization to avoid JS-thread mount collisions
-    const timer = setTimeout(() => {
-      requestIdleTask(() => {
-        setShouldRender(true);
-      });
-    }, delay);
-    return () => clearTimeout(timer);
-  }, [delay]);
-
-  if (!shouldRender) {
-    return (
-      <View style={{ height: 180, justifyContent: 'center' }}>
-        <ActivityIndicator color={P.primary} size="small" />
-      </View>
-    );
-  }
-
+// ── LAZY FLASH LIST (Direct Mounting) ──────────────────────────────────
+const LazyFlashList = memo(({ children }: { children: React.ReactNode, delay?: number }) => {
   return <>{children}</>;
 });
 
@@ -620,7 +845,7 @@ const ContinueListeningSection = memo(({ handlePlay }: any) => {
       <LazyFlashList delay={0}>
         <FlashList
           // @ts-ignore
-          estimatedItemSize={200}
+          estimatedItemSize={180}
           horizontal
           data={continueListeningTracks}
           renderItem={({ item: track }: any) => (
@@ -628,7 +853,7 @@ const ContinueListeningSection = memo(({ handlePlay }: any) => {
           )}
           keyExtractor={(track: any) => track.id}
           contentContainerStyle={s.hzScrollContent}
-          snapToInterval={216}
+          snapToInterval={194}
           {...ScrollPhysics.SNAPPY}
         />
       </LazyFlashList>
@@ -672,124 +897,155 @@ const hexToRgba = (hex: string, alpha: number) => {
 };
 
 const TopTrackCard = React.memo(({ track, index, onPress, onLongPress }: any) => {
-  const floatAnim = useSharedValue(0);
-  useEffect(() => {
-    // Subtle float animation: translateY from 0 to -2
-    floatAnim.value = withRepeat(
-      withTiming(1, { duration: 3500 }),
-      -1,
-      true
-    );
-  }, []);
+  const toggleLike = useLikesStore(s => s.toggleLike);
+  const isFavorite = useLikesStore(s => !!(track.id && s.likedTrackIds[track.id]));
 
-  const floatStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ translateY: floatAnim.value * -2 }],
-    };
-  });
+  const candidateCanonical = getCanonicalTrackId({ id: track.id, title: track.title, artist: track.artist });
+  const isCurrentTrack = usePlayerStore(s => !!(s.currentTrack && getCanonicalTrackId(s.currentTrack) === candidateCanonical));
+  const isPlaying = usePlayerStore(s => s.isPlaying && isCurrentTrack);
 
   const colors = getDeterministicGradient(track.title || 'Aura');
-  const cardBgColor = hexToRgba(colors[0], 0.09); // Capped at 9% opacity tint
-
   const rank = index + 1;
 
-  // Formulate significance subtext for rank badge
-  const isFavorite = useLikesStore(s => !!(track.id && s.likedTrackIds[track.id]));
-  const durationHours = track.totalListenMs ? (track.totalListenMs / (1000 * 60 * 60)).toFixed(1) : '0.0';
-  
-  let significanceText = '🔥 Trending';
-  if (isFavorite) {
-    significanceText = '⭐ Favorite';
-  } else if (track.playCount > 10) {
-    significanceText = `${track.playCount} Plays`;
-  } else if (parseFloat(durationHours) > 0.5) {
-    significanceText = `${durationHours}h`;
+  // iOS-style rank accents
+  const isGold = rank === 1;
+  const isSilver = rank === 2;
+  const isBronze = rank === 3;
+  const rankBadgeColor = isGold ? '#FFD700' : isSilver ? '#E0E0E0' : isBronze ? '#CD7F32' : 'rgba(255,255,255,0.45)';
+  const rankBadgeBg = isGold ? 'rgba(255, 215, 0, 0.15)' : isSilver ? 'rgba(224, 224, 224, 0.12)' : isBronze ? 'rgba(205, 127, 50, 0.12)' : 'rgba(255,255,255,0.06)';
+
+  // Formulate significance pill
+  const durationHours = track.totalListenMs ? (track.totalListenMs / (1000 * 60 * 60)).toFixed(1) : null;
+  const playCount = track.playCount || 0;
+
+  let metricText = '';
+  if (isPlaying) {
+    metricText = 'Playing now';
+  } else if (playCount > 0) {
+    metricText = `${playCount} plays`;
+  } else if (durationHours && parseFloat(durationHours) > 0.1) {
+    metricText = `${durationHours}h listen`;
+  } else if (isFavorite) {
+    metricText = 'Favorite';
+  } else {
+    metricText = 'Top Chart';
   }
 
-  // Build bottom metadata pills (max 2)
-  const pills = [];
-  if (track.playCount && track.playCount > 0) {
-    pills.push(`🎧 ${track.playCount} Plays`);
-  }
-  if (track.totalListenMs && track.totalListenMs > 60000) {
-    const hours = track.totalListenMs / (1000 * 60 * 60);
-    if (hours >= 0.1) {
-      pills.push(`⏱ ${hours.toFixed(1)}h`);
+  const handleCardPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (isCurrentTrack) {
+      if (isPlaying) {
+        usePlayerStore.getState().pause();
+      } else {
+        usePlayerStore.getState().play();
+      }
     } else {
-      pills.push(`⏱ ${Math.round(track.totalListenMs / 60000)}m`);
+      onPress();
     }
-  }
-  if (isFavorite && pills.length < 2) {
-    pills.push('❤️ Favorite');
-  }
-  if (rank <= 3 && pills.length < 2) {
-    pills.push('🔥 Trending');
-  }
-  // Cap at 2 pills
-  const visiblePills = pills.slice(0, 2);
+  };
 
   return (
     <PressScale
-      onPress={onPress}
+      onPress={handleCardPress}
       onLongPress={onLongPress}
-      scaleTo={0.98}
+      scaleTo={0.97}
       haptic={Haptics.ImpactFeedbackStyle.Medium}
-      wrapperStyle={s.topTrackCardContainer}
+      wrapperStyle={s.iosTopTrackCardContainer}
     >
       <LiquidGlass
-        borderRadius={28}
-        intensity={55}
+        borderRadius={22}
+        intensity={45}
         accentColor={colors[0]}
-        accentOpacity={0.09}
+        accentOpacity={0.08}
         gradient
-        style={s.topTrackCardGlass}
+        style={s.iosTopTrackCardGlass}
       >
-        <View style={s.topTrackCardInner}>
-          {/* Left Section: Artwork */}
-          <AnimatedReanimated.View style={[s.topTrackArtworkContainer, { shadowColor: colors[0] }, floatStyle]}>
-            <AuraArtwork 
-              source={resolveArtwork(track, 'card')} 
-              entityName={track.title}
-              entityType="song"
-              style={s.topTrackArtwork} 
-              contentFit="cover" 
-              transition={200}
-              cachePolicy="memory-disk"
-              borderRadius={22}
-              fallbackIcon="musical-note-outline"
-            />
-          </AnimatedReanimated.View>
-
-          {/* Center Section: Track Info */}
-          <View style={s.topTrackInfo}>
-            <Text style={s.topTrackTitle} numberOfLines={2}>
-              {track.title}
-            </Text>
-            <Text style={s.topTrackArtist} numberOfLines={1}>
-              {track.artist}
-            </Text>
-            {track.album && (
-              <Text style={s.topTrackAlbum} numberOfLines={1}>
-                {track.album}
+        <View style={s.iosTopTrackCardInner}>
+          {/* Left: Artwork Stage with iOS Floating Rank Corner Badge */}
+          <View style={s.iosTopTrackArtworkWrapper}>
+            <View style={[s.iosTopTrackArtworkContainer, { shadowColor: colors[0] }]}>
+              <AuraArtwork 
+                source={resolveArtwork(track, 'card')} 
+                entityName={track.title}
+                entityType="song"
+                style={s.iosTopTrackArtwork} 
+                contentFit="cover" 
+                transition={200}
+                cachePolicy="memory-disk"
+                borderRadius={16}
+                fallbackIcon="musical-note-outline"
+              />
+            </View>
+            {/* iOS Floating Rank Corner Badge */}
+            <View style={[s.iosTopTrackRankPill, { backgroundColor: rankBadgeBg, borderColor: hexToRgba(rankBadgeColor, 0.3) }]}>
+              <Text style={[s.iosTopTrackRankText, { color: rankBadgeColor }]}>
+                {rank}
               </Text>
-            )}
-            
-            {/* Bottom Metadata Pills */}
-            {visiblePills.length > 0 && (
-              <View style={s.topTrackPillsRow}>
-                {visiblePills.map((pill, pIdx) => (
-                  <View key={`pill-${pIdx}`} style={s.topTrackPill}>
-                    <Text style={s.topTrackPillText}>{pill}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
+            </View>
           </View>
 
-          {/* Right Section: Ranking Badge */}
-          <View style={s.topTrackRankBadge}>
-            <Text style={s.topTrackRankNumber}>#{rank}</Text>
-            <Text style={s.topTrackRankSub}>{significanceText}</Text>
+          {/* Center: Track Typography & Hierarchy */}
+          <View style={s.iosTopTrackInfo}>
+            <Text style={s.iosTopTrackTitle} numberOfLines={1}>
+              {track.title}
+            </Text>
+            <Text style={s.iosTopTrackArtist} numberOfLines={1}>
+              {track.artist}
+            </Text>
+            
+            {/* iOS Micro Metric Badge Row */}
+            <View style={s.iosTopTrackMetaRow}>
+              <View style={s.iosTopTrackMetricBadge}>
+                <Ionicons 
+                  name={isGold ? "trophy" : isSilver || isBronze ? "medal" : "flame"} 
+                  size={10} 
+                  color={rankBadgeColor} 
+                />
+                <Text style={s.iosTopTrackMetricText}>{metricText}</Text>
+              </View>
+              {track.album ? (
+                <Text style={s.iosTopTrackAlbumText} numberOfLines={1}>
+                  • {track.album}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+
+          {/* Right: iOS Action Controls */}
+          <View style={s.iosTopTrackActions}>
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                toggleLike({ ...track, art: track.art });
+              }}
+              activeOpacity={0.6}
+              hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
+              style={s.iosTopTrackHeartBtn}
+            >
+              <Ionicons
+                name={isFavorite ? "heart" : "heart-outline"}
+                size={19}
+                color={isFavorite ? P.primary : "rgba(255,255,255,0.35)"}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                if (onLongPress) onLongPress();
+              }}
+              activeOpacity={0.6}
+              hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
+              style={s.iosTopTrackMoreBtn}
+            >
+              <Ionicons
+                name="ellipsis-horizontal"
+                size={16}
+                color="rgba(255,255,255,0.45)"
+              />
+            </TouchableOpacity>
           </View>
         </View>
       </LiquidGlass>
@@ -798,7 +1054,7 @@ const TopTrackCard = React.memo(({ track, index, onPress, onLongPress }: any) =>
 });
 
 const TopTracksSection = memo(({ data, handlePlay, handleLongPress }: any) => {
-  const columnWidth = SW * 0.85;
+  const columnWidth = SW * 0.82;
   const topTracksLimit = useMemo(() => {
     return (data || []).slice(0, 12);
   }, [data]);
@@ -827,7 +1083,7 @@ const TopTracksSection = memo(({ data, handlePlay, handleLongPress }: any) => {
           )}
           keyExtractor={(track: any) => track.id}
           contentContainerStyle={s.hzScrollContent}
-          snapToInterval={columnWidth + 16}
+          snapToInterval={columnWidth + 14}
           {...ScrollPhysics.SNAPPY}
         />
       </LazyFlashList>
@@ -1061,7 +1317,7 @@ export default function HomeScreen() {
     return { title: 'Good night', sub: 'Wind down with some midnight melodies.' };
   }, []);
 
-  const { setQueue } = useMusic();
+  const { setQueue } = useMusicActions();
   const setActiveContext = usePlayerStore(s => s.setActiveContext);
   
   // Hydration state
@@ -1070,17 +1326,19 @@ export default function HomeScreen() {
 
   // Real data
   const historyCount = useAnalyticsStore(s => s.history?.length || 0);
-  const continueListening = useAnalyticsStore(s => s.computed?.continueListening || []);
-  const topTracks = useAnalyticsStore(s => s.computed?.topTracks || []);
-  const topAlbums = useAnalyticsStore(s => s.computed?.topAlbums || []);
-  const topArtists = useAnalyticsStore(s => s.computed?.topArtists || []);
-  const recentlyPlayed = useAnalyticsStore(s => s.computed?.recentlyPlayed || []);
-  const favoriteArtists = useAnalyticsStore(s => s.userTasteProfile?.favoriteArtists || []);
-  const favoriteAlbums = useAnalyticsStore(s => s.userTasteProfile?.favoriteAlbums || []);
+  const continueListening = useAnalyticsStore(s => s.computed?.continueListening ?? EMPTY_ARRAY);
+  const topTracks = useAnalyticsStore(s => s.computed?.topTracks ?? EMPTY_ARRAY);
+  const topAlbums = useAnalyticsStore(s => s.computed?.topAlbums ?? EMPTY_ARRAY);
+  const topArtists = useAnalyticsStore(s => s.computed?.topArtists ?? EMPTY_ARRAY);
+  const recentlyPlayed = useAnalyticsStore(s => s.computed?.recentlyPlayed ?? EMPTY_ARRAY);
+  const favoriteArtists = useAnalyticsStore(s => s.userTasteProfile?.favoriteArtists ?? EMPTY_ARRAY);
+  const favoriteAlbums = useAnalyticsStore(s => s.userTasteProfile?.favoriteAlbums ?? EMPTY_ARRAY);
   
-  const dailyMixes = useRecommendationsStore(s => s.dailyMixes || []);
-  const becauseYouLike = useRecommendationsStore(s => s.becauseYouLike || []);
-  const trendingSeeds = useRecommendationsStore(s => s.trendingSeeds || []);
+  const featuredHeroMix = useRecommendationsStore(s => s.featuredHeroMix);
+  const madeForYou = useRecommendationsStore(s => s.madeForYou ?? EMPTY_ARRAY);
+  const dailyMixes = useRecommendationsStore(s => s.dailyMixes ?? EMPTY_ARRAY);
+  const becauseYouLike = useRecommendationsStore(s => s.becauseYouLike ?? EMPTY_ARRAY);
+  const trendingSeeds = useRecommendationsStore(s => s.trendingSeeds ?? EMPTY_ARRAY);
 
   const handlePlayTrack = useCallback((track: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -1088,40 +1346,94 @@ export default function HomeScreen() {
     setQueue([track]);
   }, [setActiveContext, setQueue]);
 
+  const handleQuickPlaySeed = useCallback(async (seed: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (seed.tracks && seed.tracks.length > 0) {
+      setActiveContext({ type: 'playlist' as any, id: seed.id });
+      setQueue(seed.tracks);
+    } else {
+      const { hydrateRecommendationSeed } = require('@/src/features/recommendations/services/recommendation-hydrator');
+      const hydrated = await hydrateRecommendationSeed(seed);
+      if (hydrated && hydrated.length > 0) {
+        setActiveContext({ type: 'playlist' as any, id: seed.id });
+        setQueue(hydrated);
+      }
+    }
+  }, [setActiveContext, setQueue]);
+
+  const handleResumeContinueListening = useCallback((track: any) => {
+    resumeTrackFromHistory(
+      {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        art: track.art || track.artwork,
+        positionMs: track.positionMs || track.position || 0,
+        durationMs: track.durationMs || track.duration || 0,
+        trackSnapshot: track.trackSnapshot,
+      },
+      () => {},
+      'home'
+    );
+  }, []);
+
   // STABLE SECTIONS DATA - Dynamic "Push" Model
   const sectionsData = useMemo(() => {
-    // Show nothing until stores hydrate to prevent layout jumping
-    if (!isAnalyticsHydrated || !isRecommendationsHydrated) return [];
-
     const sections = [];
     sections.push({ id: 'welcome', type: 'welcome' });
     
-    // Discover Music (Onboarding for new users)
-    if (historyCount <= 20 && trendingSeeds.length > 0) {
-        sections.push({ id: 'discover_music', type: 'discover_music', data: trendingSeeds });
-    }
-
-    // Hero Fallback Priority: DailyMix -> TopTrack -> ContinueListening
-    if (dailyMixes.length > 0) {
-      sections.push({ id: 'hero', type: 'hero', heroType: 'mix', data: dailyMixes[0] });
+    // 1. Featured Mix / Hero (Contextual & Behavior-Driven)
+    const effectiveHeroMix = featuredHeroMix || (madeForYou.length > 0 ? madeForYou[0] : (dailyMixes.length > 0 ? dailyMixes[0] : null));
+    if (effectiveHeroMix) {
+      sections.push({ id: 'hero', type: 'hero', heroType: 'mix', data: effectiveHeroMix });
     } else if (topTracks.length > 0) {
       sections.push({ id: 'hero', type: 'hero', heroType: 'track', data: topTracks[0] });
     } else if (continueListening.length > 0) {
       sections.push({ id: 'hero', type: 'hero', heroType: 'track', data: continueListening[0] });
+    } else if (catalogTracks.length > 0) {
+      sections.push({ id: 'hero', type: 'hero', heroType: 'track', data: catalogTracks[0] });
     }
 
     if (continueListening.length > 0) sections.push({ id: 'continue_listening', type: 'continue_listening' });
-    if (dailyMixes.length > 0) sections.push({ id: 'daily_mixes', type: 'daily_mixes', data: dailyMixes });
-    if (becauseYouLike.length > 0) sections.push({ id: 'because_you_like', type: 'because_you_like', data: becauseYouLike });
-    if (topTracks.length > 0) sections.push({ id: 'top_tracks', type: 'top_tracks', data: topTracks });
-    if (favoriteArtists.length > 0) sections.push({ id: 'favorite_artists', type: 'favorite_artists', data: favoriteArtists });
-    if (favoriteAlbums.length > 0) sections.push({ id: 'favorite_albums', type: 'favorite_albums', data: favoriteAlbums });
+
+    // 2. Made For You & Personal Mixes (Daily Mix, On Repeat, Repeat Rewind, Discover Weekly, Deep Cuts)
+    const allPersonalMixes = [
+      ...dailyMixes,
+      ...madeForYou.filter(m => !dailyMixes.some(dm => dm.id === m.id)),
+    ].filter(Boolean);
+
+    if (allPersonalMixes.length > 0) {
+      sections.push({ id: 'daily_mixes', type: 'daily_mixes', data: allPersonalMixes });
+    }
+
+    // 3. Discover Music
+    if (trendingSeeds.length > 0) {
+      sections.push({ id: 'discover_music', type: 'discover_music', data: trendingSeeds });
+    }
+
+    // 4. Because You Like
+    if (becauseYouLike.length > 0) {
+      sections.push({ id: 'because_you_like', type: 'because_you_like', data: becauseYouLike });
+    }
+    
+    // Top Tracks
+    const effectiveTopTracks = topTracks.length > 0 ? topTracks : catalogTracks;
+    if (effectiveTopTracks.length > 0) sections.push({ id: 'top_tracks', type: 'top_tracks', data: effectiveTopTracks });
+
+    // Favorite Artists
+    const effectiveFavoriteArtists = (favoriteArtists.length > 0 ? favoriteArtists : (topArtists.length > 0 ? topArtists : catalogArtists));
+    if (effectiveFavoriteArtists.length > 0) sections.push({ id: 'favorite_artists', type: 'favorite_artists', data: effectiveFavoriteArtists });
+
+    // Favorite Albums
+    const effectiveFavoriteAlbums = (favoriteAlbums.length > 0 ? favoriteAlbums : (topAlbums.length > 0 ? topAlbums : catalogAlbums));
+    if (effectiveFavoriteAlbums.length > 0) sections.push({ id: 'favorite_albums', type: 'favorite_albums', data: effectiveFavoriteAlbums });
+
     if (recentlyPlayed.length > 0) sections.push({ id: 'recently_played', type: 'recently_played' });
 
     sections.push({ id: 'cleanup', type: 'cleanup' });
 
     return sections;
-  }, [isAnalyticsHydrated, isRecommendationsHydrated, historyCount, dailyMixes, topTracks, continueListening, becauseYouLike, favoriteArtists, favoriteAlbums, recentlyPlayed, trendingSeeds]);
+  }, [isAnalyticsHydrated, isRecommendationsHydrated, historyCount, featuredHeroMix, madeForYou, dailyMixes, topTracks, continueListening, becauseYouLike, favoriteArtists, favoriteAlbums, recentlyPlayed, trendingSeeds, topArtists, topAlbums]);
 
   const renderSectionItem = useCallback(({ item }: any) => {
     switch (item.type) {
@@ -1152,29 +1464,37 @@ export default function HomeScreen() {
                 />
             </View>
         );
-      case 'hero':
+      case 'hero': {
+        const heroTag = item.data.id === 'time-night' ? 'NIGHT VIBES' :
+                        item.data.id === 'time-morning' ? 'MORNING ENERGY' :
+                        item.data.id === 'mix-on-repeat' ? 'ON REPEAT' :
+                        item.data.id === 'mix-repeat-rewind' ? 'REPEAT REWIND' :
+                        item.data.id === 'mix-discover-weekly' ? 'DISCOVER WEEKLY' :
+                        item.data.id === 'mix-deep-cuts' ? 'DEEP CUTS' :
+                        item.data.id === 'mix-made-for-you' ? 'MADE FOR YOU' :
+                        item.heroType === 'mix' ? 'FEATURED PLAYLIST' : 'FEATURED TRACK';
+        const heroSubtitle = item.data.reason || (item.heroType === 'mix' ? "A personalized mix crafted for your taste." : (item.data.artist || 'A track you might love.'));
         return (
-            <MaterialEntrance delay={100}>
-                <View style={s.heroCard}>
-                    <Text style={{ color: '#FFF', paddingHorizontal: PAD, marginBottom: 12, fontSize: 13, fontWeight: '700' }}>
-                        {item.heroType === 'mix' ? 'FEATURED MIX' : 'FEATURED TRACK'}
-                    </Text>
-                    <BentoCard 
-                        image={getArtworkUrl(item.data, 'card')}
-                        title={item.data.title || item.data.name}
-                        subtitle={item.heroType === 'mix' ? "A personalized mix just for you." : (item.data.artist || 'A track you might love.')}
-                        onPress={() => item.heroType === 'mix' ? goPlaylist(item.data.id) : handlePlayTrack(item.data)}
-                        style={{ marginHorizontal: PAD }}
-                    />
-                </View>
+            <MaterialEntrance delay={80}>
+                <IOSFeaturedMixCard 
+                    item={item.data}
+                    tag={heroTag}
+                    image={getArtworkUrl(item.data, 'card')}
+                    title={item.data.title || item.data.name}
+                    subtitle={heroSubtitle}
+                    onPress={() => item.heroType === 'mix' ? goPlaylist(item.data.id) : handlePlayTrack(item.data)}
+                    onQuickPlay={() => item.heroType === 'mix' ? handleQuickPlaySeed(item.data) : handlePlayTrack(item.data)}
+                />
             </MaterialEntrance>
         );
+      }
       case 'cleanup':
         return <LibraryCleanupCard />;
       case 'continue_listening':
-        return <ContinueListeningSection handlePlay={handlePlayTrack} />;
+        return <ContinueListeningSection handlePlay={handleResumeContinueListening} />;
       case 'recently_played':
-        return <RecentlyPlayedSection handlePlay={handlePlayTrack} />;
+        return <RecentlyPlayedSection handlePlay={handleResumeContinueListening} />;
+
       case 'daily_mixes':
         return (
             <View style={s.section}>
@@ -1222,10 +1542,21 @@ export default function HomeScreen() {
                     estimatedItemSize={120}
                     horizontal
                     data={item.data}
-                    renderItem={({ item: artist }: any) => (
-                        <CircleArtistCard name={artist.name} image={getArtworkUrl(artist, 'card')} score={artist.score} onPress={() => goArtist(artist.id)} />
-                    )}
-                    keyExtractor={(artist: any) => artist.id}
+                    renderItem={({ item: artist, index }: any) => {
+                      const artistName = typeof artist === 'string' ? artist : (artist?.name || 'Unknown Artist');
+                      const artistId = (typeof artist === 'object' && artist.id) ? artist.id : getArtistIdForName(artistName);
+                      const artistImg = typeof artist === 'object' ? (artist.image || artist.art || getArtworkUrl(artist, 'card')) : '';
+                      return (
+                        <CircleArtistCard 
+                          artist={artist} 
+                          name={artistName} 
+                          image={artistImg} 
+                          score={typeof artist === 'object' ? artist.score : undefined} 
+                          onPress={() => goArtist(artistId)} 
+                        />
+                      );
+                    }}
+                    keyExtractor={(artist: any, index: number) => (typeof artist === 'object' && artist.id ? artist.id : `artist-${artist?.name || artist}-${index}`)}
                     contentContainerStyle={s.hzScrollContent}
                     {...ScrollPhysics.SNAPPY}
                 />
@@ -1240,10 +1571,18 @@ export default function HomeScreen() {
                     estimatedItemSize={160}
                     horizontal
                     data={item.data}
-                    renderItem={({ item: album }: any) => (
-                        <FavoriteAlbumCard album={album} onPress={() => goAlbum(album.id)} />
-                    )}
-                    keyExtractor={(album: any) => album.id}
+                    renderItem={({ item: album, index }: any) => {
+                      const albumTitle = typeof album === 'string' ? album : (album.title || album.name || 'Unknown Album');
+                      const matchedCat = catalogAlbums.find(a => a.title.toLowerCase() === albumTitle.toLowerCase() || a.id === album?.id);
+                      const albumId = (typeof album === 'object' && album.id) ? album.id : (matchedCat?.id || albumTitle);
+                      return (
+                        <FavoriteAlbumCard 
+                          album={typeof album === 'object' ? album : (matchedCat || { title: albumTitle, artist: 'Various Artists', id: albumId })} 
+                          onPress={() => goAlbum(albumId)} 
+                        />
+                      );
+                    }}
+                    keyExtractor={(album: any, index: number) => (typeof album === 'object' && album.id ? album.id : `album-${album?.title || album}-${index}`)}
                     contentContainerStyle={s.hzScrollContent}
                     {...ScrollPhysics.SNAPPY}
                 />
@@ -1252,21 +1591,22 @@ export default function HomeScreen() {
       default:
         return null;
     }
-  }, [greetingData, handlePlayTrack, goPlaylist, goArtist]);
+  }, [greetingData, handlePlayTrack, goPlaylist, goArtist, goAlbum]);
 
   return (
     <View style={s.container}>
       {sectionsData.length > 0 ? (
-        <FlashList
+        <ScrollView
           ref={scrollRef}
-          data={sectionsData}
-          renderItem={renderSectionItem}
-          keyExtractor={(item: any) => item.id}
-          // @ts-ignore
-          estimatedItemSize={400}
           contentContainerStyle={[s.scrollContent, { paddingTop: insets.top + 10, paddingBottom: bottomPadding }]}
           {...ScrollPhysics.STANDARD}
-        />
+        >
+          {sectionsData.map((item: any) => (
+            <React.Fragment key={item.id}>
+              {renderSectionItem({ item })}
+            </React.Fragment>
+          ))}
+        </ScrollView>
       ) : (
         <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
           <ActivityIndicator size="large" color={P.primary} />
@@ -1379,14 +1719,128 @@ const s = StyleSheet.create({
     paddingHorizontal: PAD,
     paddingBottom: 24,
   },
+  // ── iOS 4:3 Continue Listening Card Styles ──────────────────────────────
+  iosCl43CardContainer: {
+    width: 180,
+    height: 236,
+    marginRight: 14,
+  },
+  iosCl43CardGlass: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+  },
+  iosCl43CardInner: {
+    flex: 1,
+    padding: 10,
+    justifyContent: 'space-between',
+  },
+  iosCl43ArtworkWrapper: {
+    width: '100%',
+    height: 136,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#16161A',
+  },
+  iosCl43Artwork: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 16,
+  },
+  iosCl43PlayBadge: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  iosCl43Info: {
+    paddingHorizontal: 2,
+    marginTop: 6,
+  },
+  iosCl43Title: {
+    fontSize: 14.5,
+    fontWeight: '800',
+    color: '#FFF',
+    letterSpacing: -0.2,
+    marginBottom: 2,
+  },
+  iosCl43Artist: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.65)',
+  },
+  iosCl43ProgressSection: {
+    paddingHorizontal: 2,
+    marginTop: 4,
+  },
+  iosCl43ProgressTrack: {
+    width: '100%',
+    height: 3.5,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    marginBottom: 5,
+    overflow: 'hidden',
+  },
+  iosCl43ProgressFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: P.primary,
+  },
+  iosCl43TimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  iosCl43RemainingText: {
+    fontSize: 9.5,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  iosCl43StatusText: {
+    fontSize: 9.5,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.35)',
+  },
+  iosCl43PlayingText: {
+    color: P.primary,
+    fontWeight: '800',
+  },
+  iosCl43PausedText: {
+    color: '#FFB300',
+    fontWeight: '800',
+  },
+  // Legacy aliases
+  iosClCardContainer: {
+    width: 180,
+    height: 236,
+    marginRight: 14,
+  },
+  iosClCardGlass: {
+    width: '100%',
+    height: '100%',
+  },
   clCardContainer: {
-    width: 200,
-    height: 200,
-    marginRight: 16,
+    width: 250,
+    height: 104,
+    marginRight: 14,
   },
   clCardGlass: {
-    width: 200,
-    height: 200,
+    width: 250,
+    height: 104,
   },
   clCardInner: {
     flex: 1,
@@ -1395,17 +1849,14 @@ const s = StyleSheet.create({
   },
   clCardImageContainer: {
     width: '100%',
-    height: 106,
-    overflow: 'hidden',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    height: 64,
   },
   clCardImage: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   clCardMetadata: {
     paddingHorizontal: 12,
-    paddingTop: 8,
   },
   clCardTitle: {
     fontSize: 14,
@@ -1415,49 +1866,37 @@ const s = StyleSheet.create({
   clCardArtist: {
     fontSize: 11,
     color: 'rgba(255,255,255,0.5)',
-    marginTop: 1,
   },
   clProgressSection: {
     paddingHorizontal: 12,
-    paddingBottom: 10,
-    marginTop: 'auto',
   },
   clProgressBarContainer: {
     width: '100%',
     height: 4,
     borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.15)',
-    marginBottom: 6,
-    overflow: 'hidden',
   },
   clProgressBarActive: {
     height: '100%',
-    borderRadius: 2,
     backgroundColor: P.primary,
   },
   clProgressInfo: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
   },
   clProgressText: {
     fontSize: 10,
-    fontWeight: '600',
     color: 'rgba(255,255,255,0.4)',
   },
   clNowPlayingText: {
     fontSize: 10,
-    fontWeight: '800',
     color: P.primary,
   },
   clPausedText: {
     fontSize: 10,
-    fontWeight: '800',
     color: P.amber,
   },
   clTimeText: {
     fontSize: 10,
-    fontWeight: '500',
     color: 'rgba(255,255,255,0.3)',
   },
   rpCardContainer: {
@@ -1475,7 +1914,8 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   rpCardImage: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   rpActiveOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1498,13 +1938,19 @@ const s = StyleSheet.create({
     marginRight: 16,
     alignItems: 'center',
   },
-  circleArtistGlass: {
+  circleArtistAvatarContainer: {
     width: 120,
     height: 120,
+    borderRadius: 60,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     marginBottom: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   circleArtistImage: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
     borderRadius: 60,
   },
   circleArtistName: {
@@ -1523,18 +1969,20 @@ const s = StyleSheet.create({
     width: 140,
     marginRight: 16,
   },
-  favAlbumGlass: {
+  favAlbumImageContainer: {
     width: 140,
     height: 140,
-    marginBottom: 10,
-  },
-  favAlbumImageContainer: {
-    flex: 1,
     borderRadius: 22,
     overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   favAlbumImage: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
+    borderRadius: 22,
   },
   favAlbumTitle: {
     fontSize: 14,
@@ -1553,6 +2001,8 @@ const s = StyleSheet.create({
   dmCardGlass: {
     width: 160,
     height: 160,
+    borderRadius: 20,
+    overflow: 'hidden',
     marginBottom: 10,
   },
   dmCardImageContainer: {
@@ -1561,7 +2011,8 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   dmCardImage: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   dmBadge: {
     position: 'absolute',
@@ -1597,9 +2048,12 @@ const s = StyleSheet.create({
   bylCardGlass: {
     width: 240,
     height: 140,
+    borderRadius: 24,
     overflow: 'hidden',
   },
   bylCardImage: {
+    width: '100%',
+    height: '100%',
     ...StyleSheet.absoluteFillObject,
   },
   bylCardContent: {
@@ -1627,6 +2081,8 @@ const s = StyleSheet.create({
   stCardGlass: {
     width: 140,
     height: 140,
+    borderRadius: 16,
+    overflow: 'hidden',
     marginBottom: 10,
   },
   stCardImageContainer: {
@@ -1635,7 +2091,8 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   stCardImage: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   stCardTitle: {
     fontSize: 14,
@@ -1646,6 +2103,109 @@ const s = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.5)',
     marginTop: 2,
+  },
+  // ── iOS Featured Mix Hero Styles ──────────────────────────────────────────
+  iosHeroContainer: {
+    marginHorizontal: PAD,
+    marginBottom: 24,
+  },
+  iosHeroHeader: {
+    marginBottom: 12,
+  },
+  iosHeroTag: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: P.primary,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  iosHeroTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#FFF',
+    letterSpacing: -0.5,
+    marginBottom: 3,
+  },
+  iosHeroSubtitle: {
+    fontSize: 13.5,
+    color: 'rgba(255,255,255,0.65)',
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  iosHeroCardTouch: {
+    width: '100%',
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.45,
+    shadowRadius: 20,
+    elevation: 14,
+  },
+  iosHeroCardWrapper: {
+    width: '100%',
+    height: 210,
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: '#121216',
+    position: 'relative',
+  },
+  iosHeroArtwork: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+  },
+  iosHeroBottomContent: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 76,
+    justifyContent: 'flex-end',
+  },
+  iosHeroBadgesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  iosHeroGlassPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  iosHeroGlassPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFF',
+    letterSpacing: 0.2,
+  },
+  iosHeroPlayButton: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  iosHeroPlayGradient: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bentoCard: {
     marginBottom: 20,
@@ -1663,7 +2223,8 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   bentoCardImage: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   bentoCardContent: {
     flex: 1,
@@ -1781,7 +2342,8 @@ const s = StyleSheet.create({
     height: 68,
   },
   trackCardImage: {
-    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   trackCardImageOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1833,10 +2395,139 @@ const s = StyleSheet.create({
     marginTop: 4,
     fontWeight: '500',
   },
+  // ── iOS Top Track Card Styles ─────────────────────────────────────────────
+  iosTopTrackCardContainer: {
+    width: SW * 0.82,
+    height: 106,
+    marginRight: 14,
+  },
+  iosTopTrackCardGlass: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+  },
+  iosTopTrackCardInner: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  iosTopTrackArtworkWrapper: {
+    position: 'relative',
+    marginRight: 12,
+  },
+  iosTopTrackArtworkContainer: {
+    width: 68,
+    height: 68,
+    borderRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  iosTopTrackArtwork: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 16,
+  },
+  iosTopTrackRankPill: {
+    position: 'absolute',
+    top: -4,
+    left: -4,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  iosTopTrackRankText: {
+    fontSize: 10.5,
+    fontWeight: '900',
+    letterSpacing: -0.2,
+  },
+  iosTopTrackInfo: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingRight: 6,
+  },
+  iosTopTrackTitle: {
+    fontSize: 15.5,
+    fontWeight: '800',
+    color: '#FFF',
+    letterSpacing: -0.3,
+    marginBottom: 2,
+  },
+  iosTopTrackArtist: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.65)',
+    marginBottom: 6,
+  },
+  iosTopTrackMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'nowrap',
+  },
+  iosTopTrackMetricBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  iosTopTrackMetricText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.85)',
+    letterSpacing: 0.2,
+  },
+  iosTopTrackAlbumText: {
+    flex: 1,
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.4)',
+    fontWeight: '500',
+  },
+  iosTopTrackActions: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingLeft: 4,
+  },
+  iosTopTrackHeartBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iosTopTrackMoreBtn: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Legacy aliases
   topTrackCardContainer: {
-    width: SW * 0.85,
-    height: 124,
-    marginRight: 16,
+    width: SW * 0.82,
+    height: 106,
+    marginRight: 14,
   },
   topTrackCardGlass: {
     width: '100%',
@@ -1849,19 +2540,15 @@ const s = StyleSheet.create({
     padding: 14,
   },
   topTrackArtworkContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 22,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 8,
+    width: 68,
+    height: 68,
+    borderRadius: 16,
     marginRight: 14,
   },
   topTrackArtwork: {
     width: '100%',
     height: '100%',
-    borderRadius: 22,
+    borderRadius: 16,
   },
   topTrackInfo: {
     flex: 1,
@@ -1871,32 +2558,24 @@ const s = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#FFF',
-    letterSpacing: -0.2,
   },
   topTrackArtist: {
     fontSize: 13,
     color: 'rgba(255,255,255,0.7)',
-    marginTop: 2,
-    fontWeight: '500',
   },
   topTrackAlbum: {
     fontSize: 12,
     color: 'rgba(255,255,255,0.48)',
-    marginTop: 1,
   },
   topTrackPillsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 6,
-    marginTop: 8,
   },
   topTrackPill: {
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
   },
   topTrackPillText: {
     fontSize: 9.5,
@@ -1905,20 +2584,13 @@ const s = StyleSheet.create({
   },
   topTrackRankBadge: {
     alignItems: 'flex-end',
-    justifyContent: 'center',
-    paddingLeft: 10,
   },
   topTrackRankNumber: {
     fontSize: 26,
     fontWeight: '900',
-    color: P.primary,
-    letterSpacing: -1,
   },
   topTrackRankSub: {
     fontSize: 10,
-    fontWeight: '800',
-    color: P.inkDim,
-    marginTop: 2,
   },
   actionSheetContainer: {
     position: 'absolute',

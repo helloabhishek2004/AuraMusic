@@ -114,7 +114,7 @@ function LiquidGlassComponent({
         ]}
       />
 
-      <View style={contentStyle}>{children}</View>
+      <View style={[styles.contentContainer, contentStyle]}>{children}</View>
     </View>
   );
 }
@@ -126,6 +126,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: palette.border,
+  },
+  contentContainer: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   topEdge: {
     position: 'absolute',

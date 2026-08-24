@@ -1,50 +1,102 @@
-# Welcome to your Expo app 👋
+# AuraMusic 🎵
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A cinematic Android-first music experience built with React Native (Expo SDK 55), React Native Track Player / Media3, and FastAPI backend.
 
-## Get started
+---
 
-1. Install dependencies
+## 📋 Prerequisites
 
+- **Node.js**: >= 18
+- **Python**: >= 3.10
+- **Android SDK / ADB** (configured on system PATH)
+- Connected Android device (with USB debugging enabled) or Android Emulator
+
+---
+
+## 🚀 Quick Start Guide
+
+### 1. Install Dependencies
+
+Install frontend dependencies (patches will apply automatically via `patch-package`):
+```bash
+npm install
+```
+
+Install backend dependencies (using the virtual environment):
+```bash
+# Windows
+.\backend\venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+
+# macOS / Linux
+./backend/venv/bin/pip install -r backend/requirements.txt
+```
+
+---
+
+### 2. Start the FastAPI Backend Server
+
+Run the backend on port `8000`:
+
+```bash
+# Windows
+.\backend\venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 --app-dir backend
+
+# macOS / Linux
+./backend/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --app-dir backend
+```
+
+---
+
+### 3. Configure ADB Port Forwarding (For Connected Android Devices)
+
+Forward ports so your connected device can reach both Metro (`8081`) and the backend (`8000`):
+
+```bash
+adb reverse tcp:8081 tcp:8081
+adb reverse tcp:8000 tcp:8000
+```
+
+---
+
+### 4. Build & Run the Android App
+
+Because AuraMusic uses native modules (`@rntp/player` / Media3), run the custom development build:
+
+#### Option A: Run directly via Expo CLI
+```bash
+npx expo run:android
+```
+
+#### Option B: Build with Gradle & Start Metro
+1. Build & install the debug APK:
    ```bash
-   npm install
+   cd android
+   .\gradlew installDebug
+   cd ..
    ```
-
-2. Start the app
-
+2. Start the Metro bundler:
    ```bash
    npx expo start
    ```
+3. Launch the app on your device:
+   ```bash
+   adb shell am start -n com.anonymous.AuraMusic/.MainActivity
+   ```
 
-In the output, you'll find options to open the app in a
+---
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## 🛠 Useful Commands & Troubleshooting
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+- **Apply Patches manually**:
+  ```bash
+  npx patch-package
+  ```
+- **Clear Metro Cache**:
+  ```bash
+  npx expo start -c
+  ```
+- **Check Connected Devices**:
+  ```bash
+  adb devices
+  ```
 
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.

@@ -101,8 +101,8 @@ const h2r = (hex: string, a: number) => {
 };
 
 const lnSt = StyleSheet.create({
-  row: { paddingVertical: 10, paddingHorizontal: 20, position: "relative" },
-  text: { fontSize: 26, fontWeight: "700", lineHeight: 34, letterSpacing: -0.4, color: "#FFF", paddingLeft: 10 },
+  row: { paddingVertical: 12, paddingHorizontal: 24, position: "relative" },
+  text: { fontSize: 28, fontWeight: "800", lineHeight: 38, letterSpacing: -0.5, color: "#FFF" },
 });
 
 const isLocalDeviceTrack = (track: any) => {
@@ -163,25 +163,50 @@ const timeLabelStyle = StyleSheet.create({
   }
 }).label;
 
-// ── Playback Scrubber (Optimized & Zero Re-renders) ──────────────────────────
+// ── Playback Scrubber (Optimized & Zero-Lag 1Hz Updates) ───────────────────
+const TimeDisplay = memo(() => {
+  const [elapsed, setElapsed] = useState("0:00");
+  const [remaining, setRemaining] = useState("-0:00");
+
+  useAnimatedReaction(
+    () => {
+      const pos = playbackProgress.positionMs.value;
+      const dur = playbackProgress.durationMs.value;
+      const nowSec = Math.floor(pos / 1000);
+      const durSec = Math.floor(dur / 1000);
+      return { nowSec, durSec };
+    },
+    (cur, prev) => {
+      'worklet';
+      if (!prev || cur.nowSec !== prev.nowSec || cur.durSec !== prev.durSec) {
+        const remainingSec = Math.max(0, cur.durSec - cur.nowSec);
+        const elapsedM = Math.floor(cur.nowSec / 60);
+        const elapsedS = cur.nowSec % 60;
+        const eStr = `${elapsedM}:${elapsedS < 10 ? '0' : ''}${elapsedS}`;
+        const remainM = Math.floor(remainingSec / 60);
+        const remainS = remainingSec % 60;
+        const rStr = `-${remainM}:${remainS < 10 ? '0' : ''}${remainS}`;
+        runOnJS(setElapsed)(eStr);
+        runOnJS(setRemaining)(rStr);
+      }
+    }
+  );
+
+  return (
+    <View style={st.timeLabelRow}>
+      <Text style={[timeLabelStyle, { textAlign: "left" }]}>{elapsed}</Text>
+      <Text style={[timeLabelStyle, { textAlign: "right" }]}>{remaining}</Text>
+    </View>
+  );
+});
+
 const PlaybackScrubber = memo(({ accentColor, uiPhase }: { accentColor: string; uiPhase: SharedValue<number> }) => {
   const seek = usePlayerStore(s => s.seek);
-
-  // Render counting telemetry to verify zero React re-renders occur during playback progress updates
-  const scrubberRenderCount = useRef(0);
-  scrubberRenderCount.current += 1;
-  if (typeof __DEV__ !== "undefined" && __DEV__) {
-    console.info(`[PlaybackScrubber] Rendered: count = ${scrubberRenderCount.current}`);
-  }
 
   const scrubX = useSharedValue(0);
   const scrubW = useSharedValue(1);
   const isScrub = useSharedValue(false);
   const thumbSc = useSharedValue(0);
-
-  // Shared values to hold time label text entirely on the UI thread
-  const elapsedTextVal = useSharedValue("0:00");
-  const remainingTextVal = useSharedValue("-0:00");
 
   const performSeek = useCallback((millis: number) => {
     seek(millis);
@@ -200,37 +225,6 @@ const PlaybackScrubber = memo(({ accentColor, uiPhase }: { accentColor: string; 
       if (cur.scrubbing || cur.dur <= 0 || cur.w <= 0) return;
       const pct = Math.min(1, Math.max(0, cur.pos / cur.dur));
       scrubX.value = pct * cur.w;
-    }
-  );
-
-  useAnimatedReaction(
-    () => ({
-      pos: playbackProgress.positionMs.value,
-      dur: playbackProgress.durationMs.value,
-      scrubbing: isScrub.value,
-      scrubPct: scrubW.value > 0 ? scrubX.value / scrubW.value : 0,
-    }),
-    (cur) => {
-      "worklet";
-      if (cur.dur <= 0) {
-        elapsedTextVal.value = "0:00";
-        remainingTextVal.value = "-0:00";
-        return;
-      }
-
-      // Calculate time values based on whether the user is actively scrubbing
-      const currentPos = cur.scrubbing ? cur.scrubPct * cur.dur : cur.pos;
-      const nowSec = Math.floor(currentPos / 1000);
-      const durSec = Math.floor(cur.dur / 1000);
-      const remaining = Math.max(0, durSec - nowSec);
-
-      const elapsedM = Math.floor(nowSec / 60);
-      const elapsedS = nowSec % 60;
-      elapsedTextVal.value = `${elapsedM}:${elapsedS < 10 ? '0' : ''}${elapsedS}`;
-
-      const remainM = Math.floor(remaining / 60);
-      const remainS = remaining % 60;
-      remainingTextVal.value = `-${remainM}:${remainS < 10 ? '0' : ''}${remainS}`;
     }
   );
 
@@ -285,14 +279,6 @@ const PlaybackScrubber = memo(({ accentColor, uiPhase }: { accentColor: string; 
     transform: [{ translateX: scrubX.value - 9 }, { scale: thumbSc.value }],
   }));
 
-  const elapsedProps = useAnimatedProps(() => ({
-    text: elapsedTextVal.value,
-  } as any));
-
-  const remainingProps = useAnimatedProps(() => ({
-    text: remainingTextVal.value,
-  } as any));
-
   return (
     <View style={st.scrubWrap}>
       <GestureDetector gesture={Gesture.Race(pan, tap)}>
@@ -304,24 +290,7 @@ const PlaybackScrubber = memo(({ accentColor, uiPhase }: { accentColor: string; 
           </View>
         </Animated.View>
       </GestureDetector>
-      <View style={st.timeLabelRow}>
-        <AnimatedTextInput
-          editable={false}
-          pointerEvents="none"
-          underlineColorAndroid="transparent"
-          style={[timeLabelStyle, { textAlign: "left" }]}
-          animatedProps={elapsedProps}
-          defaultValue="0:00"
-        />
-        <AnimatedTextInput
-          editable={false}
-          pointerEvents="none"
-          underlineColorAndroid="transparent"
-          style={[timeLabelStyle, { textAlign: "right" }]}
-          animatedProps={remainingProps}
-          defaultValue="-0:00"
-        />
-      </View>
+      <TimeDisplay />
     </View>
   );
 });
@@ -447,9 +416,16 @@ const LyricLine = memo(({
 }) => {
   const textStyle = useAnimatedStyle(() => {
     "worklet";
+    if (!isSynced) {
+      return {
+        opacity: 0.88,
+        transform: [{ scale: 1.0 }],
+      };
+    }
     const isActive = activeLineIndex.value === lineIndex;
     return {
-      opacity: withTiming(isActive ? 1.0 : 0.35, { duration: 140, easing: REasing.out(REasing.quad) }),
+      opacity: withTiming(isActive ? 1.0 : 0.32, { duration: 160, easing: REasing.out(REasing.quad) }),
+      transform: [{ scale: withTiming(isActive ? 1.03 : 0.98, { duration: 160 }) }],
     };
   });
 
@@ -460,8 +436,16 @@ const LyricLine = memo(({
   }, [onLayoutLine, lineIndex]);
 
   return (
-    <TouchableOpacity activeOpacity={isSynced ? 0.7 : 1} onPress={handlePress} disabled={!isSynced} onLayout={handleLayout} style={lnSt.row}>
-      <Animated.Text style={[lnSt.text, textStyle]} selectable={false}>{text}</Animated.Text>
+    <TouchableOpacity 
+      activeOpacity={isSynced ? 0.7 : 1} 
+      onPress={handlePress} 
+      disabled={!isSynced} 
+      onLayout={handleLayout} 
+      style={lnSt.row}
+    >
+      <Animated.Text style={[lnSt.text, textStyle]} selectable={false}>
+        {text}
+      </Animated.Text>
     </TouchableOpacity>
   );
 });
@@ -499,6 +483,7 @@ const LyricsSurface = memo(({
   accentColor,
   lyricsStyle,
   isLocked,
+  onClose,
 }: any) => {
   const insets = useSafeAreaInsets();
   const [showPaused, setShowPaused] = useState(false);
@@ -506,6 +491,13 @@ const LyricsSurface = memo(({
   const lyricsData = usePlayerStore(s => s.lyrics);
   const isLoading = usePlayerStore(s => s.isLyricsLoading);
   const currentTrack = usePlayerStore(s => s.currentTrack);
+
+  const handleRetryFetch = useCallback(() => {
+    if (currentTrack) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      usePlayerStore.getState().fetchLyrics(currentTrack);
+    }
+  }, [currentTrack]);
 
   useEffect(() => {
     if (visible && currentTrack && !lyricsData && !isLoading) {
@@ -604,17 +596,81 @@ const LyricsSurface = memo(({
     />
   ), [activeLineIndex, onPressLine, onLayoutLine, isSynced, accentColor]);
 
-  const ListHeader = useMemo(() => <View style={{ height: SH * 0.45 }} />, []);
+  const ListHeader = useMemo(() => <View style={{ height: SH * 0.35 }} />, []);
   const ListFooter = useMemo(() => <View style={{ height: SH * 0.45 }} />, []);
 
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 120, zIndex: 10 }, lyricsStyle]} pointerEvents={visible ? "box-none" : "none"}>
+    <Animated.View 
+      style={[
+        StyleSheet.absoluteFill, 
+        { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 90, zIndex: 10 }, 
+        lyricsStyle
+      ]} 
+      pointerEvents={visible ? "box-none" : "none"}
+    >
       <View style={{ flex: 1 }} onLayout={e => { lyricsViewportH.value = e.nativeEvent.layout.height; }}>
+        {/* Top Header Row for Lyrics View */}
+        <View style={st.lyricsHeaderRow}>
+          <TouchableOpacity 
+            onPress={onClose} 
+            activeOpacity={0.7}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            style={st.lyricsCloseBtn}
+          >
+            <Ionicons name="chevron-down" size={24} color="rgba(255,255,255,0.85)" />
+          </TouchableOpacity>
+
+          <View style={st.lyricsHeaderTitleWrap}>
+            <Text style={st.lyricsHeaderTitle} numberOfLines={1}>{currentTrack?.title || "Lyrics"}</Text>
+            <View style={st.lyricsBadgeRow}>
+              {isSynced ? (
+                <View style={[st.lyricsBadge, { borderColor: h2r(accentColor, 0.4), backgroundColor: h2r(accentColor, 0.15) }]}>
+                  <View style={[st.lyricsBadgeDot, { backgroundColor: accentColor }]} />
+                  <Text style={[st.lyricsBadgeText, { color: accentColor }]}>TIME-SYNCED</Text>
+                </View>
+              ) : lyrics.length > 0 ? (
+                <View style={st.lyricsBadge}>
+                  <Text style={st.lyricsBadgeText}>PLAIN LYRICS</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+
+          <TouchableOpacity 
+            onPress={handleRetryFetch}
+            activeOpacity={0.7}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            style={st.lyricsCloseBtn}
+          >
+            <Ionicons name="refresh-outline" size={20} color="rgba(255,255,255,0.65)" />
+          </TouchableOpacity>
+        </View>
+
         <PausedPill visible={showPaused} accent={accentColor} />
+
         {isLoading ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><ActivityIndicator size="large" color={accentColor} /></View>
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 12 }}>
+            <ActivityIndicator size="large" color={accentColor} />
+            <Text style={{ color: "rgba(255,255,255,0.6)", fontWeight: "600", fontSize: 13 }}>Loading lyrics...</Text>
+          </View>
         ) : lyrics.length === 0 ? (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Text style={{ color: "rgba(255,255,255,0.5)", fontWeight: "600" }}>No lyrics available</Text></View>
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 40, gap: 14 }}>
+            <View style={st.lyricsEmptyIconWrap}>
+              <Ionicons name="chatbubble-ellipses-outline" size={36} color="rgba(255,255,255,0.4)" />
+            </View>
+            <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 17, textAlign: "center" }}>No lyrics available</Text>
+            <Text style={{ color: "rgba(255,255,255,0.5)", fontWeight: "400", fontSize: 13, textAlign: "center", lineHeight: 18 }}>
+              We couldn't find synchronized lyrics for this track yet.
+            </Text>
+            <TouchableOpacity 
+              onPress={handleRetryFetch}
+              activeOpacity={0.8}
+              style={[st.lyricsRetryBtn, { borderColor: h2r(accentColor, 0.4), backgroundColor: h2r(accentColor, 0.12) }]}
+            >
+              <Ionicons name="refresh" size={16} color={accentColor} />
+              <Text style={{ color: accentColor, fontWeight: "700", fontSize: 13 }}>Search Again</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <AnimatedFlashList
             ref={lyricsScrollRef}
@@ -878,22 +934,19 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   }, [currentTrack, toggleLike]);
 
   const handleLyricsPress = useCallback(() => { 
-    if (isLocked) return;
     activeSurface === 'lyrics' ? closeLyrics() : openLyrics(); 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
-  }, [activeSurface, openLyrics, closeLyrics, isLocked]);
+  }, [activeSurface, openLyrics, closeLyrics]);
 
   const handleQueuePress = useCallback(() => { 
-    if (isLocked) return;
     activeSurface === 'queue' ? closeQueue() : openQueue(); 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
-  }, [activeSurface, openQueue, closeQueue, isLocked]);
+  }, [activeSurface, openQueue, closeQueue]);
 
   const handleMenuPress = useCallback(() => { 
-    if (isLocked) return;
     activeSurface === 'menu' ? closeMenu() : openMenu(); 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); 
-  }, [activeSurface, openMenu, closeMenu, isLocked]);
+  }, [activeSurface, openMenu, closeMenu]);
 
   const startProgress = useSharedValue(0);
   const surfaceOpenProgress = useSharedValue(0);
@@ -903,10 +956,13 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
 
   const [lastSurface, setLastSurface] = useState<any>('controls');
   useEffect(() => {
-    runOnJS(setIsLocked)(true);
-    surfaceOpenProgress.value = withTiming(activeSurface !== 'controls' ? 1 : 0, { duration: 220 }, () => {
-      runOnJS(setIsLocked)(false);
-      runOnJS(setLastSurface)(activeSurface);
+    setIsLocked(true);
+    surfaceOpenProgress.value = withTiming(activeSurface !== 'controls' ? 1 : 0, { duration: 220 }, (finished) => {
+      'worklet';
+      if (finished) {
+        runOnJS(setIsLocked)(false);
+        runOnJS(setLastSurface)(activeSurface);
+      }
     });
   }, [activeSurface]);
 
@@ -945,14 +1001,12 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   const prevTrackJSRef = useRef(prevTrackJS);
   const setTransitionArtworkRef = useRef(setTransitionArtwork);
 
-  useEffect(() => {
-    expandRef.current = expand;
-    collapseRef.current = collapse;
-    triggerHapticRef.current = triggerHaptic;
-    nextTrackJSRef.current = nextTrackJS;
-    prevTrackJSRef.current = prevTrackJS;
-    setTransitionArtworkRef.current = setTransitionArtwork;
-  });
+  expandRef.current = expand;
+  collapseRef.current = collapse;
+  triggerHapticRef.current = triggerHaptic;
+  nextTrackJSRef.current = nextTrackJS;
+  prevTrackJSRef.current = prevTrackJS;
+  setTransitionArtworkRef.current = setTransitionArtwork;
 
   const runExpand = useCallback(() => expandRef.current(), []);
   const runCollapse = useCallback(() => collapseRef.current(), []);
@@ -1380,7 +1434,9 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
               </Marquee>
             </View>
             <View style={st.infoActions}>
-              <TouchableOpacity onPress={handleLikePress} disabled={isLocked}><Ionicons name={isLiked ? "heart" : "heart-outline"} size={24} color={isLiked ? "#FF3B30" : "#FFF"} /></TouchableOpacity>
+              <TouchableOpacity onPress={handleLikePress} disabled={isLocked} hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}>
+                <Ionicons name={isLiked ? "heart" : "heart-outline"} size={24} color={isLiked ? "#FF3B30" : "#FFF"} />
+              </TouchableOpacity>
               {currentTrack && !isLocalDeviceTrack(currentTrack) && <DownloadButton track={currentTrack} size={24} color="#FFF" />}
             </View>
           </Animated.View>
@@ -1390,16 +1446,60 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
         </Animated.View>
         <Animated.View style={[{ position: "absolute", bottom: Math.max(insets.bottom + 8, 20), width: "100%", zIndex: 20, elevation: 20 }, bottomBarOverlayStyle]}>
           <View style={st.bottomBar}>
-            <TouchableOpacity onPress={handleLyricsPress} disabled={isLocked} style={st.bottomBtn}><Ionicons name="musical-notes-outline" size={22} color={activeSurface === 'lyrics' ? AURA_ACCENT : "rgba(255,255,255,0.72)"} /></TouchableOpacity>
+            <TouchableOpacity 
+              onPress={handleLyricsPress} 
+              style={[st.bottomBtn, activeSurface === 'lyrics' && st.bottomBtnActive]}
+              accessibilityRole="button"
+              accessibilityLabel="Lyrics"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons 
+                name={activeSurface === 'lyrics' ? "chatbubble-ellipses" : "chatbubble-ellipses-outline"} 
+                size={23} 
+                color={activeSurface === 'lyrics' ? AURA_ACCENT : "rgba(255,255,255,0.78)"} 
+              />
+            </TouchableOpacity>
             <Animated.View style={queueIconStyle}>
-              <TouchableOpacity onPress={handleQueuePress} disabled={isLocked} style={st.bottomBtn}><Ionicons name="list-outline" size={24} color={activeSurface === 'queue' ? AURA_ACCENT : "rgba(255,255,255,0.72)"} /></TouchableOpacity>
+              <TouchableOpacity 
+                onPress={handleQueuePress} 
+                style={[st.bottomBtn, activeSurface === 'queue' && st.bottomBtnActive]}
+                accessibilityRole="button"
+                accessibilityLabel="Queue"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons 
+                  name="list-outline" 
+                  size={24} 
+                  color={activeSurface === 'queue' ? AURA_ACCENT : "rgba(255,255,255,0.78)"} 
+                />
+              </TouchableOpacity>
             </Animated.View>
             <Animated.View style={menuIconStyle}>
-              <TouchableOpacity onPress={handleMenuPress} disabled={isLocked} style={st.bottomBtn}><Ionicons name="ellipsis-horizontal" size={22} color={activeSurface === 'menu' ? AURA_ACCENT : "rgba(255,255,255,0.72)"} /></TouchableOpacity>
+              <TouchableOpacity 
+                onPress={handleMenuPress} 
+                style={[st.bottomBtn, activeSurface === 'menu' && st.bottomBtnActive]}
+                accessibilityRole="button"
+                accessibilityLabel="More options"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons 
+                  name="ellipsis-horizontal" 
+                  size={22} 
+                  color={activeSurface === 'menu' ? AURA_ACCENT : "rgba(255,255,255,0.78)"} 
+                />
+              </TouchableOpacity>
             </Animated.View>
           </View>
         </Animated.View>
-        {(activeSurface === 'lyrics' || lastSurface === 'lyrics') && currentTrack && <LyricsSurface visible={activeSurface === 'lyrics'} accentColor={AURA_ACCENT} lyricsStyle={lyricsSurfaceStyle} isLocked={isLocked} />}
+        {(activeSurface === 'lyrics' || lastSurface === 'lyrics') && currentTrack && (
+          <LyricsSurface 
+            visible={activeSurface === 'lyrics'} 
+            accentColor={AURA_ACCENT} 
+            lyricsStyle={lyricsSurfaceStyle} 
+            isLocked={isLocked}
+            onClose={closeLyrics}
+          />
+        )}
       </Animated.View>
       {(activeSurface === 'queue' || lastSurface === 'queue') && <QueueSheet isVisible={activeSurface === 'queue'} onClose={closeQueue} accentColor={AURA_ACCENT} />}
       {activeSurface === 'devices' && <DevicePickerSurface visible={true} onClose={closeDevices} accentColor={AURA_ACCENT} />}
@@ -1417,7 +1517,20 @@ const st = StyleSheet.create({
   infoRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16, marginTop: 6 },
   trackTitle: { fontSize: 20, fontWeight: "700", color: "#FFF", letterSpacing: -0.4, marginBottom: 4 },
   artistName: { fontSize: 14, fontWeight: "500", color: "rgba(255,255,255,0.60)" },
-  infoActions: { flexDirection: "row", alignItems: "center", gap: 20 },
+  infoActions: { flexDirection: "row", alignItems: "center", gap: 14 },
+  quickIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  quickIconBtnActive: {
+    backgroundColor: "rgba(191,90,242,0.22)",
+    borderWidth: 1,
+    borderColor: AURA_ACCENT,
+  },
   scrubWrap: { gap: 4, marginBottom: 20 },
   scrubTouch: { paddingVertical: 10 },
   scrubTrack: { height: 5, borderRadius: 4.5, backgroundColor: "rgba(255,255,255,0.20)", position: "relative" },
@@ -1438,6 +1551,84 @@ const st = StyleSheet.create({
   volThumbDot: { width: 15, height: 15, borderRadius: 7.5, backgroundColor: "#FFF", shadowColor: "#000", shadowOpacity: 0.22, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
   bottomBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 40 },
   bottomBtn: { width: 56, height: 56, alignItems: "center", justifyContent: "center" },
+  bottomBtnActive: {
+    backgroundColor: "rgba(191,90,242,0.18)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(191,90,242,0.4)",
+  },
+  lyricsHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
+  lyricsCloseBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lyricsHeaderTitleWrap: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 12,
+  },
+  lyricsHeaderTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFF",
+    letterSpacing: -0.2,
+  },
+  lyricsBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 2,
+  },
+  lyricsBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 0.5,
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  lyricsBadgeDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  lyricsBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    color: "rgba(255,255,255,0.75)",
+  },
+  lyricsEmptyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  lyricsRetryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
   menuModal: { width: "84%", maxWidth: 340, borderRadius: 24, overflow: "hidden", borderWidth: 0.75, borderColor: "rgba(255,255,255,0.2)" },
   menuSheet: { position: "absolute", bottom: 0, left: 0, right: 0, borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: "hidden", borderWidth: 0.75, borderTopColor: "rgba(255,255,255,0.22)", borderLeftColor: "rgba(255,255,255,0.08)", borderRightColor: "rgba(255,255,255,0.08)" },
   menuHeader: { flexDirection: "row", alignItems: "center", padding: 20, borderBottomWidth: 0.5, borderBottomColor: "rgba(255,255,255,0.08)" },

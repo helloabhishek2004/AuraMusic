@@ -13,7 +13,9 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   const [accentColor, setAccentColor] = useState(initialColors.primary);
 
   const setAlbumAccent = useCallback((colors: string[]) => {
-    if (colors[0]) setAccentColor(colors[0]);
+    if (colors[0]) {
+      setAccentColor(prev => (prev === colors[0] ? prev : colors[0]));
+    }
   }, []);
 
   const themeColors = useMemo(

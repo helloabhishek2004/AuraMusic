@@ -417,7 +417,9 @@ export default function RootLayout() {
 // Deferred heavy store hydration to preserve startup frame budget
     requestIdleTask(async () => {
       const { useAnalyticsStore } = await import('../src/features/analytics/store/analytics.store');
-      useAnalyticsStore.getState().initialize();
+      await useAnalyticsStore.getState().initialize();
+      const { useRecommendationsStore } = await import('../src/features/recommendations/store/recommendations.store');
+      useRecommendationsStore.getState().refreshTrendingIfNeeded();
     });
 
     // Start diagnostics monitoring loop

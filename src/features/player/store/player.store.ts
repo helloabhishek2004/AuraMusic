@@ -267,6 +267,7 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           transitionManager.clearCache([resolvedTrack.id]);
 
           get().preloadNext();
+          get().fetchLyrics(resolvedTrack);
 
         } catch (error) {
           console.warn("[PlayerStore] setTrack failed to resolve:", error);
@@ -1392,15 +1393,13 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
           queueContext: state.queueContext,
         };
       },
-      onRehydrateStorage: (state) => {
+      onRehydrateStorage: () => {
         return (hydratedState, error) => {
           if (!error && hydratedState) {
-            hydratedState.setHasHydrated(true);
-            hydratedState.setStatus("paused");
-            hydratedState.isPlaying = false;
+            usePlayerStore.setState({ _hasHydrated: true, status: "paused", isPlaying: false });
             // Restore session asynchronously
             setTimeout(() => {
-              hydratedState.restoreSession();
+              usePlayerStore.getState().restoreSession();
             }, 1000);
           }
         };

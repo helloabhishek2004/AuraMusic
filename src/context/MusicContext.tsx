@@ -54,6 +54,8 @@ const PlaybackStateContext = createContext<PlaybackStateContextType | undefined>
 const MusicProgressContext = createContext<MusicProgressContextType | undefined>(undefined);
 const MusicActionsContext = createContext<MusicActionsContextType | undefined>(undefined);
 
+const DEFAULT_DOMINANT_COLORS = ["#bf5af2", "#7b2fbe"];
+
 export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
@@ -66,7 +68,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!currentTrack) return null;
     return {
       ...currentTrack,
-      dominantColors: currentTrack.dominantColors || ["#bf5af2", "#7b2fbe"]
+      dominantColors: currentTrack.dominantColors || DEFAULT_DOMINANT_COLORS
     };
   }, [currentTrack]);
 
@@ -135,7 +137,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (typeof __DEV__ !== "undefined" && __DEV__) {
       console.info(`[MusicProvider] Rendered: count = ${providerRenderCount.current}, currentTrackId = ${currentTrack?.id}, isPlaying = ${isPlaying}`);
     }
-  });
+  }, [currentTrack?.id, isPlaying]);
 
   return (
     <TrackContext.Provider value={trackValue}>

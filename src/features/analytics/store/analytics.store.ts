@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PlayerTrack } from '../../player/types/player';
-import { catalogTracks, catalogAlbums } from '../../../data/music-catalog';
+import { catalogTracks, catalogAlbums, catalogArtists } from '../../../data/music-catalog';
+import { extractRawArtworkUrl, getArtworkUrl } from '../../player/utils/track-identity';
 
 export function splitArtistNames(artistStr: string): string[] {
   if (!artistStr) return [];
@@ -27,6 +28,10 @@ export interface HistoryEntry {
   album: string | null;
   albumId: string | null;
   art: string | null;
+  artwork?: string | null;
+  duration?: number;
+  position?: number;
+  lastPlayed?: number;
   playedAt: number;
   positionMs: number;
   durationMs: number;
@@ -39,6 +44,7 @@ export interface HistoryEntry {
     title?: string;
   };
 }
+
 
 export interface AffinityMetric {
   playCount: number;
@@ -56,6 +62,12 @@ export interface AffinityMetric {
   playlistAddCount?: number;
   repeatCount?: number;
   shareCount?: number;
+  downloadedCount?: number;
+  averageListeningDuration?: number;
+  listeningDurationRatio?: number;
+  playbackHours?: Record<number, number>;
+  playbackDays?: Record<number, number>;
+  listeningStreak?: number;
 }
 
 export interface ArtistProfile {
@@ -82,6 +94,7 @@ export interface AnalyticsState {
   trackAffinities: Record<string, AffinityMetric>;
   artistCache: Record<string, { id: string; image: string }>;
   artistProfileCache?: Record<string, ArtistProfile>;
+  albumCache?: Record<string, { id: string; image: string; artist?: string }>;
   userTasteProfile?: UserTasteProfile | null;
   currentSession: {
     trackId: string;
@@ -110,7 +123,7 @@ export interface AnalyticsState {
     continueListening: HistoryEntry[];
     recentlyPlayed: HistoryEntry[];
     topArtists: (AffinityMetric & { name: string })[];
-    topAlbums: (AffinityMetric & { name: string })[];
+    topAlbums: (AffinityMetric & { name: string; title: string; image?: string; art?: string; artist?: string; id?: string })[];
     topTracks: (AffinityMetric & { name: string })[];
   };
 }
@@ -127,6 +140,7 @@ export interface AnalyticsActions {
   incrementTrackAffinity: (key: string, partial: Partial<AffinityMetric> & { skipWithin15s?: boolean }) => void;
   cacheArtistDetails: (name: string, details: { id: string; image: string }) => void;
   cacheArtistProfile: (profile: ArtistProfile) => void;
+  cacheAlbumDetails: (title: string, details: { id: string; image: string; artist?: string }) => void;
   rebuildTasteProfile: (force?: boolean) => void;
   rebuildComputedCollections: () => void;
   resetAnalytics: () => void;
@@ -228,20 +242,36 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
             else if (last.skipped && !entry.skipped) totalSkippedCount--;
 
             // PRUNE SNAPSHOT: Only store essential fields to reduce memory growth
+            const rawArt = extractRawArtworkUrl(entry) || extractRawArtworkUrl(entry.trackSnapshot) || last.art || last.artwork || null;
+            const posMs = entry.positionMs ?? entry.position ?? last.positionMs ?? 0;
+            const durMs = entry.durationMs ?? entry.duration ?? last.durationMs ?? 0;
+
             const prunedSnapshot = entry.trackSnapshot ? {
               id: entry.trackSnapshot.id,
               title: entry.trackSnapshot.title,
               artist: entry.trackSnapshot.artist,
-              art: entry.trackSnapshot.art,
+              art: rawArt || entry.trackSnapshot.art || (entry.trackSnapshot as any).artwork,
+              artwork: rawArt || (entry.trackSnapshot as any).artwork || entry.trackSnapshot.art,
               album: entry.trackSnapshot.album,
               isLocal: entry.trackSnapshot.isLocal,
               source: entry.trackSnapshot.source,
-            } as any : undefined;
+            } as any : (last.trackSnapshot ? {
+              ...last.trackSnapshot,
+              art: rawArt || last.trackSnapshot.art,
+              artwork: rawArt || (last.trackSnapshot as any).artwork,
+            } : undefined);
 
             updated[0] = {
               ...last,
               ...entry,
+              art: rawArt,
+              artwork: rawArt,
+              positionMs: posMs,
+              position: posMs,
+              durationMs: durMs,
+              duration: durMs,
               playedAt,
+              lastPlayed: playedAt,
               trackSnapshot: prunedSnapshot,
             };
             return { 
@@ -260,12 +290,17 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
           if (entry.completionRatio >= 0.9 || !entry.skipped) totalCompletedCount++;
           if (entry.skipped) totalSkippedCount++;
 
+          const rawArt = extractRawArtworkUrl(entry) || extractRawArtworkUrl(entry.trackSnapshot) || null;
+          const posMs = entry.positionMs ?? entry.position ?? 0;
+          const durMs = entry.durationMs ?? entry.duration ?? 0;
+
           // PRUNE SNAPSHOT: Only store essential fields to reduce memory growth
           const prunedSnapshot = entry.trackSnapshot ? {
             id: entry.trackSnapshot.id,
             title: entry.trackSnapshot.title,
             artist: entry.trackSnapshot.artist,
-            art: entry.trackSnapshot.art,
+            art: rawArt || entry.trackSnapshot.art || (entry.trackSnapshot as any).artwork,
+            artwork: rawArt || (entry.trackSnapshot as any).artwork || entry.trackSnapshot.art,
             album: entry.trackSnapshot.album,
             isLocal: entry.trackSnapshot.isLocal,
             source: entry.trackSnapshot.source,
@@ -273,7 +308,14 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
 
           const newEntry: HistoryEntry = {
             ...entry,
+            art: rawArt,
+            artwork: rawArt,
+            positionMs: posMs,
+            position: posMs,
+            durationMs: durMs,
+            duration: durMs,
             playedAt,
+            lastPlayed: playedAt,
             trackSnapshot: prunedSnapshot,
           };
           const newHistory = [newEntry, ...state.history].slice(0, 1000);
@@ -514,16 +556,37 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
           const playlistAddCount = (existing.playlistAddCount || 0) + (partial.playlistAddCount || 0);
           const repeatCount = (existing.repeatCount || 0) + (partial.repeatCount || 0);
           const shareCount = (existing.shareCount || 0) + (partial.shareCount || 0);
+          const downloadedCount = (existing.downloadedCount || 0) + (partial.downloadedCount || 0);
 
+          const now = Date.now();
+          const firstPlayedAt = existing.firstPlayedAt || now;
+          const lastPlayedAt = partial.playCount ? now : (existing.lastPlayedAt || now);
+          
+          const hour = new Date(now).getHours();
+          const day = new Date(now).getDay();
+          const playbackHours = { ...(existing.playbackHours || {}), [hour]: ((existing.playbackHours || {})[hour] || 0) + 1 };
+          const playbackDays = { ...(existing.playbackDays || {}), [day]: ((existing.playbackDays || {})[day] || 0) + 1 };
+
+          // Duration Ratio (0.0 to 1.0)
+          const durationRatio = playCount > 0 ? Math.min(1.0, totalListenMs / (playCount * 200000)) : 0;
+          
+          // Recency Score (0 to 1.0)
+          const daysSinceLastPlay = (now - lastPlayedAt) / (24 * 60 * 60 * 1000);
+          const recencyScore = daysSinceLastPlay <= 1 ? 1.0 : daysSinceLastPlay <= 3 ? 0.75 : daysSinceLastPlay <= 7 ? 0.5 : daysSinceLastPlay <= 14 ? 0.25 : 0;
+
+          // User's exact mathematical scoring formula:
+          // score = (playCount * 4) + (completedPlays * 5) + (listeningDurationPercent * 6) + (liked ? 15 : 0) + (downloaded ? 8 : 0) + (playlistAdds * 7) + (repeatCount * 5) + (recencyScore * 8) - (skipCount * 10)
           const score =
-            playCount * 1.0 +
-            (completionCount * 5.0) +
-            (totalListenMs / 600000) * 0.5 -
-            (skipCount * 5.0) -
-            (skip15sCount * 10.0) +
-            (likedCount * 10.0) +
-            (playlistAddCount * 15.0) +
-            (repeatCount * 8.0);
+            (playCount * 4) +
+            (completionCount * 5) +
+            (durationRatio * 6) +
+            (likedCount > 0 ? 15 : 0) +
+            (downloadedCount > 0 ? 8 : 0) +
+            (playlistAddCount * 7) +
+            (repeatCount * 5) +
+            (recencyScore * 8) -
+            (skipCount * 10) -
+            (skip15sCount * 5);
 
           const updated: AffinityMetric = {
             playCount,
@@ -535,7 +598,13 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
             playlistAddCount,
             repeatCount,
             shareCount,
+            downloadedCount,
             skip15sCount,
+            firstPlayedAt,
+            lastPlayedAt,
+            listeningDurationRatio: durationRatio,
+            playbackHours,
+            playbackDays,
           };
 
           return {
@@ -583,6 +652,18 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
             artistProfileCache: {
               ...(state.artistProfileCache || {}),
               [name]: profile,
+            },
+            analyticsVersion: state.analyticsVersion + 1,
+          };
+        });
+      },
+
+      cacheAlbumDetails: (title, details) => {
+        set((state) => {
+          return {
+            albumCache: {
+              ...(state.albumCache || {}),
+              [title]: details,
             },
             analyticsVersion: state.analyticsVersion + 1,
           };
@@ -638,40 +719,107 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
         // 1. Continue Listening
         const seenCL = new Set<string>();
         const continueListening = state.history
-          .filter((e) => e.positionMs >= 30000 && e.completionRatio < 0.95 && !e.skipped)
-          .sort((a, b) => b.playedAt - a.playedAt)
+          .filter((e) => ((e.positionMs || e.position || 0) >= 30000) && e.completionRatio < 0.95 && !e.skipped)
+          .sort((a, b) => (b.playedAt || b.lastPlayed || 0) - (a.playedAt || a.lastPlayed || 0))
           .filter((e) => {
             if (seenCL.has(e.id)) return false;
             seenCL.add(e.id);
             return true;
           })
-          .slice(0, 10);
+          .slice(0, 10)
+          .map((e) => {
+            const artUrl = extractRawArtworkUrl(e) || extractRawArtworkUrl(e.trackSnapshot);
+            if (artUrl && (!e.art || !e.artwork)) {
+              return { ...e, art: artUrl, artwork: artUrl };
+            }
+            return e;
+          });
 
         // 2. Recently Played
         const seenRP = new Set<string>();
         const recentlyPlayed = state.history
           .filter((e) => {
-            if (!e.trackSnapshot) return false;
-            const durationMs = e.positionMs || 0;
+            if (!e.trackSnapshot && !e.title) return false;
+            const durationMs = e.positionMs || e.position || 0;
             return durationMs >= 15000 && e.completionRatio >= 0.05 && !e.skipped;
           })
-          .sort((a, b) => b.playedAt - a.playedAt)
+          .sort((a, b) => (b.playedAt || b.lastPlayed || 0) - (a.playedAt || a.lastPlayed || 0))
           .filter((e) => {
             if (seenRP.has(e.id)) return false;
             seenRP.add(e.id);
             return true;
           })
-          .slice(0, 20);
+          .slice(0, 20)
+          .map((e) => {
+            const artUrl = extractRawArtworkUrl(e) || extractRawArtworkUrl(e.trackSnapshot);
+            if (artUrl && (!e.art || !e.artwork)) {
+              return { ...e, art: artUrl, artwork: artUrl };
+            }
+            return e;
+          });
+
 
         // 3. Top Artists
         const topArtists = Object.keys(state.artistAffinities)
-          .map((key) => ({ name: key, ...state.artistAffinities[key] }))
+          .map((key) => {
+            const affinity = state.artistAffinities[key];
+            const cached = state.artistCache?.[key] || state.artistProfileCache?.[key];
+            const histMatch = state.history.find(h => 
+              h.artist?.toLowerCase().includes(key.toLowerCase()) || 
+              key.toLowerCase().includes(h.artist?.toLowerCase())
+            );
+            const catArtist = catalogArtists.find(a => a.name.toLowerCase() === key.toLowerCase());
+            const catTrack = catalogTracks.find(t => t.artist.toLowerCase() === key.toLowerCase());
+
+            const id = cached?.id || (cached as any)?.browseId || catArtist?.id || histMatch?.artistId || key;
+            const image = cached?.image || catArtist?.image || histMatch?.art || histMatch?.artwork || catTrack?.art || '';
+
+            return {
+              id,
+              name: key,
+              image,
+              art: image,
+              ...affinity,
+            };
+          })
           .sort((a, b) => (b.score !== a.score ? b.score - a.score : b.playCount - a.playCount))
           .slice(0, 30);
 
         // 4. Top Albums
         const topAlbums = Object.keys(state.albumAffinities)
-          .map((key) => ({ name: key, ...state.albumAffinities[key] }))
+          .map((key) => {
+            const affinity = state.albumAffinities[key];
+            const cleanKey = key.toLowerCase().trim();
+
+            const cached = state.albumCache?.[key];
+            const catAlbum = catalogAlbums.find(a => a.title.toLowerCase().trim() === cleanKey || a.id === key);
+            
+            // Find any played track in history containing this album to grab its song cover
+            const histMatch = state.history.find(h => 
+              (h.album && h.album.toLowerCase().trim() === cleanKey) ||
+              (h.trackSnapshot?.album && h.trackSnapshot.album.toLowerCase().trim() === cleanKey) ||
+              (h.title && h.title.toLowerCase().trim() === cleanKey)
+            );
+            const histArt = histMatch?.art || histMatch?.artwork || histMatch?.trackSnapshot?.art;
+
+            const catTrack = catalogTracks.find(t => 
+              (catAlbum && t.albumId === catAlbum.id)
+            );
+
+            const id = cached?.id || catAlbum?.id || histMatch?.albumId || histMatch?.id || key;
+            const image = cached?.image || (histArt && !histArt.includes('placeholder') ? histArt : '') || catAlbum?.image || catTrack?.art || '';
+            const artist = cached?.artist || catAlbum?.artist || histMatch?.artist || catTrack?.artist || 'Various Artists';
+
+            return {
+              id,
+              title: key,
+              name: key,
+              artist,
+              image,
+              art: image,
+              ...affinity,
+            };
+          })
           .sort((a, b) => (b.score !== a.score ? b.score - a.score : b.playCount - a.playCount))
           .slice(0, 30);
 
@@ -738,6 +886,41 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
             topTracks,
           }
         });
+
+        // Background healing for artist avatars and album covers
+        setTimeout(async () => {
+          try {
+            const { musicService } = require('../../../services/api/music');
+            const artistsToHeal = topArtists.slice(0, 10);
+            for (const item of artistsToHeal) {
+              const currentCached = get().artistCache?.[item.name];
+              if (!currentCached?.image) {
+                const res = await musicService.lookupArtistByName(item.name);
+                if (res?.art && res?.id) {
+                  get().cacheArtistDetails(item.name, { id: res.id, image: res.art });
+                }
+              }
+            }
+
+            const albumsToHeal = topAlbums.slice(0, 10);
+            for (const item of albumsToHeal) {
+              const currentCached = get().albumCache?.[item.title];
+              if (!currentCached?.image) {
+                const query = item.artist && item.artist !== 'Various Artists' ? `${item.title} ${item.artist}` : item.title;
+                let res = await musicService.lookupAlbumByName(query);
+                if (!res?.art || res.art.includes('placeholder')) {
+                  const songs = await musicService.searchSongs(query);
+                  if (songs && songs[0]?.art) {
+                    res = { id: songs[0].albumId || songs[0].id, art: songs[0].art, artist: songs[0].artist } as any;
+                  }
+                }
+                if (res?.art && res?.id) {
+                  get().cacheAlbumDetails(item.title, { id: res.id, image: res.art, artist: res.artist || item.artist });
+                }
+              }
+            }
+          } catch (e) {}
+        }, 1000);
       },
 
       resetAnalytics: () => {
@@ -911,11 +1094,114 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
       onRehydrateStorage: (state) => {
         return (hydratedState, error) => {
           if (!error && hydratedState) {
-            // Rebuild computed collections once hydrated
+            // 1. Data Migration & Rehydration for existing stored history
+            if (Array.isArray(hydratedState.history) && hydratedState.history.length > 0) {
+              const migratedHistory = hydratedState.history.map((entry) => {
+                let artworkUrl = extractRawArtworkUrl(entry) || extractRawArtworkUrl(entry.trackSnapshot);
+                if (!artworkUrl && entry.id) {
+                  try {
+                    const { useMediaCacheStore } = require('../../cache/store/media-cache.store');
+                    const cached = useMediaCacheStore.getState().getCachedTrack(entry.id);
+                    if (cached?.track) {
+                      artworkUrl = extractRawArtworkUrl(cached.track);
+                    }
+                  } catch (e) {}
+                  if (!artworkUrl) {
+                    const catTrack = catalogTracks.find((t: any) => t.id === entry.id);
+                    if (catTrack) {
+                      artworkUrl = extractRawArtworkUrl(catTrack);
+                    }
+                  }
+                }
+
+                const resolvedArt = artworkUrl || entry.art || entry.artwork || null;
+                const pos = entry.positionMs ?? entry.position ?? 0;
+                const dur = entry.durationMs ?? entry.duration ?? 0;
+                const played = entry.playedAt ?? entry.lastPlayed ?? Date.now();
+
+                return {
+                  ...entry,
+                  art: resolvedArt,
+                  artwork: resolvedArt,
+                  positionMs: pos,
+                  position: pos,
+                  durationMs: dur,
+                  duration: dur,
+                  playedAt: played,
+                  lastPlayed: played,
+                  trackSnapshot: entry.trackSnapshot ? {
+                    ...entry.trackSnapshot,
+                    art: resolvedArt || entry.trackSnapshot.art,
+                    artwork: resolvedArt || (entry.trackSnapshot as any).artwork,
+                  } : undefined,
+                };
+              });
+
+              hydratedState.history = migratedHistory;
+            }
+
+            // 2. Rebuild computed collections once hydrated
             hydratedState.rebuildComputedCollections();
+
+            // 3. Background Artwork Healing for Continue Listening items missing remote artwork
+            setTimeout(async () => {
+              try {
+                const currentHistory = hydratedState.history;
+                const missingArtItems = currentHistory
+                  .filter(h => (!h.art && !h.artwork) || h.art === 'undefined' || h.art === 'null')
+                  .slice(0, 10);
+
+                if (missingArtItems.length === 0) return;
+
+                const { musicService } = require('../../../services/api/music');
+                let hasUpdates = false;
+                const updatedHistory = [...currentHistory];
+
+                for (const item of missingArtItems) {
+                  try {
+                    let fetchedArt: string | null = null;
+                    if (item.title && item.artist) {
+                      const searchResults = await musicService.searchSongs(`${item.title} ${item.artist}`);
+                      const matched = searchResults.find((s: any) => s.id === item.id || (s.title && s.title.toLowerCase() === item.title.toLowerCase()));
+                      if (matched && (matched.art || matched.thumbnail)) {
+                        fetchedArt = extractRawArtworkUrl(matched);
+                      }
+                    }
+                    if (fetchedArt) {
+                      hasUpdates = true;
+                      const targetIdx = updatedHistory.findIndex(h => h.id === item.id);
+                      if (targetIdx !== -1) {
+                        updatedHistory[targetIdx] = {
+                          ...updatedHistory[targetIdx],
+                          art: fetchedArt,
+                          artwork: fetchedArt,
+                        };
+                      }
+                      // Also cache in media cache store
+                      try {
+                        const { useMediaCacheStore } = require('../../cache/store/media-cache.store');
+                        useMediaCacheStore.getState().cacheTrack({
+                          id: item.id,
+                          title: item.title,
+                          artist: item.artist,
+                          art: fetchedArt,
+                          url: '',
+                        });
+                      } catch (e) {}
+                    }
+                  } catch (err) {}
+                }
+
+                if (hasUpdates) {
+                  useAnalyticsStore.setState({ history: updatedHistory });
+                  useAnalyticsStore.getState().rebuildComputedCollections();
+                }
+              } catch (e) {}
+            }, 1000);
           }
         };
       },
+
     }
   )
 );

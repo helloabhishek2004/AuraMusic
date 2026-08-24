@@ -3,6 +3,8 @@ import { usePlayerStore } from "../store/player.store";
 import { PlayerTrack, RepeatMode } from "../types/player";
 import { transitionManager } from "./transition-manager";
 import { playbackProgress } from "./playback-progress";
+import { extractRawArtworkUrl } from "../utils/track-identity";
+
 
 let _controllerInitialized = false;
 
@@ -116,6 +118,7 @@ export class PlaybackController {
       }
 
       // 1. Write history entry
+      const resolvedArt = extractRawArtworkUrl(track) || track.art || (track as any).artwork || (track as any).thumbnail || null;
       useAnalyticsStore.getState().addHistoryEntry({
         id: track.id,
         title: track.title,
@@ -123,14 +126,22 @@ export class PlaybackController {
         artistId: track.artistId || null,
         album: track.album || null,
         albumId: track.albumId || null,
-        art: track.art || null,
+        art: resolvedArt,
+        artwork: resolvedArt,
         positionMs: finalPosition,
+        position: finalPosition,
         durationMs: duration,
+        duration: duration,
         completionRatio,
         skipped,
-        trackSnapshot: track,
+        trackSnapshot: {
+          ...track,
+          art: resolvedArt || track.art,
+          artwork: resolvedArt || (track as any).artwork,
+        } as any,
         sourceContext,
       });
+
 
       // 2. Accumulate affinities
       const listenMs = Math.max(0, finalPosition - startPositionMs);
