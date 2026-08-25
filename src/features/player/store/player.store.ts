@@ -84,9 +84,9 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       setActiveContext: (context: PlaybackContext | null) => set({ activeContext: context }),
       syncWithNative: async () => {
         try {
-          const TrackPlayer = (await import("@rntp/player")).default;
-          const active = await TrackPlayer.getActiveMediaItem();
-          const index = await TrackPlayer.getActiveMediaItemIndex();
+          
+          const active = null; /* Handled natively */
+          const index = get().currentIndex;
 
           if (active) {
             const store = get();
@@ -683,8 +683,8 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
           // Verification & Repair
           try {
-              const TrackPlayer = (await import("@rntp/player")).default;
-              const active = await TrackPlayer.getActiveMediaItem();
+              
+              const active = null; /* Handled natively */
               if (active) {
                   const verifiedIndex = newQueue.findIndex(t => t.id === (active as any).id || t.id === (active as any).mediaId);
                   if (verifiedIndex !== -1 && verifiedIndex !== get().currentIndex) {
@@ -904,8 +904,8 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
 
         let posMs = get().position;
         try {
-          const TrackPlayer = require("@rntp/player").default;
-          const p = await TrackPlayer.getProgress();
+          
+          const p = { position: await PlaybackService.getPosition(), duration: await PlaybackService.getDuration() };
           if (p && p.position) posMs = p.position * 1000;
         } catch(e) {}
 
@@ -1298,8 +1298,8 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
              }
 
              // Explicitly force pause to guarantee that the music does not auto-play on app start.
-             const TrackPlayer = (await import("@rntp/player")).default;
-             await TrackPlayer.pause();
+             
+             await PlaybackService.pause();
              set({ isPlaying: false, status: "paused" });
              
              console.info("[PlayerStore] Session restored in paused state at position:", position);
@@ -1372,9 +1372,9 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
       partialize: (state) => {
         // Grab real position from RNTP natively right before saving (AppState backgrounding triggers saves usually, or periodic debounce)
         try {
-          const TrackPlayer = require("@rntp/player").default;
+          
           if (state.isPlaying) {
-            const p = TrackPlayer.getProgress();
+            const p = { position: 0, duration: 0 }; /* Sync not supported synchronously */
             if (p && p.position) state.position = p.position * 1000;
           }
         } catch(e) {}
@@ -1407,3 +1407,4 @@ export const usePlayerStore = create<ExtendedPlayerStore>()(
     }
   )
 );
+

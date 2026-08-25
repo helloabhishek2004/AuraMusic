@@ -86,6 +86,10 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
     fun skipPrevious() {
         player.skipPrevious()
     }
+    @ReactMethod
+    fun saveTrackMetadata(id: String, title: String, artist: String, album: String?, duration: Int, artworkUrl: String?) {
+        historyManager.saveTrackMetadata(id, title, artist, album, duration, artworkUrl)
+    }
 
     @ReactMethod
     fun setQueue(trackIds: ReadableArray) {
@@ -121,3 +125,6 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
             .emit(eventName, params)
     }
 }
+
+
+

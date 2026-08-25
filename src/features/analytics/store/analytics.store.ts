@@ -1248,3 +1248,5 @@ export const getDiscoverySuccessRate = (state: AnalyticsState) => {
   const completed = state.newSongsCompletedCount || 0;
   return completed / Math.max(1, recommended);
 };
+
+

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { musicService } from '../services/api/music';
+import { AuraYouTube, isNativeCoreAvailable } from '../services/native-core';
 import { SearchEntity, getBestThumbnail } from '../utils/search-utils';
 
 export interface SearchCategoryResults {
@@ -95,7 +96,23 @@ export function useSearch(initialQuery: string = '') {
     try {
       // 1. PRIMARY SEARCH: Songs
       console.log('[Search] PRIMARY: Searching songs for:', trimmed);
-      const songsData = await musicService.searchSongs(trimmed);
+      let songsData: any[] = [];
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        console.log('[Search] Using Native AuraYouTube engine');
+        const nativeTracks = await AuraYouTube.search(trimmed);
+        songsData = nativeTracks.map(t => ({
+          type: 'song',
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+          duration: t.duration ? \\:\\ : '--:--',
+          art: t.artworkUrl,
+          source: 'ytmusic'
+        }));
+      } else {
+        songsData = await musicService.searchSongs(trimmed);
+      }
       
       if (controller.signal.aborted) return;
 

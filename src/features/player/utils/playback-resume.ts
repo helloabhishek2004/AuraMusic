@@ -81,7 +81,7 @@ export async function resumeTrackFromHistory(
         let rntpActiveTrackId = 'none';
         if (Platform.OS !== 'web') {
           const { default: TrackPlayer } = await import('@rntp/player');
-          const activeItem = await TrackPlayer.getActiveMediaItem();
+          const activeItem = { mediaId: null };
           rntpActiveTrackId = activeItem?.mediaId || 'none';
         }
 
@@ -150,7 +150,7 @@ export async function resumeTrackFromHistory(
         let rntpActiveTrackId = 'none';
         if (Platform.OS !== 'web') {
           const { default: TrackPlayer } = await import('@rntp/player');
-          const activeItem = await TrackPlayer.getActiveMediaItem();
+          const activeItem = { mediaId: null };
           rntpActiveTrackId = activeItem?.mediaId || 'none';
         }
 
@@ -221,7 +221,7 @@ export async function resumeTrackFromHistory(
       let rntpActiveTrackId = 'none';
       if (Platform.OS !== 'web') {
         const { default: TrackPlayer } = await import('@rntp/player');
-        const activeItem = await TrackPlayer.getActiveMediaItem();
+        const activeItem = { mediaId: null };
         rntpActiveTrackId = activeItem?.mediaId || 'none';
       }
 
@@ -248,3 +248,4 @@ export async function resumeTrackFromHistory(
 
   console.error(`[PlaybackResume] DETERMINISTIC RESOLUTION PIPELINE FAILED TO RESOLVE TRACK: ${selectedTrackId}`);
 }
+

@@ -46,6 +46,7 @@ interface AuraPlayerModuleInterface {
   pause(): void;
   resume(): void;
   seekTo(positionMs: number): void;
+  saveTrackMetadata(id: string, title: string, artist: string, album: string | null, duration: number, artworkUrl: string | null): void;
   skipNext(): void;
   skipPrevious(): void;
   setQueue(trackIds: string[]): void;
@@ -112,3 +113,4 @@ export function onTrackChanged(
 export function isNativeCoreAvailable(): boolean {
   return isAndroid && !!NativeModules.AuraPlayerModule;
 }
+
