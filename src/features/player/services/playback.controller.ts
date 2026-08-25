@@ -23,15 +23,18 @@ export class PlaybackController {
       const store = usePlayerStore.getState();
       
       // Update store
-      store.setPlaying(state.isPlaying);
-      store.setBuffering(state.isBuffering);
+      usePlayerStore.setState({
+        isPlaying: state.isPlaying,
+        isBuffering: state.isBuffering,
+        status: state.isPlaying ? 'playing' : (state.isBuffering ? 'buffering' : 'paused')
+      });
       
       if (state.error) {
         console.error("[NativeCore] Playback Error:", state.error);
-        store.setError(state.error);
+        usePlayerStore.setState({ error: state.error });
         store.next(); // Try to skip on error
       } else {
-        store.setError(null);
+        usePlayerStore.setState({ error: null });
       }
 
       // Update progress
@@ -122,4 +125,5 @@ export class PlaybackController {
 
 // Auto-initialize on import
 PlaybackController.initialize();
+
 

@@ -106,7 +106,7 @@ export function useSearch(initialQuery: string = '') {
           title: t.title,
           artist: t.artist,
           album: t.album,
-          duration: t.duration ? \\:\\ : '--:--',
+          duration: t.duration ? `${Math.floor(t.duration/60)}:${(t.duration%60).toString().padStart(2, '0')}` : '--:--',
           art: t.artworkUrl,
           source: 'ytmusic'
         }));
@@ -132,13 +132,15 @@ export function useSearch(initialQuery: string = '') {
         // Artists Enrichment
         Promise.all(uniqueArtists.slice(0, 5).map(async (name) => {
           try {
+            if (isNativeCoreAvailable()) return null;
             return await musicService.lookupArtistByName(name);
           } catch (e) { return null; }
         })),
         // Albums Enrichment (Artist-based)
         Promise.all(uniqueArtists.slice(0, 3).map(async (name) => {
           try {
-            const albums = await musicService.searchAlbums(`${name} albums`);
+            if (isNativeCoreAvailable()) return [];
+            const albums = await musicService.searchAlbums(${name} albums);
             return albums.slice(0, 2);
           } catch (e) { return []; }
         }))
@@ -211,3 +213,4 @@ export function useSearch(initialQuery: string = '') {
     refresh: () => performSearch(query),
   };
 }
+

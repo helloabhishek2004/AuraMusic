@@ -101,5 +101,8 @@ export class PlaybackService {
   static async updateMetadata(trackId: string, metadata: Partial<PlayerTrack>) {
     // Native player fetches metadata internally
   }
-}
 
+  static async updateMediaItem(index: number, track: PlayerTrack) {
+    // No-op: AuraPlayer resolves natively
+  }
+}

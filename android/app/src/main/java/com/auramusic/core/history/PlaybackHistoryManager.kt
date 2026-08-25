@@ -2,6 +2,7 @@ package com.auramusic.core.history
 
 import com.auramusic.core.db.AuraDatabase
 import com.auramusic.core.db.HistoryEntity
+import com.auramusic.core.db.HistoryWithTrack
 import com.auramusic.core.db.TrackEntity
 import com.auramusic.core.playback.PlaybackEvent
 import com.auramusic.core.youtube.models.Track
@@ -10,11 +11,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/**
- * Records playback events into the local Room database.
- * Operates independently of React Native lifecycle —
- * the native player can record history even if RN is not running.
- */
 class PlaybackHistoryManager(private val database: AuraDatabase) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var currentListenStart: Long = 0
@@ -54,20 +50,17 @@ class PlaybackHistoryManager(private val database: AuraDatabase) {
         }
     }
 
-    /**
-     * Persists track metadata so history entries can be joined later.
-     */
-    fun saveTrackMetadata(track: Track) {
+    fun saveTrackMetadata(id: String, title: String, artist: String, album: String?, duration: Int, artworkUrl: String?) {
         scope.launch {
-            val existing = database.trackDao().getById(track.id)
+            val existing = database.trackDao().getById(id)
             database.trackDao().upsert(
                 TrackEntity(
-                    id = track.id,
-                    title = track.title,
-                    artist = track.artist,
-                    album = track.album,
-                    duration = track.duration,
-                    artworkUrl = track.artworkUrl,
+                    id = id,
+                    title = title,
+                    artist = artist,
+                    album = album,
+                    duration = duration,
+                    artworkUrl = artworkUrl,
                     createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                     lastPlayedAt = existing?.lastPlayedAt,
                     playCount = existing?.playCount ?: 0
@@ -76,8 +69,8 @@ class PlaybackHistoryManager(private val database: AuraDatabase) {
         }
     }
 
-    suspend fun getHistory(limit: Int = 100): List<HistoryEntity> {
-        return database.historyDao().getRecent(limit)
+    suspend fun getHistoryWithTracks(limit: Int = 100): List<HistoryWithTrack> {
+        return database.historyDao().getRecentWithTracks(limit)
     }
 
     suspend fun clearHistory() {

@@ -426,6 +426,17 @@ export default function RootLayout() {
     if (__DEV__) {
       RenderDiagnostics.startMonitoring();
     }
+    
+    // POC TEST
+    import('react-native').then(({ NativeModules }) => {
+      console.log("[POC] Starting testPlay...");
+      NativeModules.AuraPoc.testPlay("jNQXAC9IVRw").then((result: any) => {
+        console.log("[POC_RESULT_SUCCESS] ", JSON.stringify(result));
+      }).catch((e: any) => {
+        console.log("[POC_RESULT_ERROR] ", e.message);
+      });
+    });
+
     return () => {
       RenderDiagnostics.stopMonitoring();
     };

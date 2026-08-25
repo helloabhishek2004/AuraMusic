@@ -214,6 +214,22 @@ export const musicService = {
     try {
       if (!query.trim()) return [];
 
+      const { AuraYouTube, isNativeCoreAvailable } = require('../native-core');
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        console.log('[Search] Redirecting music.ts searchSongs to native AuraYouTube');
+        const nativeTracks = await AuraYouTube.search(query);
+        return nativeTracks.map((t: any) => ({
+          type: 'song',
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+          duration: t.duration ? `${Math.floor(t.duration/60)}:${(t.duration%60).toString().padStart(2, '0')}` : '--:--',
+          art: t.artworkUrl,
+          source: 'ytmusic'
+        }));
+      }
+
       const response = await apiClient.get(`/search`, {
         params: { q: query, type: 'songs' },
       });

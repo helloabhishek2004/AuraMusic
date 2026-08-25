@@ -3,6 +3,15 @@ package com.auramusic.core.db
 import android.content.Context
 import androidx.room.*
 
+data class HistoryWithTrack(
+    @Embedded val history: HistoryEntity,
+    @Relation(
+        parentColumn = "trackId",
+        entityColumn = "id"
+    )
+    val track: TrackEntity?
+)
+
 @Dao
 interface TrackDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -23,8 +32,9 @@ interface HistoryDao {
     @Insert
     suspend fun insert(entry: HistoryEntity)
 
+    @Transaction
     @Query("SELECT * FROM history ORDER BY timestamp DESC LIMIT :limit")
-    suspend fun getRecent(limit: Int = 100): List<HistoryEntity>
+    suspend fun getRecentWithTracks(limit: Int = 100): List<HistoryWithTrack>
 
     @Query("DELETE FROM history")
     suspend fun clearAll()

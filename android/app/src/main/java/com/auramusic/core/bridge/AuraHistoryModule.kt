@@ -5,9 +5,6 @@ import com.auramusic.core.history.PlaybackHistoryManager
 import com.facebook.react.bridge.*
 import kotlinx.coroutines.*
 
-/**
- * React Native bridge for playback history.
- */
 class AuraHistoryModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
     override fun getName() = "AuraHistoryModule"
 
@@ -20,17 +17,25 @@ class AuraHistoryModule(reactContext: ReactApplicationContext) : ReactContextBas
         scope.launch {
             try {
                 val entries = withContext(Dispatchers.IO) {
-                    historyManager.getHistory()
+                    historyManager.getHistoryWithTracks()
                 }
                 val array = Arguments.createArray()
                 for (entry in entries) {
                     val map = Arguments.createMap().apply {
-                        putString("id", entry.id)
-                        putString("trackId", entry.trackId)
-                        putDouble("timestamp", entry.timestamp.toDouble())
-                        putDouble("listenDuration", entry.listenDuration.toDouble())
-                        putBoolean("completed", entry.completed)
-                        putBoolean("skipped", entry.skipped)
+                        putString("id", entry.history.id)
+                        putString("trackId", entry.history.trackId)
+                        putDouble("timestamp", entry.history.timestamp.toDouble())
+                        putDouble("listenDuration", entry.history.listenDuration.toDouble())
+                        putBoolean("completed", entry.history.completed)
+                        putBoolean("skipped", entry.history.skipped)
+
+                        if (entry.track != null) {
+                            putString("title", entry.track.title)
+                            putString("artist", entry.track.artist)
+                            putString("album", entry.track.album)
+                            putString("artworkUrl", entry.track.artworkUrl)
+                            putInt("duration", entry.track.duration)
+                        }
                     }
                     array.pushMap(map)
                 }

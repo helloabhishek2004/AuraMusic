@@ -2,7 +2,7 @@ import { useEffect, useCallback } from "react";
 import { useDerivedValue, SharedValue, useSharedValue } from "react-native-reanimated";
 import { usePlayerStore } from "@/src/features/player/store/player.store";
 import { useLyricsStore } from "../store/lyrics.store";
-import TrackPlayer from "@rntp/player";
+import { PlaybackService } from '@/src/features/player/services/playback.service';
 import { playbackProgress } from "@/src/features/player/services/playback-progress";
 
 export const useLyricsIntegration = (isVisible: boolean) => {
@@ -60,7 +60,7 @@ export const useLyricsIntegration = (isVisible: boolean) => {
     playbackProgress.positionMs.value = timeMs;
     isFollowing.value = true;
     try {
-      await TrackPlayer.seekTo(timeMs / 1000);
+      await PlaybackService.seek(timeMs);
     } catch (e) {}
   }, [isFollowing]);
 
@@ -75,3 +75,4 @@ export const useLyricsIntegration = (isVisible: boolean) => {
     seekToLine
   };
 };
+
