@@ -1,37 +1,23 @@
-package com.auramusic.core.bridge
+﻿package com.auramusic.core.bridge
 
-import com.auramusic.core.youtube.AuraYouTubeEngine
 import com.facebook.react.bridge.*
+import com.auramusic.core.youtube.AuraYouTubeEngine
 import kotlinx.coroutines.*
+import org.json.JSONObject
+import org.json.JSONArray
 
-/**
- * React Native bridge for YouTube search and metadata.
- * Returns clean domain objects — no raw YouTube JSON crosses the bridge.
- */
 class AuraYouTubeModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
     override fun getName() = "AuraYouTubeModule"
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val engine = AuraYouTubeEngine()
+    private val engine = AuraYouTubeEngine(reactContext)
 
     @ReactMethod
     fun search(query: String, promise: Promise) {
         scope.launch {
             try {
                 val result = engine.search(query)
-                val array = Arguments.createArray()
-                for (track in result.tracks) {
-                    val map = Arguments.createMap().apply {
-                        putString("id", track.id)
-                        putString("title", track.title)
-                        putString("artist", track.artist)
-                        putString("album", track.album)
-                        putInt("duration", track.duration)
-                        putString("artworkUrl", track.artworkUrl)
-                    }
-                    array.pushMap(map)
-                }
-                promise.resolve(array)
+                promise.resolve(convertJsonToArray(result))
             } catch (e: Exception) {
                 promise.reject("SEARCH_ERROR", e.message, e)
             }
@@ -39,29 +25,86 @@ class AuraYouTubeModule(reactContext: ReactApplicationContext) : ReactContextBas
     }
 
     @ReactMethod
-    fun getTrack(videoId: String, promise: Promise) {
-        // For now, return a minimal Track object from search
-        // Future: implement dedicated /player endpoint parsing for richer metadata
+    fun searchArtists(query: String, promise: Promise) {
         scope.launch {
             try {
-                val result = engine.search(videoId)
-                if (result.tracks.isNotEmpty()) {
-                    val track = result.tracks[0]
-                    val map = Arguments.createMap().apply {
-                        putString("id", track.id)
-                        putString("title", track.title)
-                        putString("artist", track.artist)
-                        putString("album", track.album)
-                        putInt("duration", track.duration)
-                        putString("artworkUrl", track.artworkUrl)
-                    }
-                    promise.resolve(map)
-                } else {
-                    promise.reject("NOT_FOUND", "Track not found")
-                }
+                val result = engine.searchArtists(query)
+                promise.resolve(convertJsonToArray(result))
             } catch (e: Exception) {
-                promise.reject("TRACK_ERROR", e.message, e)
+                promise.reject("SEARCH_ARTIST_ERROR", e.message, e)
             }
         }
+    }
+
+    @ReactMethod
+    fun searchAlbums(query: String, promise: Promise) {
+        scope.launch {
+            try {
+                val result = engine.searchAlbums(query)
+                promise.resolve(convertJsonToArray(result))
+            } catch (e: Exception) {
+                promise.reject("SEARCH_ALBUM_ERROR", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun getArtistDetails(browseId: String, promise: Promise) {
+        scope.launch {
+            try {
+                val result = engine.getArtistDetails(browseId)
+                promise.resolve(convertJsonToMap(result))
+            } catch (e: Exception) {
+                promise.reject("ARTIST_DETAILS_ERROR", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun getAlbumDetails(browseId: String, promise: Promise) {
+        scope.launch {
+            try {
+                val result = engine.getAlbumDetails(browseId)
+                promise.resolve(convertJsonToMap(result))
+            } catch (e: Exception) {
+                promise.reject("ALBUM_DETAILS_ERROR", e.message, e)
+            }
+        }
+    }
+
+    private fun convertJsonToArray(jsonArray: JSONArray): WritableArray {
+        val array = Arguments.createArray()
+        for (i in 0 until jsonArray.length()) {
+            val value = jsonArray.opt(i)
+            when (value) {
+                is JSONObject -> array.pushMap(convertJsonToMap(value))
+                is JSONArray -> array.pushArray(convertJsonToArray(value))
+                is String -> array.pushString(value)
+                is Int -> array.pushInt(value)
+                is Double -> array.pushDouble(value)
+                is Boolean -> array.pushBoolean(value)
+                else -> array.pushNull()
+            }
+        }
+        return array
+    }
+
+    private fun convertJsonToMap(jsonObject: JSONObject): WritableMap {
+        val map = Arguments.createMap()
+        val iterator = jsonObject.keys()
+        while (iterator.hasNext()) {
+            val key = iterator.next()
+            val value = jsonObject.opt(key)
+            when (value) {
+                is JSONObject -> map.putMap(key, convertJsonToMap(value))
+                is JSONArray -> map.putArray(key, convertJsonToArray(value))
+                is String -> map.putString(key, value)
+                is Int -> map.putInt(key, value)
+                is Double -> map.putDouble(key, value)
+                is Boolean -> map.putBoolean(key, value)
+                else -> map.putNull(key)
+            }
+        }
+        return map
     }
 }

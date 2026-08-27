@@ -28,20 +28,22 @@ class AndroidVrStreamResolver(
     private val client = OkHttpClient()
 
     suspend fun resolve(videoId: String): StreamResolutionResult = withContext(Dispatchers.IO) {
-        // 1. Ensure VisitorData is available
+        android.util.Log.i("NativeCore", "[PlaybackTrace] playTrack videoId=$videoId")
+        
         val visitorData = visitorDataManager.getVisitorData() ?: throw Exception("VisitorData is required but could not be obtained.")
         
-        // 2. Prewarm PoToken
         poTokenManager.prewarm()
-        val poTokenResult = poTokenManager.getToken(videoId)
+        
+        // Player Request PoToken (session-bound)
+        val playerPoTokenResult = poTokenManager.getToken(visitorData)
+        // Streaming Data PoToken (video-bound)
+        val streamingPoTokenResult = poTokenManager.getToken(videoId)
 
-        // 3. Resolve using ANDROID_VR
         return@withContext suspendCancellableCoroutine { continuation ->
             try {
                 val json = JSONObject()
                 json.put("videoId", videoId)
 
-                // Client Config
                 val clientJson = JSONObject()
                 clientJson.put("clientName", "ANDROID_VR")
                 clientJson.put("clientVersion", "1.65.10")
@@ -57,18 +59,16 @@ class AndroidVrStreamResolver(
                 contextJson.put("client", clientJson)
                 json.put("context", contextJson)
 
-                // The Golden Payload (Bypasses Age Restriction / Cipher)
                 val contentPlaybackContext = JSONObject()
                 contentPlaybackContext.put("html5Preference", "HTML5_PREF_WANTS")
-                contentPlaybackContext.put("signatureTimestamp", 20684) // TODO: Dynamic fetching
+                contentPlaybackContext.put("signatureTimestamp", 20684)
                 
                 json.put("playbackContext", JSONObject().put("contentPlaybackContext", contentPlaybackContext))
                 json.put("contentCheckOk", true)
                 json.put("racyCheckOk", true)
 
-                // PoToken
                 val serviceIntegrityDimensions = JSONObject()
-                serviceIntegrityDimensions.put("poToken", poTokenResult.token)
+                serviceIntegrityDimensions.put("poToken", playerPoTokenResult.token)
                 json.put("serviceIntegrityDimensions", serviceIntegrityDimensions)
 
                 val requestBuilder = Request.Builder()
@@ -82,11 +82,19 @@ class AndroidVrStreamResolver(
 
                 val request = requestBuilder.build()
                 val response = client.newCall(request).execute()
+                val code = response.code
                 val body = response.body?.string() ?: throw Exception("Empty body")
 
                 val root = JSONObject(body)
 
-                // Check for errors
+                val poLen = playerPoTokenResult.token.length
+                val visLen = visitorData.length
+                android.util.Log.i("NativeCore", "[PlaybackTrace][YouTubePlayer] HTTP $code | videoId=$videoId | client=ANDROID_VR | visitorDataPresent=${visLen > 0} | visitorDataLength=$visLen | poTokenPresent=${poLen > 0} | poTokenLength=$poLen")
+                if (!response.isSuccessful) {
+                    android.util.Log.e("NativeCore", "[PlaybackTrace][YouTubePlayer] ERROR BODY: $body")
+                    throw Exception("YouTube /player HTTP $code: $body")
+                }
+
                 val playabilityStatus = root.optJSONObject("playabilityStatus")
                 val status = playabilityStatus?.optString("status")
                 if (status != "OK") {
@@ -103,7 +111,6 @@ class AndroidVrStreamResolver(
                     throw Exception("No adaptive formats available.")
                 }
 
-                // Pick the best audio format (highest audio bitrate)
                 var bestFormat: JSONObject? = null
                 var maxBitrate = -1
                 for (i in 0 until adaptiveFormats.length()) {
@@ -119,7 +126,7 @@ class AndroidVrStreamResolver(
                 }
 
                 if (bestFormat != null) {
-                    val url = bestFormat.optString("url", "")
+                    var url = bestFormat.optString("url", "")
                     if (url.isEmpty()) {
                         val cipher = bestFormat.optString("signatureCipher", "")
                         if (cipher.isNotEmpty()) {
@@ -128,6 +135,14 @@ class AndroidVrStreamResolver(
                             throw Exception("No URL or cipher provided.")
                         }
                     }
+                    
+                    // Append streaming pot
+                    if (!url.contains("pot=")) {
+                        val cleanPot = streamingPoTokenResult.token.trim().replace("=", "")
+                        url = if (url.contains("?")) "$url&pot=$cleanPot" else "$url?pot=$cleanPot"
+                    }
+                    android.util.Log.i("NativeCore", "[PlaybackTrace] resolved stream URL: ${url.take(80)}... (potLen=${streamingPoTokenResult.token.length})")
+                    
                     continuation.resume(StreamResolutionResult(
                         url = url,
                         format = bestFormat.optString("mimeType", "audio/mp4"),
@@ -144,3 +159,4 @@ class AndroidVrStreamResolver(
         }
     }
 }
+

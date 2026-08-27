@@ -1,4 +1,5 @@
 import { usePlayerStore } from '../store/player.store';
+import { PlaybackService } from '../services/playback.service';
 import { PlayerTrack } from '../types/player';
 
 export function usePlayer() {
@@ -35,11 +36,11 @@ export function usePlayer() {
     currentIndex: store.currentIndex,
 
     // Actions
-    play: store.play,
-    pause: store.pause,
-    togglePlayback: store.togglePlayback,
-    next: store.next,
-    previous: store.previous,
+    play: PlaybackService.play,
+    pause: PlaybackService.pause,
+    togglePlayback: () => store.isPlaying ? PlaybackService.pause() : PlaybackService.play(),
+    next: PlaybackService.skipToNext,
+    previous: PlaybackService.skipToPrevious,
     seek: (p: number) => store.seek(p * store.duration), // Seek by percentage (0-1)
     setVolume: store.setVolume,
     setRepeatMode: store.setRepeatMode,

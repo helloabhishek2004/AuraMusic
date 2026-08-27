@@ -41,7 +41,9 @@ export class PlaybackService {
 
       // Instruct native player to resolve and play the track ID
       AuraPlayer.saveTrackMetadata(track.id, track.title, track.artist || 'Unknown', track.album || null, track.duration ? Number(track.duration) : 0, track.art || null);
-      AuraPlayer.playTrack(track.id);
+      
+      const localUrl = (track.isLocal && track.url) ? track.url : null;
+      AuraPlayer.playTrack(track.id, localUrl);
     } catch (error) {
       console.error("[PlaybackService] Failed to load track natively:", error);
     }
@@ -49,6 +51,14 @@ export class PlaybackService {
 
   static async play(): Promise<void> {
     if (AuraPlayer) AuraPlayer.resume();
+  }
+
+  static async skipToNext(): Promise<void> {
+    if (AuraPlayer) AuraPlayer.skipNext();
+  }
+
+  static async skipToPrevious(): Promise<void> {
+    if (AuraPlayer) AuraPlayer.skipPrevious();
   }
 
   static async pause(): Promise<void> {

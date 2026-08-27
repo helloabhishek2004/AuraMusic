@@ -1,3 +1,4 @@
+import { PlaybackService } from "@/src/features/player/services/playback.service";
 import React, {
   memo,
   useCallback,
@@ -695,7 +696,7 @@ const LyricsSurface = memo(({
 const MoreMenuSurface = memo(({ visible, onClose, accentColor, currentTrack, onAddToPlaylist, onShare }: any) => {
   const isShuffle = usePlayerStore(s => s.isShuffle);
   const repeatMode = usePlayerStore(s => s.repeatMode);
-  const { toggleRepeat, toggleShuffle } = useMusicActions();
+  const { toggleRepeat, toggleShuffle, play, pause, prev, next } = useMusicActions();
   const router = useRouter();
   const menuAnim = useSharedValue(120);
   const menuOpacity = useSharedValue(0);
@@ -834,12 +835,9 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     transitionArtworkShared.value = transitionArtwork;
   }, [transitionArtwork]);
 
-  const play = usePlayerStore(s => s.play);
-  const pause = usePlayerStore(s => s.pause);
-  const next = usePlayerStore(s => s.next);
-  const prev = usePlayerStore(s => s.previous);
+  
 
-  const { toggleRepeat, toggleShuffle } = useMusicActions();
+  const { toggleRepeat, toggleShuffle, play, pause, prev, next } = useMusicActions();
   const isLiked = useLikesStore(s => !!(currentTrack?.id && s.likedTrackIds[currentTrack.id]));
   const toggleLike = useLikesStore(s => s.toggleLike);
 
@@ -860,8 +858,8 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   const [isLocked, setIsLocked] = useState(true);
 
   const handlePlayPause = useCallback(() => {
-    if (isPlaying) pause();
-    else play();
+    if (isPlaying) PlaybackService.pause();
+    else PlaybackService.play();
   }, [isPlaying, play, pause]);
 
   const handleSingleArtistPress = useCallback((artistName: string) => {
@@ -980,7 +978,7 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   };
 
   const nextTrackJS = () => {
-    next();
+    PlaybackService.skipToNext();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
@@ -1441,7 +1439,7 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
             </View>
           </Animated.View>
           <PlaybackScrubber accentColor={AURA_ACCENT} uiPhase={uiPhase} />
-          <View style={st.playbackRow}><SkipBtn icon="play-back" label="Prev" onPress={() => !isLocked && prev()} /><PlayPauseBtn isPlaying={isPlaying} onPress={() => !isLocked && handlePlayPause()} /><SkipBtn icon="play-forward" label="Next" onPress={() => !isLocked && next()} /></View>
+          <View style={st.playbackRow}><SkipBtn icon="play-back" label="Prev" onPress={() => !isLocked && PlaybackService.skipToPrevious()} /><PlayPauseBtn isPlaying={isPlaying} onPress={() => !isLocked && handlePlayPause()} /><SkipBtn icon="play-forward" label="Next" onPress={() => !isLocked && PlaybackService.skipToNext()} /></View>
           <VolumeControl uiPhase={uiPhase} />
         </Animated.View>
         <Animated.View style={[{ position: "absolute", bottom: Math.max(insets.bottom + 8, 20), width: "100%", zIndex: 20, elevation: 20 }, bottomBarOverlayStyle]}>

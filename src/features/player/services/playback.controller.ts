@@ -31,8 +31,7 @@ export class PlaybackController {
       
       if (state.error) {
         console.error("[NativeCore] Playback Error:", state.error);
-        usePlayerStore.setState({ error: state.error });
-        store.next(); // Try to skip on error
+        usePlayerStore.setState({ error: state.error, status: "error" });
       } else {
         usePlayerStore.setState({ error: null });
       }
@@ -109,13 +108,26 @@ export class PlaybackController {
 
       // Record to analytics
       const { useAnalyticsStore } = require("../../analytics/store/analytics.store");
-      useAnalyticsStore.getState().recordPlay(track, {
-        duration: duration,
-        listenDuration: finalPosition / 1000,
-        completionRatio,
-        completed: completionRatio >= 0.95 || wasCompleted,
-        skipped: !wasCompleted && completionRatio < 0.95,
-      });
+      const analytics = useAnalyticsStore.getState();
+      if (analytics?.addHistoryEntry) {
+        analytics.addHistoryEntry({
+          id: track.id,
+          title: track.title,
+          artist: track.artist,
+          artistId: track.artistId || null,
+          album: track.album || null,
+          albumId: track.albumId || null,
+          art: track.artwork || track.art || null,
+          artwork: track.artwork || track.art || null,
+          duration: duration,
+          position: finalPosition / 1000,
+          positionMs: finalPosition,
+          durationMs: duration * 1000,
+          completionRatio,
+          skipped: !wasCompleted && completionRatio < 0.95,
+          trackSnapshot: track,
+        });
+      }
 
     } catch (e) {
       console.warn("Failed to flush session", e);

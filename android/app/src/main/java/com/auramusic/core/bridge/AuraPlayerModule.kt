@@ -1,6 +1,8 @@
 package com.auramusic.core.bridge
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import com.auramusic.core.botguard.PoTokenManager
 import com.auramusic.core.botguard.VisitorDataManager
 import com.auramusic.core.db.AuraDatabase
@@ -14,14 +16,8 @@ import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import kotlinx.coroutines.*
 
-/**
- * React Native bridge for the AuraPlayer.
- * RN provides only videoIds — all resolution, tokens, and playback happen natively.
- */
 class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
     override fun getName() = "AuraPlayerModule"
-
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val visitorDataManager = VisitorDataManager()
     private val poTokenManager by lazy { PoTokenManager(reactApplicationContext) }
@@ -30,7 +26,21 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
     private val database by lazy { AuraDatabase.getInstance(reactApplicationContext) }
     private val historyManager by lazy { PlaybackHistoryManager(database) }
 
+    private val moduleScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    init {
+        // Prewarm BotGuard VM in the background as soon as module is created (app launch)
+        moduleScope.launch {
+            try {
+                poTokenManager.prewarm()
+            } catch (e: Exception) {
+                // Silent
+            }
+        }
+    }
+
     private var isListening = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private fun ensureListeners() {
         if (isListening) return
@@ -57,35 +67,38 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
     }
 
     @ReactMethod
-    fun playTrack(videoId: String) {
-        ensureListeners()
-        player.playTrack(videoId)
+    fun playTrack(videoId: String, localUrl: String? = null) {
+        mainHandler.post {
+            ensureListeners()
+            player.playTrack(videoId, localUrl)
+        }
     }
 
     @ReactMethod
     fun pause() {
-        player.pause()
+        mainHandler.post { player.pause() }
     }
 
     @ReactMethod
     fun resume() {
-        player.resume()
+        mainHandler.post { player.resume() }
     }
 
     @ReactMethod
     fun seekTo(positionMs: Double) {
-        player.seekTo(positionMs.toLong())
+        mainHandler.post { player.seekTo(positionMs.toLong()) }
     }
 
     @ReactMethod
     fun skipNext() {
-        player.skipNext()
+        mainHandler.post { player.skipNext() }
     }
 
     @ReactMethod
     fun skipPrevious() {
-        player.skipPrevious()
+        mainHandler.post { player.skipPrevious() }
     }
+    
     @ReactMethod
     fun saveTrackMetadata(id: String, title: String, artist: String, album: String?, duration: Int, artworkUrl: String?) {
         historyManager.saveTrackMetadata(id, title, artist, album, duration, artworkUrl)
@@ -97,26 +110,28 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
         for (i in 0 until trackIds.size()) {
             trackIds.getString(i)?.let { ids.add(it) }
         }
-        player.setQueue(ids)
+        mainHandler.post { player.setQueue(ids) }
     }
 
     @ReactMethod
     fun stop() {
-        player.stop()
+        mainHandler.post { player.stop() }
     }
 
     @ReactMethod
     fun getState(promise: Promise) {
-        val state = player.getState()
-        val map = Arguments.createMap().apply {
-            putBoolean("isPlaying", state.isPlaying)
-            putString("currentTrackId", state.currentTrackId)
-            putDouble("positionMs", state.positionMs.toDouble())
-            putDouble("durationMs", state.durationMs.toDouble())
-            putBoolean("isBuffering", state.isBuffering)
-            putString("error", state.error)
+        mainHandler.post {
+            val state = player.getState()
+            val map = Arguments.createMap().apply {
+                putBoolean("isPlaying", state.isPlaying)
+                putString("currentTrackId", state.currentTrackId)
+                putDouble("positionMs", state.positionMs.toDouble())
+                putDouble("durationMs", state.durationMs.toDouble())
+                putBoolean("isBuffering", state.isBuffering)
+                putString("error", state.error)
+            }
+            promise.resolve(map)
         }
-        promise.resolve(map)
     }
 
     private fun sendEvent(eventName: String, params: WritableMap) {
@@ -125,6 +140,4 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
             .emit(eventName, params)
     }
 }
-
-
 

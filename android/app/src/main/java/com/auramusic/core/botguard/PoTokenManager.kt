@@ -8,19 +8,23 @@ import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicBoolean
 
 data class PoTokenResult(val token: String)
@@ -28,122 +32,401 @@ data class PoTokenResult(val token: String)
 class PoTokenManager(private val context: Context) {
     private val TAG = "PoTokenManager"
     private val REQUEST_KEY = "O43z0dpjhgX20SCx4KAo"
+    private val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.3"
     private val JSON_PROTO = "application/json+protobuf".toMediaType()
     private val httpClient = OkHttpClient.Builder().build()
     
     private var webView: WebView? = null
-    private var isPrewarmed = false
     private val mutex = Mutex()
-    private var currentVisitorData: String? = null
+    private var isPrewarmed = false
+    private var lastInitTime = 0L
     
-    private var initContinuation: kotlin.coroutines.Continuation<Unit>? = null
-    private var tokenContinuation: kotlin.coroutines.Continuation<String>? = null
+    private var initContinuation: Continuation<Unit>? = null
+    private val tokenContinuations = ConcurrentHashMap<String, Continuation<String>>()
+    private val requestCounter = AtomicLong(0)
 
-    suspend fun prewarm() = withContext(Dispatchers.Main) {
-        if (isPrewarmed) return@withContext
+    suspend fun prewarm(force: Boolean = false) = withContext(Dispatchers.Main) {
+        if (!force && isPrewarmed && System.currentTimeMillis() - lastInitTime < 5 * 60 * 1000) return@withContext
         mutex.withLock {
-            if (isPrewarmed) return@withContext
+            if (!force && isPrewarmed && System.currentTimeMillis() - lastInitTime < 5 * 60 * 1000) return@withContext
+            Log.d("NativeCore", "[PlaybackTrace] BotGuard initialization")
             setupWebView()
             initBotGuard()
             isPrewarmed = true
-        }
-    }
-
-    fun invalidate() {
-        Handler(Looper.getMainLooper()).post {
-            webView?.destroy()
-            webView = null
-            isPrewarmed = false
+            lastInitTime = System.currentTimeMillis()
         }
     }
 
     suspend fun getToken(identifier: String): PoTokenResult = withContext(Dispatchers.Main) {
+        if (!isPrewarmed || webView == null || System.currentTimeMillis() - lastInitTime > 5 * 60 * 1000) {
+            prewarm(force = true)
+        }
         mutex.withLock {
             if (!isPrewarmed || webView == null) {
-                setupWebView()
-                initBotGuard()
-                isPrewarmed = true
+                prewarm(force = true)
             }
-            
-            val token = suspendCancellableCoroutine<String> { continuation ->
-                tokenContinuation = continuation
-                val js = "try { window.minter.mint('$identifier', (token) => { window.PoTokenWebView.onToken(token); }); } catch(e) { window.PoTokenWebView.onError(e.message); }"
+        }
+        
+        Log.i("NativeCore", "[PlaybackTrace] generating PO token identifierLength=${identifier.length}")
+        val token = suspendCancellableCoroutine<String> { continuation ->
+            val requestId = requestCounter.incrementAndGet().toString()
+            tokenContinuations[requestId] = continuation
+            val u8Id = stringToU8(identifier)
+            val js = """
+                try {
+                    obtainPoToken($u8Id).then(function(poTokenU8) {
+                        var binary = '';
+                        var len = poTokenU8.byteLength || poTokenU8.length;
+                        for (var i = 0; i < len; i++) {
+                            binary += String.fromCharCode(poTokenU8[i]);
+                        }
+                        var poTokenBase64 = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                        PoTokenWebView.onObtainPoTokenResult("$requestId", poTokenBase64);
+                    }).catch(function(error) {
+                        PoTokenWebView.onObtainPoTokenError("$requestId", error + "\n" + (error.stack || ""));
+                    });
+                } catch (error) {
+                    PoTokenWebView.onObtainPoTokenError("$requestId", error + "\n" + error.stack);
+                }
+            """
+            Handler(Looper.getMainLooper()).post {
                 webView?.evaluateJavascript(js, null)
             }
-            PoTokenResult(token)
         }
+        
+        // Strict validation barrier
+        if (token.isEmpty() || token.contains("is not a function") || token.contains("Error") || token.contains("TypeError") || token.startsWith("E:")) {
+            Log.e("NativeCore", "[PlaybackTrace] PO token generation FAILED reason=Invalid token content: $token")
+            throw Exception("Invalid PO token generated by BotGuard: $token")
+        }
+        
+        Log.i("NativeCore", "[PlaybackTrace] PO token generated valid=true base64Length=${token.length}")
+        PoTokenResult(token)
     }
 
     private fun setupWebView() {
         webView?.destroy()
         webView = WebView(context)
         webView?.settings?.javaScriptEnabled = true
+        webView?.settings?.domStorageEnabled = true
+        webView?.settings?.userAgentString = USER_AGENT
         webView?.addJavascriptInterface(this@PoTokenManager, "PoTokenWebView")
     }
 
     private suspend fun initBotGuard() {
-        val botguardProgram = downloadBotguard()
         suspendCancellableCoroutine<Unit> { continuation ->
             initContinuation = continuation
             val html = """
                 <html>
-                <body>
-                    <script>
-                        $botguardProgram
+                <head>
+                <script>
+                    var poTokenMinter = null;
+
+                    function loadBotGuard(challengeData) {
+                        PoTokenWebView.logTrace("VM initialization");
+                        var bgVm = window[challengeData.globalName];
+                        var bgProgram = challengeData.program;
+                        var bgVmFunctions = null;
+                        if (!bgVm) throw new Error("VM not found");
+                        if (!bgVm.a) throw new Error("Could not load program");
+
+                        var vmFunctionsCallback = function(asyncSnapshotFunction) {
+                            bgVmFunctions = { asyncSnapshotFunction: asyncSnapshotFunction };
+                        };
+
                         try {
-                            const botguard = window.trayride;
-                            window.minter = new botguard.T();
-                            window.PoTokenWebView.onInitSuccess();
+                            PoTokenWebView.logTrace("VM execution started");
+                            bgVm.a(bgProgram, vmFunctionsCallback, true, undefined, function(){}, [[],[]]);
+                            PoTokenWebView.logTrace("VM execution success=true");
                         } catch(e) {
-                            window.PoTokenWebView.onInitError(e.message);
+                            throw new Error("Failed to execute program: " + e.message);
                         }
-                    </script>
+
+                        return new Promise(function(resolve, reject) {
+                            var attempts = 0;
+                            var maxAttempts = 10000;
+                            var checkInterval = setInterval(function() {
+                                if (bgVmFunctions && bgVmFunctions.asyncSnapshotFunction) {
+                                    clearInterval(checkInterval);
+                                    resolve({ vmFunctions: bgVmFunctions, vm: bgVm, program: bgProgram });
+                                } else if (attempts >= maxAttempts) {
+                                    clearInterval(checkInterval);
+                                    reject(new Error("Timeout waiting for asyncSnapshotFunction"));
+                                }
+                                attempts++;
+                            }, 1);
+                        });
+                    }
+
+                    function snapshot(botguard, args) {
+                        return new Promise(function(resolve, reject) {
+                            if (!botguard.vmFunctions || !botguard.vmFunctions.asyncSnapshotFunction) {
+                                return reject(new Error("Async snapshot function not found"));
+                            }
+                            try {
+                                botguard.vmFunctions.asyncSnapshotFunction(
+                                    function(response) { 
+                                        PoTokenWebView.logTrace("snapshot generated=true");
+                                        resolve(response); 
+                                    },
+                                    [args.contentBinding, args.signedTimestamp, args.webPoSignalOutput, args.skipPrivacyBuffer]
+                                );
+                            } catch (e) {
+                                reject(new Error("Snapshot failed: " + e.message));
+                            }
+                        });
+                    }
+
+                    function runBotGuard(challengeData) {
+                        var interpreterJavascript = challengeData.interpreterJavascript.privateDoNotAccessOrElseSafeScriptWrappedValue;
+                        if (interpreterJavascript) {
+                            new Function(interpreterJavascript)();
+                        } else {
+                            throw new Error("Could not load VM");
+                        }
+                        var webPoSignalOutput = [];
+                        return loadBotGuard({
+                            globalName: challengeData.globalName,
+                            program: challengeData.program
+                        }).then(function(botguard) {
+                            return snapshot(botguard, { webPoSignalOutput: webPoSignalOutput });
+                        }).then(function(botguardResponse) {
+                            return { webPoSignalOutput: webPoSignalOutput, botguardResponse: botguardResponse };
+                        });
+                    }
+
+                    async function createPoTokenMinter(webPoSignalOutput, integrityToken) {
+                        var getMinter = webPoSignalOutput[0];
+                        if (typeof getMinter !== "function") throw new Error("Minter factory not found");
+                        
+                        var minterResult = getMinter(integrityToken);
+                        if (minterResult && typeof minterResult.then === "function") {
+                            poTokenMinter = await minterResult;
+                        } else {
+                            poTokenMinter = minterResult;
+                        }
+                        
+                        if (typeof poTokenMinter !== "function") throw new Error("Minter callback is invalid");
+                    }
+
+                    async function obtainPoToken(identifier) {
+                        if (!poTokenMinter) throw new Error("Minter not initialized");
+                        var result;
+                        var mintResult = poTokenMinter(identifier);
+                        if (mintResult && typeof mintResult.then === "function") {
+                            result = await mintResult;
+                        } else {
+                            result = mintResult;
+                        }
+                        if (!(result instanceof Uint8Array)) throw new Error("Result is not Uint8Array");
+                        return result;
+                    }
+                </script>
+                </head>
+                <body>
+                <script>PoTokenWebView.downloadAndRunBotguard()</script>
                 </body>
                 </html>
             """.trimIndent()
-            webView?.loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+            Handler(Looper.getMainLooper()).post {
+                webView?.loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+            }
         }
     }
 
-    private suspend fun downloadBotguard(): String = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("https://www.youtube.com/youtubei/v1/att/get?key=$REQUEST_KEY")
-            .post("{}".toRequestBody(JSON_PROTO))
-            .header("Content-Type", "application/json+protobuf")
-            .header("User-Agent", "Mozilla/5.0")
-            .build()
-        val response = httpClient.newCall(request).execute()
-        val body = response.body?.string() ?: throw Exception("Failed to get bg config")
-        val json = JSONObject(body)
-        var botguard = json.optString("c")
-        if (botguard.isEmpty()) throw Exception("Empty botguard script")
-        val pidx = botguard.indexOf(";")
-        botguard = botguard.substring(pidx + 1)
-        val decoded = Base64.decode(botguard, Base64.DEFAULT).decodeToString()
-        decoded
+    @JavascriptInterface
+    fun logTrace(msg: String) {
+        Log.d("NativeCore", "[PlaybackTrace] $msg")
     }
 
     @JavascriptInterface
-    fun onInitSuccess() {
+    fun downloadAndRunBotguard() {
+        Log.d("NativeCore", "[PlaybackTrace] Integrity Create request")
+        makePost("https://www.youtube.com/api/jnn/v1/Create", "[ \"$REQUEST_KEY\" ]") { response, responseBody ->
+            Log.d("NativeCore", "[PlaybackTrace] Integrity Create HTTP status=${response.code}")
+            val parsed = parseChallengeData(responseBody)
+            Log.d("NativeCore", "[PlaybackTrace] challenge received=true")
+            Handler(Looper.getMainLooper()).post {
+                webView?.evaluateJavascript(
+                    """try {
+                        data = $parsed
+                        runBotGuard(data).then(function (result) {
+                            this.webPoSignalOutput = result.webPoSignalOutput
+                            PoTokenWebView.onRunBotguardResult(result.botguardResponse)
+                        }, function (error) {
+                            PoTokenWebView.onJsInitializationError(error + "\n" + error.stack)
+                        })
+                    } catch (error) {
+                        PoTokenWebView.onJsInitializationError(error + "\n" + error.stack)
+                    }""", null
+                )
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun onRunBotguardResult(botguardResponse: String) {
+        Log.d("NativeCore", "[PlaybackTrace] GenerateIT request")
+        makePost("https://www.youtube.com/api/jnn/v1/GenerateIT", "[ \"$REQUEST_KEY\", \"$botguardResponse\" ]") { response, responseBody ->
+            Log.d("NativeCore", "[PlaybackTrace] GenerateIT HTTP status=${response.code}")
+            val (integrityToken, ext) = parseIntegrityTokenData(responseBody)
+            Log.d("NativeCore", "[PlaybackTrace] integrityToken received=true")
+            Log.d("NativeCore", "[PlaybackTrace] webPoSignalOutput received=true")
+            Handler(Looper.getMainLooper()).post {
+                webView?.evaluateJavascript(
+                    """try {
+                        this.integrityToken = $integrityToken
+                        createPoTokenMinter(webPoSignalOutput, integrityToken).then(function() {
+                            PoTokenWebView.onMinterCreated()
+                        }).catch(function(error) {
+                            PoTokenWebView.onJsInitializationError(error + "\n" + (error.stack || ""))
+                        })
+                    } catch (error) {
+                        PoTokenWebView.onJsInitializationError(error + "\n" + error.stack)
+                    }""", null
+                )
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun onMinterCreated() {
+        Log.d("NativeCore", "[PlaybackTrace] poTokenMinter initialized=true")
         initContinuation?.resume(Unit)
         initContinuation = null
     }
 
     @JavascriptInterface
-    fun onInitError(error: String) {
-        initContinuation?.resumeWithException(Exception(error))
+    fun onJsInitializationError(err: String) {
+        Log.e("NativeCore", "[PlaybackTrace] PO token generation FAILED reason=\$err")
+        initContinuation?.resumeWithException(Exception(err))
         initContinuation = null
     }
 
     @JavascriptInterface
-    fun onToken(token: String) {
-        tokenContinuation?.resume(token)
-        tokenContinuation = null
+    fun onObtainPoTokenResult(requestId: String, poTokenU8: String) {
+        val poToken = try {
+            u8ToBase64(poTokenU8)
+        } catch (e: Exception) {
+            tokenContinuations.remove(requestId)?.resumeWithException(e)
+            return
+        }
+        tokenContinuations.remove(requestId)?.resume(poToken)
     }
 
     @JavascriptInterface
-    fun onError(error: String) {
-        tokenContinuation?.resumeWithException(Exception(error))
-        tokenContinuation = null
+    fun onObtainPoTokenError(requestId: String, err: String) {
+        Log.e("NativeCore", "[PlaybackTrace] PO token generation FAILED reason=\$err")
+        tokenContinuations.remove(requestId)?.resumeWithException(Exception(err))
+    }
+
+    private fun makePost(url: String, data: String, onResponse: (Response, String) -> Unit) {
+        Thread {
+            try {
+                val req = Request.Builder().url(url)
+                    .post(data.toRequestBody(JSON_PROTO))
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "application/json")
+                    .header("Content-Type", "application/json+protobuf")
+                    .header("x-goog-api-key", "AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw")
+                    .header("x-user-agent", "grpc-web-javascript/0.1")
+                    .build()
+                val resp = httpClient.newCall(req).execute()
+                val body = resp.body?.string() ?: ""
+                if (resp.isSuccessful && body.isNotEmpty()) {
+                    onResponse(resp, body)
+                } else {
+                    onJsInitializationError("HTTP Error ${resp.code}: $body")
+                }
+            } catch (e: Exception) {
+                onJsInitializationError("Network exception: ${e.message}")
+            }
+        }.start()
+    }
+
+    private fun parseChallengeData(raw: String): String {
+        val scrambled = JSONArray(raw)
+        val challengeData = if (scrambled.length() > 1 && scrambled.opt(1) is String) {
+            JSONArray(descramble(scrambled.getString(1)))
+        } else {
+            scrambled.getJSONArray(0)
+        }
+        val messageId = challengeData.getString(0)
+        val interpreterHash = challengeData.getString(3)
+        val program = challengeData.getString(4)
+        val globalName = challengeData.getString(5)
+        val clientExperimentsStateBlob = challengeData.getString(7)
+        
+        var privateDoNotAccessOrElseSafeScriptWrappedValue: String? = null
+        if (!challengeData.isNull(1)) { 
+            val arr = challengeData.getJSONArray(1)
+            for (i in 0 until arr.length()) { 
+                if (arr.opt(i) is String) { 
+                    privateDoNotAccessOrElseSafeScriptWrappedValue = arr.getString(i)
+                    break 
+                } 
+            } 
+        }
+        
+        var privateDoNotAccessOrElseTrustedResourceUrlWrappedValue: String? = null
+        if (!challengeData.isNull(2)) { 
+            val arr = challengeData.getJSONArray(2)
+            for (i in 0 until arr.length()) { 
+                if (arr.opt(i) is String) { 
+                    privateDoNotAccessOrElseTrustedResourceUrlWrappedValue = arr.getString(i)
+                    break 
+                } 
+            } 
+        }
+        
+        val obj = JSONObject()
+        obj.put("messageId", messageId)
+        val interp = JSONObject()
+        interp.put("privateDoNotAccessOrElseSafeScriptWrappedValue", privateDoNotAccessOrElseSafeScriptWrappedValue ?: JSONObject.NULL)
+        interp.put("privateDoNotAccessOrElseTrustedResourceUrlWrappedValue", privateDoNotAccessOrElseTrustedResourceUrlWrappedValue ?: JSONObject.NULL)
+        obj.put("interpreterJavascript", interp)
+        obj.put("interpreterHash", interpreterHash)
+        obj.put("program", program)
+        obj.put("globalName", globalName)
+        obj.put("clientExperimentsStateBlob", clientExperimentsStateBlob)
+        return obj.toString()
+    }
+    
+    private fun parseIntegrityTokenData(raw: String): Pair<String, Long> {
+        val arr = JSONArray(raw)
+        return Pair(base64ToU8(arr.getString(0)), arr.getLong(1))
+    }
+    
+    private fun descramble(scrambled: String): String {
+        val bytes = base64ToByteString(scrambled)
+        val decoded = ByteArray(bytes.size)
+        for (i in bytes.indices) { decoded[i] = (bytes[i] + 97).toByte() }
+        return String(decoded)
+    }
+    
+    private fun base64ToU8(base64: String): String {
+        return newUint8Array(base64ToByteString(base64))
+    }
+    
+    private fun stringToU8(identifier: String): String {
+        return newUint8Array(identifier.toByteArray())
+    }
+    
+    private fun newUint8Array(contents: ByteArray): String {
+        return "new Uint8Array([" + contents.joinToString(",") { (it.toInt() and 0xFF).toString() } + "])"
+    }
+    
+    private fun base64ToByteString(base64: String): ByteArray {
+        val mod = base64.replace("-", "+").replace("_", "/").replace(".", "=")
+        return Base64.decode(mod, Base64.DEFAULT)
+    }
+    
+    private fun u8ToBase64(poToken: String): String {
+        if (!poToken.contains(",")) {
+            return poToken.trim().replace("=", "")
+        }
+        val bytes = poToken.split(",").map { it.toInt().toByte() }.toByteArray()
+        return Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING).trim().replace("=", "")
     }
 }
+

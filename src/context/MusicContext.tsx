@@ -3,6 +3,7 @@ import { SharedValue } from "react-native-reanimated";
 import { usePlayerStore } from "../features/player/store/player.store";
 import { PlayerTrack, RepeatMode } from "../features/player/types/player";
 import { playbackProgress } from "../features/player/services/playback-progress";
+import { PlaybackService } from "../features/player/services/playback.service";
 
 export type Track = PlayerTrack;
 
@@ -109,24 +110,51 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     usePlayerStore.getState().setRepeatMode(nextMode);
   }, []);
 
-  const actionsValue = useMemo<MusicActionsContextType>(
+    const actionsValue = useMemo<MusicActionsContextType>(
     () => ({
-      play: async (track?: Track) => track ? usePlayerStore.getState().setTrack(track) : usePlayerStore.getState().play(),
-      pause: async () => usePlayerStore.getState().pause(),
-      next: async () => usePlayerStore.getState().next(),
-      prev: async (forcePrevious?: boolean) => usePlayerStore.getState().previous(forcePrevious),
+      play: async (track?: Track) => { 
+        if (track) {
+
+            await PlaybackService.loadTrack(track, [track], 0);
+        } else {
+
+            await PlaybackService.play();
+        }
+      },
+      pause: async () => {
+
+          await PlaybackService.pause();
+      },
+      next: async () => { 
+
+          await PlaybackService.skipToNext();
+      },
+      prev: async (forcePrevious?: boolean) => {
+
+          await PlaybackService.skipToPrevious();
+      },
       seek: async (p: number) => {
         const duration = usePlayerStore.getState().duration;
-        await usePlayerStore.getState().seek(p * duration);
+
+        await PlaybackService.seek(p * duration);
       },
-      setTrack: async (track: Track) => usePlayerStore.getState().setTrack(track),
-      setQueue: async (tracks: Track[], startIndex?: number, context?: QueueContext) => usePlayerStore.getState().setQueue(tracks, startIndex, context),
-      playNext: (track: Track) => usePlayerStore.getState().playNext(track),
-      addToQueue: (track: Track) => usePlayerStore.getState().addToQueue(track),
+      setTrack: async (track: Track) => {
+          await usePlayerStore.getState().setTrack(track);
+      },
+      setQueue: async (tracks: Track[], startIndex?: number, context?: QueueContext) => {
+          if (tracks.length > 0) {
+              await usePlayerStore.getState().setQueue(tracks, startIndex ?? 0, context);
+          }
+      },
+      playNext: (track: Track) => { console.warn('playNext unimplemented natively'); },
+      addToQueue: (track: Track) => { console.warn('addToQueue unimplemented natively'); },
       toggleRepeat,
-      toggleShuffle: async () => usePlayerStore.getState().toggleShuffle(),
-      setVolume: async (volume: number) => usePlayerStore.getState().setVolume(volume),
-      preloadTrack: async (track: Track) => usePlayerStore.getState().preloadTrack(track),
+      toggleShuffle: async () => usePlayerStore.getState().setShuffle(!usePlayerStore.getState().isShuffle),
+      setVolume: async (volume: number) => {
+
+          await PlaybackService.setVolume(volume);
+      },
+      preloadTrack: async (track: Track) => null,
     }),
     [toggleRepeat],
   );

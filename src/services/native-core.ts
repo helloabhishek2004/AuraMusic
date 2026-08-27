@@ -42,8 +42,10 @@ export interface NativeHistoryEntry {
 // ─── Native Module Interfaces ─────────────────────────────────────
 
 interface AuraPlayerModuleInterface {
-  playTrack(videoId: string): void;
+  playTrack(videoId: string, localUrl?: string | null): void;
   pause(): void;
+  skipNext(): void;
+  skipPrevious(): void;
   resume(): void;
   seekTo(positionMs: number): void;
   saveTrackMetadata(id: string, title: string, artist: string, album: string | null, duration: number, artworkUrl: string | null): void;
@@ -57,6 +59,10 @@ interface AuraPlayerModuleInterface {
 interface AuraYouTubeModuleInterface {
   search(query: string): Promise<NativeTrack[]>;
   getTrack(videoId: string): Promise<NativeTrack>;
+  getArtistDetails(browseId: string): Promise<any>;
+  getAlbumDetails(browseId: string): Promise<any>;
+  searchArtists(query: string): Promise<any[]>;
+  searchAlbums(query: string): Promise<any[]>;
 }
 
 interface AuraHistoryModuleInterface {
@@ -113,4 +119,5 @@ export function onTrackChanged(
 export function isNativeCoreAvailable(): boolean {
   return isAndroid && !!NativeModules.AuraPlayerModule;
 }
+
 

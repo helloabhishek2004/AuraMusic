@@ -25,13 +25,21 @@ class VisitorDataManager {
             val body = response.body?.string() ?: return@withContext null
             val regex = "\"visitorData\":\"(.*?)\"".toRegex()
             val match = regex.find(body)
-            val visitorData = match?.groups?.get(1)?.value
+            var visitorData = match?.groups?.get(1)?.value
             if (visitorData != null) {
+                if (visitorData.contains("%")) {
+                    try {
+                        visitorData = java.net.URLDecoder.decode(visitorData, "UTF-8")
+                    } catch (e: Exception) {
+                        // Keep raw if decoding fails
+                    }
+                }
                 cachedVisitorData.set(visitorData)
+                android.util.Log.i("NativeCore", "[PlaybackTrace] visitorData extracted successfully (len=${visitorData.length})")
             }
             visitorData
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("NativeCore", "[PlaybackTrace] Error fetching visitorData: ${e.message}", e)
             null
         }
     }

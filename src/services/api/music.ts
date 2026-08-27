@@ -1,3 +1,4 @@
+import { isNativeCoreAvailable, AuraYouTube } from "../native-core";
 import apiClient from "./client";
 import { 
   SearchEntity, 
@@ -249,10 +250,13 @@ export const musicService = {
   searchArtists: async (query: string): Promise<SearchEntity[]> => {
     try {
       if (!query.trim()) return [];
-
-      const response = await apiClient.get(`/search`, {
-        params: { q: query, type: 'artists' },
-      });
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        const data = await AuraYouTube.searchArtists(query);
+        return data.map((a: any) => ({
+          id: a.id, title: a.title, type: 'artist', art: a.art || "", subscribers: ""
+        }));
+      }
+      const response = await apiClient.get(`/search`, { params: { q: query, type: 'artists' } });
 
       return (response.data || [] as any[])
         .map(mapArtistResult)
@@ -269,10 +273,13 @@ export const musicService = {
   searchAlbums: async (query: string): Promise<SearchEntity[]> => {
     try {
       if (!query.trim()) return [];
-
-      const response = await apiClient.get(`/search`, {
-        params: { q: query, type: 'albums' },
-      });
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        const data = await AuraYouTube.searchAlbums(query);
+        return data.map((a: any) => ({
+          id: a.id, title: a.title, type: 'album', artist: a.artist || "", art: a.art || ""
+        }));
+      }
+      const response = await apiClient.get(`/search`, { params: { q: query, type: 'albums' } });
 
       return (response.data || [] as any[])
         .map(mapAlbumResult)
@@ -289,6 +296,15 @@ export const musicService = {
   lookupArtistByName: async (artistName: string): Promise<SearchEntity | null> => {
     try {
       if (!artistName.trim()) return null;
+
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        const data = await AuraYouTube.searchArtists(artistName);
+        if (data && data.length > 0) {
+          const a = data[0];
+          return { id: a.id, title: a.title, type: 'artist', artist: a.title, art: a.art || "", subscribers: "" };
+        }
+        return null;
+      }
 
       const response = await apiClient.get(`/search`, {
         params: { q: artistName, type: 'artists' },
@@ -313,7 +329,29 @@ export const musicService = {
   getArtistDetails: async (browseId: string): Promise<ArtistDetails | null> => {
     try {
       if (!browseId) return null;
-
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        const nData = await AuraYouTube.getArtistDetails(browseId);
+        if (nData) {
+          return {
+            id: nData.id,
+            name: nData.name || nData.title,
+            description: nData.description || "",
+            thumbnail: nData.art || nData.thumbnail || "",
+            subscribers: "",
+            songs: (nData.songs || []).map((s: any) => ({
+              id: s.id, title: s.title, artist: s.artist, album: s.album, duration: s.duration, art: s.artworkUrl || s.art || "", source: 'ytmusic'
+            })),
+            songs_params: "",
+            albums: (nData.albums || []).map((a: any) => ({
+              id: a.id, title: a.title, year: a.year || "", thumbnail: a.art || a.thumbnail || ""
+            })),
+            albums_params: "",
+            singles: [],
+            singles_params: "",
+            related: []
+          };
+        }
+      }
       const response = await apiClient.get(`/artist/${browseId}`);
       const data = response.data;
 
@@ -409,7 +447,21 @@ export const musicService = {
   getAlbumDetails: async (browseId: string): Promise<AlbumDetails | null> => {
     try {
       if (!browseId) return null;
-
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        const nData = await AuraYouTube.getAlbumDetails(browseId);
+        if (nData) {
+          return {
+            id: nData.id,
+            title: nData.title,
+            artist: nData.artist || "",
+            year: nData.year || "",
+            thumbnail: nData.thumbnail || nData.art || "",
+            tracks: (nData.tracks || nData.songs || []).map((s: any) => ({
+              id: s.id, title: s.title, artist: s.artist || nData.artist || "", album: nData.title, duration: s.duration, art: s.artworkUrl || s.art || nData.thumbnail || "", source: 'ytmusic'
+            }))
+          };
+        }
+      }
       const response = await apiClient.get(`/album/${browseId}`);
       const data = response.data;
 

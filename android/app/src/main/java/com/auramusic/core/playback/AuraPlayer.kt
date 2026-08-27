@@ -37,7 +37,24 @@ class AuraPlayer(
 
     fun initialize() {
         if (exoPlayer != null) return
-        exoPlayer = ExoPlayer.Builder(context).build()
+
+        val okHttpClient = okhttp3.OkHttpClient.Builder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .retryOnConnectionFailure(true)
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+
+        val userAgent = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+        val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okHttpClient)
+            .setUserAgent(userAgent)
+        val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
+
+        exoPlayer = ExoPlayer.Builder(context)
+            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory))
+            .build()
+            
         exoPlayer?.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
@@ -58,11 +75,13 @@ class AuraPlayer(
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                 val trackId = currentState.currentTrackId
-                // If HTTP 403 or similar, attempt re-resolution
+                android.util.Log.e("NativeCore", "[PlaybackTrace] ExoPlayer error on track $trackId: ${error.message}", error)
                 if (retryCount < MAX_RETRIES && trackId != null) {
                     retryCount++
-                    playTrack(trackId)
+                    android.util.Log.w("NativeCore", "[PlaybackTrace] Retrying playback for $trackId (attempt $retryCount/$MAX_RETRIES)")
+                    playTrackInternal(trackId, isRetry = true)
                 } else {
+                    android.util.Log.e("NativeCore", "[PlaybackTrace] Playback permanently failed for $trackId after $retryCount retries")
                     updateState(currentState.copy(isBuffering = false, error = error.message))
                     notifyEvent(PlaybackEvent.ERROR, trackId)
                     retryCount = 0
@@ -71,7 +90,16 @@ class AuraPlayer(
         })
     }
 
-    fun playTrack(videoId: String) {
+    fun playTrack(videoId: String, localUrl: String? = null) {
+        val idx = queue.indexOf(videoId)
+        if (idx != -1) currentIndex = idx
+        playTrackInternal(videoId, localUrl, isRetry = false)
+    }
+
+    private fun playTrackInternal(videoId: String, localUrl: String? = null, isRetry: Boolean = false) {
+        if (!isRetry) {
+            retryCount = 0
+        }
         scope.launch {
             try {
                 initialize()
@@ -81,19 +109,27 @@ class AuraPlayer(
                     error = null
                 ))
 
-                val result = withContext(Dispatchers.IO) {
-                    streamResolver.resolve(videoId)
+                val finalUrl = if (localUrl != null) {
+                    localUrl
+                } else {
+                    val result = withContext(Dispatchers.IO) {
+                        streamResolver.resolve(videoId)
+                    }
+                    result.url
                 }
 
                 exoPlayer?.apply {
-                    setMediaItem(MediaItem.fromUri(result.url))
+                    android.util.Log.i("NativeCore", "[PlaybackTrace] Preparing ExoPlayer with URL: $finalUrl")
+                    setMediaItem(MediaItem.fromUri(finalUrl))
                     prepare()
                     play()
                 }
 
-                retryCount = 0
-                notifyEvent(PlaybackEvent.PLAY_STARTED, videoId)
+                if (!isRetry) {
+                    notifyEvent(PlaybackEvent.PLAY_STARTED, videoId)
+                }
             } catch (e: Exception) {
+                android.util.Log.e("NativeCore", "[PlaybackTrace] playTrack error: ${e.message}", e)
                 updateState(currentState.copy(isBuffering = false, error = e.message))
                 notifyEvent(PlaybackEvent.ERROR, videoId)
             }
@@ -190,3 +226,4 @@ class AuraPlayer(
         progressJob = null
     }
 }
+

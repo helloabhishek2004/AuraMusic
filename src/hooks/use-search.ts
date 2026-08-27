@@ -94,61 +94,26 @@ export function useSearch(initialQuery: string = '') {
     setError(null);
 
     try {
-      // 1. PRIMARY SEARCH: Songs
-      console.log('[Search] PRIMARY: Searching songs for:', trimmed);
-      let songsData: any[] = [];
-      if (isNativeCoreAvailable() && AuraYouTube) {
-        console.log('[Search] Using Native AuraYouTube engine');
-        const nativeTracks = await AuraYouTube.search(trimmed);
-        songsData = nativeTracks.map(t => ({
-          type: 'song',
-          id: t.id,
-          title: t.title,
-          artist: t.artist,
-          album: t.album,
-          duration: t.duration ? `${Math.floor(t.duration/60)}:${(t.duration%60).toString().padStart(2, '0')}` : '--:--',
-          art: t.artworkUrl,
-          source: 'ytmusic'
-        }));
-      } else {
-        songsData = await musicService.searchSongs(trimmed);
-      }
+      // 1. PARALLEL SEARCH
+      console.log(`[Search] PRIMARY: Searching for: ${trimmed}`);
+      
+      const [songsData, artistResults, albumResults] = await Promise.all([
+        musicService.searchSongs(trimmed),
+        musicService.searchArtists(trimmed).catch(() => []),
+        musicService.searchAlbums(trimmed).catch(() => [])
+      ]);
       
       if (controller.signal.aborted) return;
 
-      if (songsData.length === 0) {
+      if (songsData.length === 0 && artistResults.length === 0 && albumResults.length === 0) {
         setResults(EMPTY_RESULT);
         setIsLoading(false);
         return;
       }
 
-      // 2. PARALLEL ENRICHMENT: Contextual Extraction
-      const uniqueArtists = extractUniqueArtists(songsData);
-      
       setIsEnriching(true);
 
-      // Fetch artists and albums in parallel with primary songs
-      const [artistResults, albumResults] = await Promise.all([
-        // Artists Enrichment
-        Promise.all(uniqueArtists.slice(0, 5).map(async (name) => {
-          try {
-            if (isNativeCoreAvailable()) return null;
-            return await musicService.lookupArtistByName(name);
-          } catch (e) { return null; }
-        })),
-        // Albums Enrichment (Artist-based)
-        Promise.all(uniqueArtists.slice(0, 3).map(async (name) => {
-          try {
-            if (isNativeCoreAvailable()) return [];
-            const albums = await musicService.searchAlbums(${name} albums);
-            return albums.slice(0, 2);
-          } catch (e) { return []; }
-        }))
-      ]);
-
-      if (controller.signal.aborted) return;
-
-      // Filter and Deduplicate
+      // Filter and Deduplicate Artists
       const enrichedArtists: SearchEntity[] = [];
       const seenArtistIds = new Set<string>();
       artistResults.forEach(artist => {
@@ -158,6 +123,7 @@ export function useSearch(initialQuery: string = '') {
         }
       });
 
+      // Filter and Deduplicate Albums
       const enrichedAlbums: SearchEntity[] = [];
       const seenAlbumIds = new Set<string>();
       albumResults.flat().forEach(album => {
