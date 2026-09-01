@@ -117,60 +117,102 @@ function AlbumScreen() {
   }, [pageOpacity, reduceMotion]);
 
   // Data Fetching
+  const resolveLocalAlbum = useCallback((id: string): AlbumDetails | null => {
+    try {
+      const decodedName = decodeURIComponent(id.replace("local-album-", "")).toLowerCase().trim();
+      
+      const { useDownloadStore } = require("@/src/features/download/store/download.store");
+      const downloaded = Object.values(useDownloadStore.getState().downloadedTracks || {}) as any[];
+
+      const { usePlaylistStore } = require("@/src/features/playlist/store/playlist.store");
+      const playlists = usePlaylistStore.getState().playlists || [];
+      const playlistTracks: any[] = [];
+      playlists.forEach((pl: any) => {
+        if (Array.isArray(pl.tracks)) playlistTracks.push(...pl.tracks);
+      });
+
+      const { useAnalyticsStore } = require("@/src/features/analytics/store/analytics.store");
+      const history = (useAnalyticsStore.getState().history || []).map((h: any) => h.trackSnapshot || h);
+
+      const allTracks = [...downloaded, ...playlistTracks, ...history];
+      const seenIds = new Set<string>();
+      const albumTracks: any[] = [];
+
+      for (const t of allTracks) {
+        if (!t || !t.id) continue;
+        const tAlbum = (t.album || "").toLowerCase().trim();
+        const tAlbumId = (t.albumId || "").toLowerCase().trim();
+
+        const matchById = tAlbumId && (tAlbumId === id.toLowerCase() || id.toLowerCase() === tAlbumId);
+        const matchByName = tAlbum && (
+          tAlbum === decodedName ||
+          (decodedName.length > 2 && tAlbum.includes(decodedName)) ||
+          (tAlbum.length > 2 && decodedName.includes(tAlbum))
+        );
+
+        if (matchById || matchByName) {
+          if (!seenIds.has(t.id)) {
+            seenIds.add(t.id);
+            albumTracks.push(t);
+          }
+        }
+      }
+
+      if (albumTracks.length === 0) return null;
+
+      const first = albumTracks[0];
+      return {
+        id: id,
+        title: first.album || decodeURIComponent(id.replace("local-album-", "")),
+        artist: first.artist || "Unknown Artist",
+        year: first.year || new Date(first.downloadedAt || Date.now()).getFullYear().toString(),
+        thumbnail: first.art || "",
+        trackCount: albumTracks.length,
+        tracks: albumTracks.map(t => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist || first.artist,
+          art: t.art || first.art,
+          album: t.album || first.album,
+          duration: String(t.duration || "0:00"),
+          source: t.source || "local"
+        }))
+      };
+    } catch (e) {
+      console.warn("[Album Page] Local album resolution error:", e);
+      return null;
+    }
+  }, []);
+
   const fetchAlbumData = useCallback(async (id: string, useCache = true) => {
     if (!id) return;
 
     // Use requestIdleTask to ensure the transition animation completes before starting heavy work
     requestIdleTask(async () => {
+      // 1. Check local prefix or local match
       if (id.startsWith("local-album-")) {
         setIsLoading(true);
-        try {
-          const decodedName = decodeURIComponent(id.replace("local-album-", ""));
-          const { useDownloadStore } = await import("@/src/features/download/store/download.store");
-          const downloaded = Object.values(useDownloadStore.getState().downloadedTracks);
-          const albumTracks = downloaded.filter(t => t.album === decodedName);
-
-          if (albumTracks.length > 0) {
-            const localAlbum: AlbumDetails = {
-              id: id,
-              title: decodedName,
-              artist: albumTracks[0].artist || "Unknown Artist",
-              year: new Date(albumTracks[0].downloadedAt || Date.now()).getFullYear().toString(),
-              thumbnail: albumTracks[0].art || "",
-              trackCount: albumTracks.length,
-              tracks: albumTracks.map(t => ({
-                id: t.id,
-                title: t.title,
-                artist: t.artist,
-                art: t.art,
-                album: t.album || decodedName,
-                duration: String(t.duration || "0:00"),
-                source: t.source || "local"
-              }))
-            };
-            setAlbum(localAlbum);
-            setIsLoading(false);
-            setError(null);
-            return;
-          } else {
-            setError("Local album has no downloaded tracks.");
-            setIsLoading(false);
-            return;
-          }
-        } catch (e: any) {
-          console.error("[Album Page] Local album load failed:", e);
-          setError("Unable to load offline album.");
+        const localAlbum = resolveLocalAlbum(id);
+        if (localAlbum) {
+          setAlbum(localAlbum);
+          setIsLoading(false);
+          setError(null);
+          return;
+        } else {
+          setError("Local album has no downloaded tracks.");
           setIsLoading(false);
           return;
         }
       }
 
+      // 2. Check Memory Cache
       if (useCache && IN_MEMORY_CACHE[id]) {
         setAlbum(IN_MEMORY_CACHE[id]);
         setIsLoading(false);
         return;
       }
 
+      // 3. Check AsyncStorage Cache
       if (useCache) {
         try {
           const cachedData = await AsyncStorage.getItem(CACHE_PREFIX + id);
@@ -183,6 +225,25 @@ function AlbumScreen() {
           }
         } catch (e) {
           console.warn("[Album Page] Cache read failed:", e);
+        }
+      }
+
+      // 4. Check Network Status
+      const { useNetworkStore } = require("@/src/features/network/store/network.store");
+      const isOnline = useNetworkStore.getState().isOnline;
+
+      if (!isOnline) {
+        const local = resolveLocalAlbum(id);
+        if (local) {
+          setAlbum(local);
+          IN_MEMORY_CACHE[id] = local;
+          setIsLoading(false);
+          setError(null);
+          return;
+        } else {
+          setAlbum(null);
+          setIsLoading(false);
+          return;
         }
       }
 
@@ -216,16 +277,28 @@ function AlbumScreen() {
           IN_MEMORY_CACHE[targetBrowseId] = data;
           await AsyncStorage.setItem(CACHE_PREFIX + id, JSON.stringify(data));
         } else {
-          setError("Album not found.");
+          const local = resolveLocalAlbum(id);
+          if (local) {
+            setAlbum(local);
+            setError(null);
+          } else {
+            setError("Album not found.");
+          }
         }
       } catch (e: any) {
-        console.error("[Album Page] Fetch failed:", e);
-        setError(e?.message || "Unable to load album details.");
+        console.warn("[Album Page] Remote fetch failed, trying local resolution:", e?.message || e);
+        const local = resolveLocalAlbum(id);
+        if (local) {
+          setAlbum(local);
+          setError(null);
+        } else {
+          setError(e?.message || "Unable to load album details.");
+        }
       } finally {
         setIsLoading(false);
       }
     });
-  }, []);
+  }, [resolveLocalAlbum]);
 
   useEffect(() => {
     fetchAlbumData(albumId as string);

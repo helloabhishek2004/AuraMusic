@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAnalyticsStore, splitArtistNames } from '../../analytics/store/analytics.store';
-import { catalogTracks } from '../../../data/music-catalog';
 import {
   RecommendationSeed,
   generateDailyMixes,
@@ -57,12 +56,6 @@ async function resolveSeedArtworkAsync(
     for (const name of seed.seedArtists) {
       const clean = name.toLowerCase().trim();
       const match = history.find(h => splitArtistNames(h.artist).some(an => an.toLowerCase().trim() === clean));
-      if (match?.art && !match.art.includes('placeholder')) return match.art;
-    }
-    // Check catalog
-    for (const name of seed.seedArtists) {
-      const clean = name.toLowerCase().trim();
-      const match = catalogTracks.find(t => t.artist.toLowerCase().trim() === clean);
       if (match?.art && !match.art.includes('placeholder')) return match.art;
     }
   }
@@ -725,13 +718,21 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
 
       getAutoplayContinuationQueue: async (lastTrackId: string) => {
         const analytics = useAnalyticsStore.getState();
-        const history = analytics.history;
-        const trackMatch = history.find(h => h.id === lastTrackId) || catalogTracks.find(t => t.id === lastTrackId);
+        const history = analytics.history || [];
+        const { useDownloadStore } = require('../../download/store/download.store');
+        const downloadedTracks = Object.values(useDownloadStore.getState().downloadedTracks || {}) as any[];
+        
+        const localPool = [
+          ...history.map((h: any) => h.trackSnapshot || h),
+          ...downloadedTracks,
+        ].filter((t: any) => t && t.id);
+
+        const trackMatch = localPool.find(t => t.id === lastTrackId);
         const artist = trackMatch?.artist || '';
         const cleanArtist = artist.toLowerCase().trim();
 
         // Find tracks by the current artist
-        const artistTracks = catalogTracks.filter(t => t.artist.toLowerCase().trim() === cleanArtist);
+        const artistTracks = cleanArtist ? localPool.filter(t => t.artist?.toLowerCase().trim() === cleanArtist) : [];
 
         // Find other tracks from related artists in the same taste cluster if possible
         const clusters = buildTasteClusters(analytics.artistAffinities, history, analytics.artistCache);
@@ -740,18 +741,14 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
         let relatedTracks: any[] = [];
         if (matchingCluster) {
           const clusterArtists = new Set(matchingCluster.artists.map(a => a.toLowerCase().trim()));
-          relatedTracks = catalogTracks.filter(t => {
-            const trackArt = t.artist.toLowerCase().trim();
-            return clusterArtists.has(trackArt) && trackArt !== cleanArtist;
+          relatedTracks = localPool.filter(t => {
+            const trackArt = t.artist?.toLowerCase().trim();
+            return trackArt && clusterArtists.has(trackArt) && trackArt !== cleanArtist;
           });
         }
 
-        // Mix: artistTracks, related/trending tracks
-        const combined = [...artistTracks, ...relatedTracks];
-        if (combined.length < 10) {
-          // Fill up with general catalog
-          combined.push(...catalogTracks.filter(t => t.id !== lastTrackId));
-        }
+        // Mix: artistTracks, related tracks, remaining localPool
+        const combined = [...artistTracks, ...relatedTracks, ...localPool];
 
         // De-duplicate by ID
         const seen = new Set<string>();

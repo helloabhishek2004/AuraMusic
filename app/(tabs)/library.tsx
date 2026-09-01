@@ -744,8 +744,8 @@ const TrackRow = memo(({
         title: track.title,
         artist: track.artist,
         art: getTrackArtwork(track),
-        url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-        duration: 240,
+        url: track.url || "",
+        duration: track.duration || 240,
         dominantColors: [C.primary, C.primaryMid],
       });
     } catch (e) {

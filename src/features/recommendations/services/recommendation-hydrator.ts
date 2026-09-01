@@ -498,21 +498,12 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
         }
 
         const cleanName = seed.title.replace(' Mix', '').toLowerCase();
-        const localMatches = catalogTracks.filter((t) => t.artist.toLowerCase().includes(cleanName));
-        if (localMatches.length > 0) {
-          const mapped = localMatches.map((t) => ({
-            id: t.id,
-            title: t.title,
-            artist: t.artist,
-            art: t.art,
-            url: '',
-            duration: t.durationSec || 240,
-            dominantColors: t.dominantColors,
-            artistId: t.artistId,
-            albumId: t.albumId,
-            source: 'local',
-          }));
-          return applyDiversityFilter(mapped, 25);
+        const history = useAnalyticsStore.getState().history || [];
+        const histMatches = history
+          .map((h: any) => h.trackSnapshot || h)
+          .filter((t: any) => t?.artist?.toLowerCase().includes(cleanName));
+        if (histMatches.length > 0) {
+          return applyDiversityFilter(histMatches, 25);
         }
         break;
       }
@@ -555,21 +546,6 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
           return [historyMatch.trackSnapshot];
         }
 
-        const localMatch = catalogTracks.find((t) => t.id === seed.id);
-        if (localMatch) {
-          return [{
-            id: localMatch.id,
-            title: localMatch.title,
-            artist: localMatch.artist,
-            art: localMatch.art,
-            url: '',
-            duration: localMatch.durationSec || 240,
-            dominantColors: localMatch.dominantColors,
-            artistId: localMatch.artistId,
-            albumId: localMatch.albumId,
-            source: 'local',
-          }];
-        }
 
         if (seed.title) {
           return [{
@@ -689,8 +665,11 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
               return applyDiversityFilter(searchRes, 25);
             }
           } catch (e) {}
-          const catTracks = catalogTracks.filter(t => t.artist.toLowerCase().includes(artistName.toLowerCase()));
-          if (catTracks.length > 0) return applyDiversityFilter(catTracks.map(t => ({ id: t.id, title: t.title, artist: t.artist, art: t.art, artwork: t.art, url: '', duration: t.durationSec || 240, dominantColors: t.dominantColors, artistId: t.artistId, albumId: t.albumId, source: 'local' as any })), 25);
+          const history = useAnalyticsStore.getState().history || [];
+          const histTracks = history
+            .map((h: any) => h.trackSnapshot || h)
+            .filter((t: any) => t?.artist?.toLowerCase().includes(artistName.toLowerCase()));
+          if (histTracks.length > 0) return applyDiversityFilter(histTracks, 25);
         }
 
         // Personalized Trending Hydration
@@ -763,7 +742,7 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
           return applyDiversityFilter(historyTracks, 25);
         }
 
-        return catalogTracks.map(t => ({ id: t.id, title: t.title, artist: t.artist, art: t.art, artwork: t.art, url: '', duration: t.durationSec || 240, dominantColors: t.dominantColors, artistId: t.artistId, albumId: t.albumId, source: 'local' as any }));
+        return [];
       }
     }
   } catch (error) {
@@ -777,5 +756,5 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
     return applyDiversityFilter(fallbackHist, 25);
   }
 
-  return catalogTracks.map(t => ({ id: t.id, title: t.title, artist: t.artist, art: t.art, artwork: t.art, url: '', duration: t.durationSec || 240, dominantColors: t.dominantColors, artistId: t.artistId, albumId: t.albumId, source: 'local' as any }));
+  return [];
 }

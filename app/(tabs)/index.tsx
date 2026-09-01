@@ -60,7 +60,7 @@ import { AuraArtwork } from '@/src/components/ui/aura-artwork';
 import { getCanonicalTrackId, getArtworkUrl } from '@/src/features/player/utils/track-identity';
 import { resolveArtwork, getDeterministicGradient } from '@/src/features/player/utils/artwork-resolver';
 import { resumeTrackFromHistory } from '@/src/features/player/utils/playback-resume';
-import { catalogTracks, catalogAlbums, catalogArtists, getArtistIdForName } from '@/src/data/music-catalog';
+import { getArtistIdForName } from '@/src/data/music-catalog';
 import { useArtistEnrichment } from '@/src/hooks/use-artist-enrichment';
 import { useAlbumEnrichment } from '@/src/hooks/use-album-enrichment';
 
@@ -560,13 +560,6 @@ const CircleArtistCard = memo(({ artist, name, image, score, onPress }: any) => 
     );
     if (histMatch?.art || histMatch?.artwork) return histMatch.art || histMatch.artwork;
 
-    // Check catalog
-    const catArtist = catalogArtists.find(a => a.name.toLowerCase() === artistName.toLowerCase());
-    if (catArtist?.image) return catArtist.image;
-
-    const catTrack = catalogTracks.find(t => t.artist.toLowerCase() === artistName.toLowerCase());
-    if (catTrack?.art) return catTrack.art;
-
     return null;
   }, [artist, image, artistName]);
 
@@ -641,20 +634,6 @@ const FavoriteAlbumCard = React.memo(({ album, onPress }: any) => {
     );
     const histArt = histMatch?.art || histMatch?.artwork || histMatch?.trackSnapshot?.art;
     if (histArt && !histArt.includes('placeholder')) return histArt;
-
-    // 3. Check catalog albums
-    const catAlbum = catalogAlbums.find(a => 
-      a.title.toLowerCase().trim() === cleanTitle || 
-      (typeof album === 'object' && a.id === album?.id)
-    );
-    if (catAlbum?.image) return catAlbum.image;
-
-    // 4. Check catalog tracks
-    const catTrack = catalogTracks.find(t => 
-      (catAlbum && t.albumId === catAlbum.id) ||
-      (albumArtist && t.artist.toLowerCase().trim() === albumArtist.toLowerCase().trim())
-    );
-    if (catTrack?.art) return catTrack.art;
 
     return null;
   }, [album, albumTitle, albumArtist]);
@@ -1578,11 +1557,10 @@ export default function HomeScreen() {
                     data={item.data}
                     renderItem={({ item: album, index }: any) => {
                       const albumTitle = typeof album === 'string' ? album : (album.title || album.name || 'Unknown Album');
-                      const matchedCat = catalogAlbums.find(a => a.title.toLowerCase() === albumTitle.toLowerCase() || a.id === album?.id);
-                      const albumId = (typeof album === 'object' && album.id) ? album.id : (matchedCat?.id || albumTitle);
+                      const albumId = (typeof album === 'object' && album.id) ? album.id : albumTitle;
                       return (
                         <FavoriteAlbumCard 
-                          album={typeof album === 'object' ? album : (matchedCat || { title: albumTitle, artist: 'Various Artists', id: albumId })} 
+                          album={typeof album === 'object' ? album : { title: albumTitle, artist: 'Various Artists', id: albumId }} 
                           onPress={() => goAlbum(albumId)} 
                         />
                       );

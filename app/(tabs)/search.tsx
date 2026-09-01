@@ -114,12 +114,6 @@ const h2r = (hex: string, a: number) => {
   return `rgba(${r},${g},${b},${a})`;
 };
 
-const TRACK_URLS: Record<string, string> = {
-  nebula: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-  neon: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
-  solar: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
-  nightcall: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
-};
 
 // ─── Glass Card ───────────────────────────────────────────────────────────────
 
@@ -485,7 +479,7 @@ const SongRow = ({
               title: song.title,
               artist: displayArtist,
               art: songData.art,
-              url: song.url || TRACK_URLS[song.id] || "",
+              url: song.url || "",
               duration: 0,
             }}
             size={18}
@@ -1199,7 +1193,7 @@ const EmptyRecent = () => (
   </Mat>
 );
 
-const NoResults = ({ query }: { query: string }) => (
+const NoResults = ({ query, isOffline }: { query: string; isOffline?: boolean }) => (
   <Mat delay={0}>
     <View style={s.statePanel}>
       <Glass r={28} blur={52} style={s.statePanelGlass}>
@@ -1213,10 +1207,10 @@ const NoResults = ({ query }: { query: string }) => (
             colors={[h2r(C.primary, 0.18), h2r(C.primaryDp, 0.08)]}
             style={s.stateIconBg}
           >
-            <Ionicons name="search-outline" size={32} color={C.primary} />
+            <Ionicons name={isOffline ? "cloud-offline-outline" : "search-outline"} size={32} color={isOffline ? "#FFD60A" : C.primary} />
           </LinearGradient>
         </View>
-        <Text style={s.stateTitle}>No results for</Text>
+        <Text style={s.stateTitle}>{isOffline ? "No saved music found" : "No results for"}</Text>
         <Text
           style={[s.stateTitle, { color: C.primary, marginTop: 2 }]}
           numberOfLines={1}
@@ -1224,7 +1218,9 @@ const NoResults = ({ query }: { query: string }) => (
           "{query}"
         </Text>
         <Text style={s.stateSub}>
-          Try a different song, artist, or keyword.
+          {isOffline
+            ? "Connect to the internet to discover new music."
+            : "Try a different song, artist, or keyword."}
         </Text>
       </Glass>
     </View>
@@ -1512,7 +1508,7 @@ export default function SearchScreen() {
         title: track.title ?? "",
         artist: displayArtist,
         art: displayArt,
-        url: track.url || TRACK_URLS[track.id] || "",
+        url: track.url || "",
         duration: durationSec,
         dominantColors: [C.primary, C.primaryMid],
         album: displayAlbum,
@@ -1743,9 +1739,9 @@ export default function SearchScreen() {
       } else if (error) {
         list.push({ id: 'error_state', type: 'error_state', error });
       } else if (!hasResults) {
-        list.push({ id: 'no_results', type: 'no_results', query });
+        list.push({ id: 'no_results', type: 'no_results', query, isOffline: results?.isOffline });
       } else {
-        list.push({ id: 'results_label', type: 'results_label', query });
+        list.push({ id: 'results_label', type: 'results_label', query, isOffline: results?.isOffline });
         
         if (showTopResult && topResult) {
           list.push({ id: 'top_result', type: 'top_result', data: topResult });
@@ -1858,16 +1854,24 @@ export default function SearchScreen() {
       case 'error_state':
         return <ErrorState message={item.error} onRetry={() => setQuery(query)} />;
       case 'no_results':
-        return <NoResults query={item.query} />;
+        return <NoResults query={item.query} isOffline={item.isOffline} />;
       case 'results_label':
         return (
           <Mat delay={0}>
-            <Text style={s.resultsFor}>
-              Results for{" "}
-              <Text style={{ color: C.primary, fontWeight: "700" }}>
-                "{item.query}"
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 20 }}>
+              <Text style={s.resultsFor}>
+                Results for{" "}
+                <Text style={{ color: C.primary, fontWeight: "700" }}>
+                  "{item.query}"
+                </Text>
               </Text>
-            </Text>
+              {item.isOffline && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 214, 10, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 0.5, borderColor: 'rgba(255, 214, 10, 0.25)' }}>
+                  <Ionicons name="cloud-offline" size={11} color="#FFD60A" style={{ marginRight: 4 }} />
+                  <Text style={{ color: '#FFD60A', fontSize: 10, fontWeight: '600' }}>Saved Music</Text>
+                </View>
+              )}
+            </View>
           </Mat>
         );
       case 'top_result':

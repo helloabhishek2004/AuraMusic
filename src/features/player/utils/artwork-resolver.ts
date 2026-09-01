@@ -83,26 +83,7 @@ export function resolveArtwork(entity: any, size: ArtworkSize = 'album'): string
       }
     } catch (e) {}
 
-    // B. Check Music Catalog
-    if (!url || url.length === 0 || url.includes('placeholder')) {
-      try {
-        const { catalogTracks, catalogAlbums, catalogArtists } = require("../../../data/music-catalog");
-        const catTrack = catalogTracks.find((t: any) => t.id === candidateId);
-        if (catTrack) {
-          url = getArtworkUrl(catTrack, size);
-        } else {
-          const catAlbum = catalogAlbums.find((a: any) => a.id === candidateId);
-          if (catAlbum) {
-            url = getArtworkUrl(catAlbum, size);
-          } else {
-            const catArtist = catalogArtists.find((a: any) => a.id === candidateId);
-            if (catArtist) {
-              url = getArtworkUrl(catArtist, size);
-            }
-          }
-        }
-      } catch (e) {}
-    }
+
 
     // C. Check active player store queue / current track
     if (!url || url.length === 0 || url.includes('placeholder')) {

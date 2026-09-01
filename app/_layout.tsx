@@ -37,6 +37,7 @@ enableFreeze(true);
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 import PlayerOverlay from '../src/components/PlayerOverlay';
+import { OfflineStatusBar } from '../src/features/network/components/OfflineStatusBar';
 
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -396,6 +397,11 @@ export default function RootLayout() {
     PlaybackService.setupPlayer();
     PlaybackController.initialize();
     
+    // Initialize Global Network Authority
+    import('../src/features/network/services/network-connectivity.service').then(({ networkConnectivityService }) => {
+      networkConnectivityService.initialize();
+    });
+
     // Initialize Device & Hardware State Authority
     import('../src/features/device/services/device-state.service').then(({ deviceStateService }) => {
       deviceStateService.initialize();
@@ -529,6 +535,7 @@ export default function RootLayout() {
             </Animated.View>
             <PlayerOverlay expandProgress={expandProgress} />
             <GlobalDownloadNotification />
+            <OfflineStatusBar />
             </BackPriorityProvider>
           </GestureHandlerRootView>
         </MusicProvider>

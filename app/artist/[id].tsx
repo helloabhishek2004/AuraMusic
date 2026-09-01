@@ -259,6 +259,7 @@ function ArtistPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isOfflineEmpty, setIsOfflineEmpty] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
 
   // Animation values
@@ -346,36 +347,97 @@ function ArtistPage() {
     });
   }, [pageOpacity, reduceMotion]);
 
-  // Data Fetching (UNCHANGED)
-  const fetchArtistData = useCallback(async (id: string, useCache = true) => {
-    if (!id) return;
+  // Local-First Resolution
+  const resolveLocalArtist = useCallback((id: string): ArtistDetails | null => {
+    try {
+      const normId = (id || '').toLowerCase().trim();
+      
+      const { useDownloadStore } = require('@/src/features/download/store/download.store');
+      const downloads = Object.values(useDownloadStore.getState().downloadedTracks || {}) as any[];
 
-    requestIdleTask(async () => {
-      if (useCache && IN_MEMORY_CACHE[id]) {
-        setArtist(IN_MEMORY_CACHE[id]);
-        setIsLoading(false);
-        refreshArtistData(id);
-        return;
-      }
-      if (useCache) {
-        try {
-          const cachedData = await AsyncStorage.getItem(CACHE_PREFIX + id);
-          if (cachedData) {
-            const parsed = JSON.parse(cachedData);
-            setArtist(parsed);
-            IN_MEMORY_CACHE[id] = parsed;
-            setIsLoading(false);
-            refreshArtistData(id);
-            return;
+      const { usePlaylistStore } = require('@/src/features/playlist/store/playlist.store');
+      const playlists = usePlaylistStore.getState().playlists || [];
+      const playlistTracks: any[] = [];
+      playlists.forEach((pl: any) => {
+        if (Array.isArray(pl.tracks)) playlistTracks.push(...pl.tracks);
+      });
+
+      const { useAnalyticsStore } = require('@/src/features/analytics/store/analytics.store');
+      const history = (useAnalyticsStore.getState().history || []).map((h: any) => h.trackSnapshot || h);
+
+      const { useLikesStore } = require('@/src/features/likes/store/likes.store');
+      const likes = Object.values(useLikesStore.getState().trackMetadata || {}) as any[];
+
+      const allLocalTracks = [...downloads, ...playlistTracks, ...history, ...likes];
+
+      const matchingTracks: any[] = [];
+      const seenTrackIds = new Set<string>();
+
+      let detectedArtistName = '';
+      let detectedThumbnail = '';
+
+      for (const t of allLocalTracks) {
+        if (!t || !t.id) continue;
+        const tArtist = (t.artist || '').trim();
+        const tArtistId = (t.artistId || '').trim();
+
+        const matchById = tArtistId && (tArtistId.toLowerCase() === normId || normId === tArtistId.toLowerCase());
+        const matchByName = tArtist && (
+          tArtist.toLowerCase() === normId ||
+          tArtist.toLowerCase().includes(normId) ||
+          normId.includes(tArtist.toLowerCase())
+        );
+
+        if (matchById || matchByName) {
+          if (!seenTrackIds.has(t.id)) {
+            seenTrackIds.add(t.id);
+            matchingTracks.push(t);
+            if (!detectedArtistName && tArtist) detectedArtistName = tArtist;
+            if (!detectedThumbnail && (t.art || t.artwork)) detectedThumbnail = t.art || t.artwork;
           }
-        } catch (e) {
-          console.warn("[Artist Page] Cache read failed:", e);
         }
       }
-      setIsLoading(true);
-      await refreshArtistData(id);
-      setIsLoading(false);
-    });
+
+      if (matchingTracks.length === 0) {
+        return null;
+      }
+
+      const albumMap = new Map<string, any>();
+      matchingTracks.forEach(t => {
+        const albumTitle = t.album || '';
+        if (albumTitle && !albumMap.has(albumTitle)) {
+          albumMap.set(albumTitle, {
+            id: t.albumId || `local-album-${encodeURIComponent(albumTitle)}`,
+            title: albumTitle,
+            year: t.year || 'Saved',
+            thumbnail: t.art || detectedThumbnail,
+          });
+        }
+      });
+
+      return {
+        id,
+        name: detectedArtistName || id,
+        thumbnail: detectedThumbnail || '',
+        subscribers: 'Offline Discography',
+        tagline: 'Showing saved and downloaded tracks from this device',
+        genres: ['Saved Tracks'],
+        songs: matchingTracks.map(t => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist || detectedArtistName,
+          art: t.art || detectedThumbnail,
+          album: t.album || '',
+          duration: String(t.duration || '3:30'),
+          source: 'local' as any,
+        })),
+        albums: Array.from(albumMap.values()),
+        singles: [],
+        related: [],
+      };
+    } catch {
+      return null;
+    }
   }, []);
 
   const refreshArtistData = async (id: string) => {
@@ -412,19 +474,91 @@ function ArtistPage() {
           genres: data.genres || [],
         };
         setArtist(enriched);
+        setIsOfflineEmpty(false);
         IN_MEMORY_CACHE[id] = enriched;
         IN_MEMORY_CACHE[targetBrowseId] = enriched;
         await AsyncStorage.setItem(CACHE_PREFIX + id, JSON.stringify(enriched));
       } else {
-        setError("Artist details not found.");
+        const local = resolveLocalArtist(id);
+        if (local) {
+          setArtist(local);
+          setIsOfflineEmpty(false);
+        } else {
+          setIsOfflineEmpty(true);
+        }
       }
     } catch (e: any) {
-      console.error("[Artist Page] Fetch failed:", e);
-      setError(e?.message || "Unable to load artist. Please check your connection.");
+      console.warn("[Artist Page] Remote fetch failed, trying local resolution:", e?.message || e);
+      const local = resolveLocalArtist(id);
+      if (local) {
+        setArtist(local);
+        setError(null);
+        setIsOfflineEmpty(false);
+      } else {
+        const { useNetworkStore } = require('@/src/features/network/store/network.store');
+        if (!useNetworkStore.getState().isOnline) {
+          setIsOfflineEmpty(true);
+          setError(null);
+        } else {
+          setError(e?.message || "Unable to load artist. Please check your connection.");
+        }
+      }
     } finally {
       setIsRefreshing(false);
     }
   };
+
+  const fetchArtistData = useCallback(async (id: string, useCache = true) => {
+    if (!id) return;
+
+    requestIdleTask(async () => {
+      if (useCache && IN_MEMORY_CACHE[id]) {
+        setArtist(IN_MEMORY_CACHE[id]);
+        setIsLoading(false);
+        refreshArtistData(id);
+        return;
+      }
+      if (useCache) {
+        try {
+          const cachedData = await AsyncStorage.getItem(CACHE_PREFIX + id);
+          if (cachedData) {
+            const parsed = JSON.parse(cachedData);
+            setArtist(parsed);
+            IN_MEMORY_CACHE[id] = parsed;
+            setIsLoading(false);
+            refreshArtistData(id);
+            return;
+          }
+        } catch (e) {
+          console.warn("[Artist Page] Cache read failed:", e);
+        }
+      }
+
+      // Check connectivity before initiating remote fetch
+      const { useNetworkStore } = require('@/src/features/network/store/network.store');
+      const isOnline = useNetworkStore.getState().isOnline;
+
+      if (!isOnline) {
+        const local = resolveLocalArtist(id);
+        if (local) {
+          setArtist(local);
+          IN_MEMORY_CACHE[id] = local;
+          setIsLoading(false);
+          setError(null);
+          setIsOfflineEmpty(false);
+          return;
+        } else {
+          setIsOfflineEmpty(true);
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      setIsLoading(true);
+      await refreshArtistData(id);
+      setIsLoading(false);
+    });
+  }, [resolveLocalArtist]);
 
   useEffect(() => {
     fetchArtistData(artistId);
@@ -646,6 +780,41 @@ function ArtistPage() {
       // Future: pagination
     }
   }, [isModalLoadingMore, isModalFetching]);
+
+  // ─── Offline Empty State ───────────────────────────────────────────────────
+  if (isOfflineEmpty) {
+    return (
+      <View style={styles.container}>
+        <StatusBar style="light" />
+        <AtmosphericBackground />
+        <View style={styles.errorContainer}>
+          <LiquidGlass borderRadius={radius.xl} style={styles.errorCard} contentStyle={styles.errorCardInner}>
+            <View style={styles.errorIconRing}>
+              <Ionicons name="cloud-offline-outline" size={40} color="#FFD60A" />
+            </View>
+            <AuraText variant="title" style={styles.errorTitle}>
+              Artist unavailable offline
+            </AuraText>
+            <AuraText variant="body" style={styles.errorText}>
+              This artist hasn't been saved on this device yet. Connect to the internet to explore their music.
+            </AuraText>
+            <SpringButton
+              onPress={handleBackPress}
+              style={styles.retryButton}
+              accessibilityLabel="Go back"
+            >
+              <View style={styles.retryButtonInner}>
+                <Ionicons name="arrow-back" size={16} color="#fff" />
+                <AuraText variant="headline" style={styles.retryText}>
+                  Go Back
+                </AuraText>
+              </View>
+            </SpringButton>
+          </LiquidGlass>
+        </View>
+      </View>
+    );
+  }
 
   // ─── Error State ───────────────────────────────────────────────────────────
   if (error) {

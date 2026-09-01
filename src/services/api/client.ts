@@ -1,35 +1,22 @@
 import axios from 'axios';
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
 
-const getDevServerIp = () => {
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    const ip = hostUri.split(':')[0];
-    if (ip) return ip;
-  }
-  return Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-};
-
-const DEV_SERVER_IP = getDevServerIp();
-
-export const BASE_URL = `http://${DEV_SERVER_IP}:8000`;
+/**
+ * DEPRECATED & PURGED: AuraMusic is a 100% on-device architecture.
+ * No FastAPI or remote backend server (10.0.2.2:8000) is used.
+ * All media streaming and discovery calls communicate directly from Android
+ * to YouTube Music, Googlevideo CDN, and LRCLIB.
+ * 
+ * Any accidental invocations fail immediately without network hang.
+ */
+export const BASE_URL = 'http://127.0.0.1:0';
 
 const apiClient = axios.create({
-  baseURL: BASE_URL,  
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: BASE_URL,
+  timeout: 50,
 });
 
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    const url = error.config?.url || 'Unknown URL';
-    console.error(`[API Error] ${url}:`, error.message);
-    return Promise.reject(error);
-  }
-);
+apiClient.interceptors.request.use(() => {
+  return Promise.reject(new Error('[FastAPI Purged] AuraMusic is 100% on-device. Backend servers are disabled.'));
+});
 
 export default apiClient;

@@ -1,5 +1,4 @@
 import { isNativeCoreAvailable, AuraYouTube } from "../native-core";
-import apiClient from "./client";
 import { 
   SearchEntity, 
   UnifiedSearchResult, 
@@ -199,59 +198,11 @@ export const musicService = {
         }
       }
 
-      // Fetch all categories in parallel with specific type filters
-      const responses = await Promise.all([
-        apiClient.get(`/search`, { params: { q: query, type: 'songs' } }).catch(() => ({ data: [] })),
-        apiClient.get(`/search`, { params: { q: query, type: 'artists' } }).catch(() => ({ data: [] })),
-        apiClient.get(`/search`, { params: { q: query, type: 'albums' } }).catch(() => ({ data: [] })),
-        apiClient.get(`/search`, { params: { q: query, type: 'playlists' } }).catch(() => ({ data: [] })),
-      ]);
-
-      // Map and filter each category with validation
-      const songs: SearchEntity[] = [];
-      const artists: SearchEntity[] = [];
-      const albums: SearchEntity[] = [];
-      const playlists: SearchEntity[] = [];
-
-      // Process songs
-      const rawSongs: any[] = responses[0].data || [];
-      rawSongs.forEach((item: any) => {
-        const mapped = mapSongResult(item);
-        if (mapped) songs.push(mapped);
-      });
-
-      // Process artists
-      const rawArtists: any[] = responses[1].data || [];
-      rawArtists.forEach((item: any) => {
-        const mapped = mapArtistResult(item);
-        if (mapped) artists.push(mapped);
-      });
-
-      // Process albums
-      const rawAlbums: any[] = responses[2].data || [];
-      rawAlbums.forEach((item: any) => {
-        const mapped = mapAlbumResult(item);
-        if (mapped) albums.push(mapped);
-      });
-
-      // Process playlists
-      const rawPlaylists: any[] = responses[3].data || [];
-      rawPlaylists.forEach((item: any) => {
-        const mapped = mapPlaylistResult(item);
-        if (mapped) playlists.push(mapped);
-      });
-
-      // Limit results
-      const limitedSongs = songs.slice(0, 10);
-      const limitedArtists = artists.slice(0, 6);
-      const limitedAlbums = albums.slice(0, 6);
-      const limitedPlaylists = playlists.slice(0, 4);
-
       return {
-        songs: limitedSongs,
-        artists: limitedArtists,
-        albums: limitedAlbums,
-        playlists: limitedPlaylists,
+        songs: [],
+        artists: [],
+        albums: [],
+        playlists: [],
         query,
       };
     } catch (error) {
@@ -283,13 +234,7 @@ export const musicService = {
         }));
       }
 
-      const response = await apiClient.get(`/search`, {
-        params: { q: query, type: 'songs' },
-      });
-
-      return (response.data || [] as any[])
-        .map(mapSongResult)
-        .filter((item: any): item is SearchEntity => item !== null);
+      return [];
     } catch (error) {
       console.error("Error searching songs:", error);
       return [];
@@ -308,11 +253,7 @@ export const musicService = {
           id: a.id, title: a.title, type: 'artist', art: a.art || "", subscribers: ""
         }));
       }
-      const response = await apiClient.get(`/search`, { params: { q: query, type: 'artists' } });
-
-      return (response.data || [] as any[])
-        .map(mapArtistResult)
-        .filter((item: any): item is SearchEntity => item !== null);
+      return [];
     } catch (error) {
       console.error("Error searching artists:", error);
       return [];
@@ -331,11 +272,7 @@ export const musicService = {
           id: a.id, title: a.title, type: 'album', artist: a.artist || "", art: a.art || ""
         }));
       }
-      const response = await apiClient.get(`/search`, { params: { q: query, type: 'albums' } });
-
-      return (response.data || [] as any[])
-        .map(mapAlbumResult)
-        .filter((item: any): item is SearchEntity => item !== null);
+      return [];
     } catch (error) {
       console.error("Error searching albums:", error);
       return [];
@@ -358,17 +295,6 @@ export const musicService = {
         return null;
       }
 
-      const response = await apiClient.get(`/search`, {
-        params: { q: artistName, type: 'artists' },
-      }).catch(() => ({ data: [] }));
-
-      const items = response.data || [];
-      for (const item of items) {
-        const mapped = mapArtistResult(item);
-        if (mapped) {
-          return mapped;
-        }
-      }
       return null;
     } catch (error) {
       return null;
@@ -445,48 +371,7 @@ export const musicService = {
           };
         }
       }
-      const response = await apiClient.get(`/artist/${browseId}`);
-      const data = response.data;
-
-      if (!data) return null;
-
-      return {
-        id: data.id,
-        name: data.name,
-        description: data.description,
-        thumbnail: data.thumbnail,
-        subscribers: data.subscribers,
-        songs: (data.songs || []).map((s: any) => ({
-          ...mapBackendSongToMusicTrack(s),
-          artistId: data.id,
-          source: 'ytmusic',
-        })),
-        songs_params: data.songs_params,
-        albums: (data.albums || []).map((album: any) => ({
-          id: album.id,
-          title: album.title,
-          artist: album.artist,
-          year: album.year,
-          thumbnail: album.thumbnail,
-          type: 'album',
-        })),
-        albums_params: data.albums_params,
-        singles: (data.singles || []).map((single: any) => ({
-          id: single.id,
-          title: single.title,
-          artist: single.artist,
-          year: single.year,
-          thumbnail: single.thumbnail,
-          type: 'single',
-        })),
-        singles_params: data.singles_params,
-        related: (data.related || []).map((artist: any) => ({
-          id: artist.id,
-          title: artist.title,
-          thumbnail: artist.thumbnail,
-          subscribers: artist.subscribers,
-        })),
-      };
+      return null;
     } catch (error) {
       console.error('[Music Service] Error fetching artist details:', error);
       return null;
@@ -533,14 +418,7 @@ export const musicService = {
         }
       }
 
-      const response = await apiClient.get(`/artist/${browseId}/songs`, {
-        params: { params },
-      }).catch(() => ({ data: [] }));
-      return (response.data || []).map((s: any) => ({
-        ...mapBackendSongToMusicTrack(s),
-        artistId: browseId,
-        source: 'ytmusic',
-      }));
+      return [];
     } catch (error) {
       console.error('[Music Service] Error fetching artist songs:', error);
       return [];
@@ -581,17 +459,7 @@ export const musicService = {
         }
       }
 
-      const response = await apiClient.get(`/artist/${browseId}/albums`, {
-        params: { params },
-      }).catch(() => ({ data: [] }));
-      return (response.data || []).map((album: any) => ({
-        id: album.id,
-        title: album.title,
-        artist: album.artist,
-        year: album.year,
-        thumbnail: album.thumbnail,
-        type: album.type || 'album',
-      }));
+      return [];
     } catch (error) {
       console.error('[Music Service] Error fetching artist albums:', error);
       return [];
@@ -619,33 +487,7 @@ export const musicService = {
           };
         }
       }
-      const response = await apiClient.get(`/album/${browseId}`);
-      const data = response.data;
-
-      if (!data) return null;
-
-      return {
-        id: data.id,
-        title: data.title,
-        artist: data.artist,
-        artistId: data.artistId,
-        year: data.year,
-        thumbnail: data.thumbnail,
-        description: data.description,
-        trackCount: data.trackCount,
-        duration: data.duration,
-        tracks: (data.tracks || []).map((track: any) => {
-          const mapped = mapBackendSongToMusicTrack(track);
-          return {
-            ...mapped,
-            art: mapped.art || data.thumbnail, // Fallback to album thumbnail
-            album: data.title,
-            albumId: data.id,
-            artistId: data.artistId,
-            source: 'ytmusic',
-          };
-        }),
-      };
+      return null;
     } catch (error) {
       console.error('[Music Service] Error fetching album details:', error);
       return null;
@@ -705,18 +547,6 @@ export const musicService = {
         }
       }
 
-      const response = await apiClient.get(`/search`, {
-        params: { q: albumName, type: 'albums' },
-      });
-
-      const items = response.data || [];
-      // Return first valid album result
-      for (const item of items) {
-        const mapped = mapAlbumResult(item);
-        if (mapped) {
-          return mapped;
-        }
-      }
       return null;
     } catch (error) {
       console.error('[Search] Error looking up album:', error);
@@ -735,19 +565,7 @@ export const musicService = {
       return { streamUrl: cached.url };
     }
 
-    try {
-      const response = await apiClient.get(`/resolve/${videoId}`, {
-          params: { quality }
-      });
-      const result = response.data;
-      if (result.streamUrl) {
-        streamUrlCache.set(cacheKey, { url: result.streamUrl, timestamp: Date.now() });
-      }
-      return result;
-    } catch (error) {
-      console.error("Error resolving stream:", error);
-      throw error;
-    }
+    throw new Error('[MusicAPI] Remote backend stream resolution disabled. Native UnifiedStreamResolver is authoritative.');
   },
 
   /**
@@ -818,8 +636,7 @@ export const musicService = {
         }
       }
 
-      const response = await apiClient.get(`/charts`, { params: { country } }).catch(() => ({ data: { trending: [], songs: [], artists: [] } }));
-      return response.data || { trending: [], songs: [], artists: [] };
+      return { trending: [], songs: [], artists: [] };
     } catch (error) {
       console.error('[MusicAPI] Error fetching charts:', error);
       return { trending: [], songs: [], artists: [] };

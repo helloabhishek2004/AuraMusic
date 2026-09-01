@@ -1,5 +1,4 @@
 import { PlayerTrack } from "../types/player";
-import { catalogTracks } from "../../../data/music-catalog";
 import { useAnalyticsStore } from "../../analytics/store/analytics.store";
 import { useRecommendationsStore } from "../../recommendations/store/recommendations.store";
 import { buildTasteClusters } from "../../recommendations/services/recommendation-engine";
@@ -41,11 +40,19 @@ export const AutoplayRadio = {
     const clusterC = clusters.find(c => c.id === 'cluster-exploration');
     const discoveryArtists = clusterC ? clusterC.artists.map(a => a.toLowerCase().trim()) : [];
 
-    // Filter catalogTracks into pools
-    const highAffinityPool = catalogTracks.filter(t => topArtists.includes(t.artist.toLowerCase().trim()) && t.id !== lastTrack.id);
-    const relatedPool = catalogTracks.filter(t => relatedArtists.includes(t.artist.toLowerCase().trim()) && t.id !== lastTrack.id);
-    const discoveryPool = catalogTracks.filter(t => discoveryArtists.includes(t.artist.toLowerCase().trim()) && t.id !== lastTrack.id);
-    const generalPool = catalogTracks.filter(t => t.id !== lastTrack.id);
+    const historyTracks = (history || []).map((h: any) => h.trackSnapshot || h).filter((t: any) => t && t.id);
+    let downloadedTracks: any[] = [];
+    try {
+      const { useDownloadStore } = require('../../download/store/download.store');
+      downloadedTracks = Object.values(useDownloadStore.getState().downloadedTracks || {});
+    } catch (e) {}
+    const localTrackPool = [...historyTracks, ...downloadedTracks];
+
+    // Filter localTrackPool into pools
+    const highAffinityPool = localTrackPool.filter(t => topArtists.includes((t.artist || '').toLowerCase().trim()) && t.id !== lastTrack.id);
+    const relatedPool = localTrackPool.filter(t => relatedArtists.includes((t.artist || '').toLowerCase().trim()) && t.id !== lastTrack.id);
+    const discoveryPool = localTrackPool.filter(t => discoveryArtists.includes((t.artist || '').toLowerCase().trim()) && t.id !== lastTrack.id);
+    const generalPool = localTrackPool.filter(t => t.id !== lastTrack.id);
 
     // Ratios: 40% High Affinity, 30% Related, 20% Trending, 10% Discovery
     const candidates: any[] = [];
