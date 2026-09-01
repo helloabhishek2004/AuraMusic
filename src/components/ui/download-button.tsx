@@ -45,6 +45,7 @@ export const DownloadButton = memo(({ track, size = 24, color = palette.ink, sty
   }, [downloading]);
 
   const handlePress = useCallback(() => {
+    console.log("[DownloadButton] Pressed for track:", track?.id, track?.title, "downloaded:", downloaded, "downloading:", downloading);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     
     Animated.sequence([
@@ -107,8 +108,9 @@ export const DownloadButton = memo(({ track, size = 24, color = palette.ink, sty
     <TouchableOpacity 
       onPress={handlePress}
       onLongPress={handleLongPress}
+      hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
       activeOpacity={0.7}
-      style={[style, { transform: [{ scale }] }]}
+      style={style}
     >
       <Animated.View style={{ transform: [{ scale }] }}>
         {renderIcon()}

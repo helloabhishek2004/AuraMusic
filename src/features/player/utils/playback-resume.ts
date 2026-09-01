@@ -44,7 +44,7 @@ export async function resumeTrackFromHistory(
 
   // ─── Case 1: Active Queue Match ─────────────────────────────────────────
   console.log(`[PlaybackResume] [Case 1] Scanning active queue for matching canonical ID...`);
-  const queueIdx = playerStore.queue.findIndex((t) => {
+  const queueIdx = playerStore.queue.findIndex((t: PlayerTrack) => {
     return getCanonicalTrackId(t) === selectedCanonicalId;
   });
 

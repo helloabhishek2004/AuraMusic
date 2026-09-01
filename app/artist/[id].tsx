@@ -382,15 +382,38 @@ function ArtistPage() {
     setIsRefreshing(true);
     setError(null);
     try {
-      const data = await musicService.getArtistDetails(id);
+      let targetBrowseId = id;
+      let preResolvedName = "";
+      let preResolvedArt = "";
+
+      // If id is not a channel browseId (starting with UC or FE), resolve it first
+      if (!targetBrowseId.startsWith("UC") && !targetBrowseId.startsWith("FE")) {
+        const lookup = await musicService.lookupArtistByName(targetBrowseId);
+        if (lookup?.id && (lookup.id.startsWith("UC") || lookup.id.startsWith("FE"))) {
+          targetBrowseId = lookup.id;
+          preResolvedName = lookup.title || "";
+          preResolvedArt = lookup.art || "";
+        }
+      }
+
+      let data = await musicService.getArtistDetails(targetBrowseId);
+
+      // Fallback: If not found and targetBrowseId was an ID, try lookup by original id
+      if (!data && targetBrowseId !== id) {
+        data = await musicService.getArtistDetails(id);
+      }
+
       if (data) {
         const enriched = {
           ...data,
-          tagline: data.tagline || "Pioneering the future of electronic music",
-          genres: data.genres || ["Synthwave", "Electronic", "Ambient"],
+          name: data.name || preResolvedName || id,
+          thumbnail: data.thumbnail || preResolvedArt || "",
+          tagline: data.description || (data.subscribers ? `${data.subscribers} listeners` : ""),
+          genres: data.genres || [],
         };
         setArtist(enriched);
         IN_MEMORY_CACHE[id] = enriched;
+        IN_MEMORY_CACHE[targetBrowseId] = enriched;
         await AsyncStorage.setItem(CACHE_PREFIX + id, JSON.stringify(enriched));
       } else {
         setError("Artist details not found.");
@@ -843,9 +866,11 @@ function ArtistPage() {
             </MotionReveal>
           )}
 
-          <MotionReveal delay={345}>
-            <AboutArtistSection artist={artist} />
-          </MotionReveal>
+          {Boolean(artist.description) && (
+            <MotionReveal delay={345}>
+              <AboutArtistSection artist={artist} />
+            </MotionReveal>
+          )}
 
           {artist.related && artist.related.length > 0 && (
             <MotionReveal delay={370}>
@@ -999,11 +1024,13 @@ const HeroSection = memo(
             </AuraText>
           </AnimatedReanimated.View>
 
-          <AnimatedReanimated.View style={nameStyle}>
-            <AuraText variant="body" style={styles.listenersText}>
-              {artist.subscribers} monthly listeners
-            </AuraText>
-          </AnimatedReanimated.View>
+          {Boolean(artist.subscribers) && (
+            <AnimatedReanimated.View style={nameStyle}>
+              <AuraText variant="body" style={styles.listenersText}>
+                {artist.subscribers} monthly listeners
+              </AuraText>
+            </AnimatedReanimated.View>
+          )}
 
           {/* Genre pills — enhanced border */}
           {artist.genres && artist.genres.length > 0 && (
@@ -1019,12 +1046,6 @@ const HeroSection = memo(
               ))}
             </AnimatedReanimated.View>
           )}
-
-          <AnimatedReanimated.View style={nameStyle}>
-            <AuraText variant="headline" style={styles.taglineText}>
-              {artist.tagline}
-            </AuraText>
-          </AnimatedReanimated.View>
         </AnimatedReanimated.View>
       </View>
     );
@@ -1469,21 +1490,6 @@ const AboutArtistSection = memo(({ artist }: { artist: ArtistDetails }) => {
             </View>
           </TouchableOpacity>
         )}
-
-        <View style={styles.aboutMeta}>
-          <View style={styles.metaRow}>
-            <Ionicons name="location-outline" size={14} color={palette.primary} />
-            <AuraText variant="caption" muted>
-              Los Angeles, CA
-            </AuraText>
-          </View>
-          <View style={styles.metaRow}>
-            <Ionicons name="musical-notes-outline" size={14} color={palette.primary} />
-            <AuraText variant="caption" muted>
-              Influences: Kavinsky, The Midnight
-            </AuraText>
-          </View>
-        </View>
       </LiquidGlass>
     </View>
   );

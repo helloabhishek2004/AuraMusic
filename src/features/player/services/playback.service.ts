@@ -93,12 +93,15 @@ export class PlaybackService {
     if (AuraPlayer) AuraPlayer.stop();
   }
 
-  static async setVolume(volume: number): Promise<void> {
-    // Media3 handles audio focus naturally, specific volume API not exposed yet
-    console.log("[PlaybackService] Native setVolume not yet implemented");
+  static async setRepeatMode(mode: string): Promise<void> {
+    if (AuraPlayer) AuraPlayer.setRepeatMode(mode);
   }
 
-  static async syncQueue(queue: PlayerTrack[], activeIndex: number) {
+  static async setVolume(volume: number): Promise<void> {
+    if (AuraPlayer) AuraPlayer.setVolume(volume);
+  }
+
+  static async syncQueue(queue: PlayerTrack[], activeIndex: number = -1) {
     if (AuraPlayer && queue.length > 0) {
       AuraPlayer.setQueue(queue.map(t => t.id));
     }

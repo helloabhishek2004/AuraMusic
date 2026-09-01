@@ -385,7 +385,7 @@ const HeroCard = memo(({ onPress }: { onPress: () => void }) => {
     return null;
   });
 
-  const artworkSource = newestLikedArtwork || "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=800&q=80";
+  const artworkSource = newestLikedArtwork || "aura://generated?name=Liked%20Songs&type=playlist";
 
   useEffect(() => {
     Animated.loop(

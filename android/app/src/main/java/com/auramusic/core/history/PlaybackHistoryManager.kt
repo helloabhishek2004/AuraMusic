@@ -63,7 +63,10 @@ class PlaybackHistoryManager(private val database: AuraDatabase) {
                     artworkUrl = artworkUrl,
                     createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                     lastPlayedAt = existing?.lastPlayedAt,
-                    playCount = existing?.playCount ?: 0
+                    playCount = existing?.playCount ?: 0,
+                    isDownloaded = existing?.isDownloaded ?: false,
+                    downloadedAt = existing?.downloadedAt,
+                    contentLength = existing?.contentLength
                 )
             )
         }

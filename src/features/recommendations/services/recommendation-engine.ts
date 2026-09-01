@@ -135,7 +135,7 @@ export function generateMadeForYou(
   }
 
   const topArtistName = Object.keys(artistAffinities).sort((a, b) => (artistAffinities[b].score || 0) - (artistAffinities[a].score || 0))[0] || 'You';
-  const coverImage = matchedTracks[0]?.art || artistCache?.[topArtistName]?.image || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&q=80&w=600';
+  const coverImage = matchedTracks[0]?.art || artistCache?.[topArtistName]?.image || `aura://generated?name=${encodeURIComponent(topArtistName)}&type=playlist`;
 
   return {
     type: 'playlist',
@@ -255,7 +255,7 @@ export function generateDailyMixes(
       type: 'playlist',
       id,
       title: cluster?.name || `Daily Mix ${i + 1}`,
-      image: image || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?auto=format&fit=crop&q=80&w=480',
+      image: image || `aura://generated?name=${encodeURIComponent(cluster?.name || `Daily Mix ${i + 1}`)}&type=playlist`,
       score: cluster?.score || (10 - i),
       seedArtists: cluster?.artists || [],
       reason: cluster?.reason || '60% favorite content, 30% similar artists, 10% fresh discovery.',
@@ -316,7 +316,7 @@ export function generateOnRepeat(
     }
   }
 
-  const coverImage = tracks[0]?.art || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&q=80&w=480';
+  const coverImage = tracks[0]?.art || `aura://generated?name=On%20Repeat&type=playlist`;
 
   return {
     type: 'playlist',
@@ -378,7 +378,7 @@ export function generateRepeatRewind(
     }
   }
 
-  const coverImage = tracks[0]?.art || 'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?auto=format&fit=crop&q=80&w=480';
+  const coverImage = tracks[0]?.art || `aura://generated?name=Repeat%20Rewind&type=playlist`;
 
   return {
     type: 'playlist',
@@ -429,7 +429,7 @@ export function generateDiscoverWeekly(
     });
   }
 
-  const coverImage = discoveryTracks[0]?.art || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&q=80&w=480';
+  const coverImage = discoveryTracks[0]?.art || `aura://generated?name=Discover%20Weekly&type=playlist`;
 
   return {
     type: 'playlist',
@@ -459,7 +459,7 @@ export function generateDeepCuts(
     .slice(0, 5);
 
   const topArtistName = sortedArtists[0] || 'Your Favorites';
-  const coverImage = artistCache?.[topArtistName]?.image || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&q=80&w=480';
+  const coverImage = artistCache?.[topArtistName]?.image || `aura://generated?name=${encodeURIComponent(topArtistName)}&type=playlist`;
 
   return {
     type: 'playlist',
@@ -482,13 +482,14 @@ export function generateContextualTimeMix(
   activeHoursMap: Record<number, number> = {}
 ): RecommendationSeed {
   const hour = new Date().getHours();
+  const recentArt = history.find(h => (h.art || h.artwork) && !h.art?.includes('placeholder'))?.art || '';
 
   if (hour >= 22 || hour < 4) {
     return {
       type: 'playlist',
       id: 'time-night',
       title: 'Night Mix',
-      image: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&q=80&w=600',
+      image: recentArt || 'aura://generated?name=Night%20Mix&type=playlist',
       score: 9.5,
       reason: 'Late-night chill beats and atmospheric sounds curated for your midnight listening session.',
       confidence: 96,
@@ -498,7 +499,7 @@ export function generateContextualTimeMix(
       type: 'playlist',
       id: 'time-morning',
       title: 'Morning Energy',
-      image: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&q=80&w=600',
+      image: recentArt || 'aura://generated?name=Morning%20Energy&type=playlist',
       score: 9.0,
       reason: 'Upbeat acoustic rhythms and energizing favorites to kickstart your day.',
       confidence: 92,
@@ -508,7 +509,7 @@ export function generateContextualTimeMix(
       type: 'playlist',
       id: 'time-chill',
       title: 'Focus & Study Mix',
-      image: 'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?auto=format&fit=crop&q=80&w=600',
+      image: recentArt || 'aura://generated?name=Focus%20Study&type=playlist',
       score: 8.8,
       reason: 'Instrumental flow, lo-fi rhythms, and ambient melodies to keep you in the zone.',
       confidence: 90,
@@ -518,7 +519,7 @@ export function generateContextualTimeMix(
       type: 'playlist',
       id: 'time-evening',
       title: 'Evening Wind-Down',
-      image: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&q=80&w=600',
+      image: recentArt || 'aura://generated?name=Evening%20Wind%20Down&type=playlist',
       score: 9.0,
       reason: 'Smooth melodies and relaxing hits curated for your evening wind-down.',
       confidence: 93,
@@ -543,7 +544,7 @@ export function generateBecauseYouLike(
 
   return sortedArtists.map((artist) => {
     const match = history.find((h) => h.artist.toLowerCase().includes(artist.name.toLowerCase()));
-    const image = artistCache?.[artist.name]?.image || match?.art || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&q=80&w=400';
+    const image = artistCache?.[artist.name]?.image || match?.art || `aura://generated?name=${encodeURIComponent(artist.name)}&type=artist`;
     
     return {
       type: 'artist',

@@ -147,6 +147,58 @@ export const musicService = {
     }
 
     try {
+      if (isNativeCoreAvailable() && AuraYouTube && typeof AuraYouTube.searchUnified === 'function') {
+        const nativeResult = await AuraYouTube.searchUnified(query);
+        if (nativeResult) {
+          const songs: SearchEntity[] = (nativeResult.songs || []).map((t: any) => ({
+            type: 'song' as const,
+            id: t.id,
+            title: t.title,
+            artist: t.artistName || t.artist || 'Unknown Artist',
+            art: t.thumbnail || t.artworkUrl || '',
+            duration: t.duration || '--:--',
+            album: t.albumName || t.album || undefined,
+            albumId: t.albumId || undefined,
+            source: 'ytmusic' as const,
+          }));
+
+          const artists: SearchEntity[] = (nativeResult.artists || []).map((a: any) => ({
+            type: 'artist' as const,
+            id: a.id || a.browseId,
+            title: a.title || a.name || 'Unknown Artist',
+            artist: a.title || a.name || 'Unknown Artist',
+            art: a.thumbnail || a.art || '',
+            subscribers: a.subscribers || '',
+          }));
+
+          const albums: SearchEntity[] = (nativeResult.albums || []).map((al: any) => ({
+            type: 'album' as const,
+            id: al.id || al.browseId,
+            title: al.title || 'Unknown Album',
+            artist: al.artistName || al.artist || 'Unknown Artist',
+            art: al.thumbnail || al.art || '',
+            year: al.year || '',
+          }));
+
+          const playlists: SearchEntity[] = (nativeResult.playlists || []).map((pl: any) => ({
+            type: 'playlist' as const,
+            id: pl.id || pl.browseId,
+            title: pl.title || 'Playlist',
+            artist: pl.artistName || pl.author || 'Unknown',
+            art: pl.thumbnail || pl.art || '',
+            trackCount: pl.trackCount || '',
+          }));
+
+          return {
+            songs: songs.slice(0, 10),
+            artists: artists.slice(0, 6),
+            albums: albums.slice(0, 6),
+            playlists: playlists.slice(0, 4),
+            query,
+          };
+        }
+      }
+
       // Fetch all categories in parallel with specific type filters
       const responses = await Promise.all([
         apiClient.get(`/search`, { params: { q: query, type: 'songs' } }).catch(() => ({ data: [] })),
@@ -329,22 +381,63 @@ export const musicService = {
   getArtistDetails: async (browseId: string): Promise<ArtistDetails | null> => {
     try {
       if (!browseId) return null;
+      let targetId = browseId;
       if (isNativeCoreAvailable() && AuraYouTube) {
-        const nData = await AuraYouTube.getArtistDetails(browseId);
+        const nData = await AuraYouTube.getArtistDetails(targetId);
         if (nData) {
+          let songs = (nData.songs || []).map((s: any) => ({
+            id: s.id, title: s.title, artist: s.artist || nData.name || "", album: s.album || "", duration: s.duration, art: s.artworkUrl || s.art || nData.art || "", source: 'ytmusic'
+          }));
+          let albums = (nData.albums || []).map((a: any) => ({
+            id: a.id, title: a.title, year: a.year || "", thumbnail: a.art || a.thumbnail || ""
+          }));
+
+          // If songs are empty from channel tabs, supplement with top songs search
+          if (songs.length === 0 && (nData.name || targetId)) {
+            try {
+              const searchedSongs = await AuraYouTube.search(nData.name || targetId);
+              if (Array.isArray(searchedSongs) && searchedSongs.length > 0) {
+                songs = searchedSongs.slice(0, 15).map((s: any) => ({
+                  id: s.id,
+                  title: s.title,
+                  artist: s.artistName || s.artist || nData.name || "",
+                  album: s.albumName || s.album || "",
+                  duration: s.duration || (s.durationMs ? Math.floor(s.durationMs / 1000) : 240),
+                  art: s.thumbnail || s.art || nData.art || "",
+                  source: 'ytmusic'
+                }));
+              }
+            } catch (e) {
+              console.warn('[Music Service] Supplement songs failed:', e);
+            }
+          }
+
+          // If albums are empty from channel tabs, supplement with albums search
+          if (albums.length === 0 && (nData.name || targetId)) {
+            try {
+              const searchedAlbums = await AuraYouTube.searchAlbums(nData.name || targetId);
+              if (Array.isArray(searchedAlbums) && searchedAlbums.length > 0) {
+                albums = searchedAlbums.slice(0, 10).map((a: any) => ({
+                  id: a.id || a.browseId,
+                  title: a.title,
+                  year: a.year || "",
+                  thumbnail: a.thumbnail || a.art || ""
+                }));
+              }
+            } catch (e) {
+              console.warn('[Music Service] Supplement albums failed:', e);
+            }
+          }
+
           return {
-            id: nData.id,
-            name: nData.name || nData.title,
+            id: nData.id || targetId,
+            name: nData.name || nData.title || targetId,
             description: nData.description || "",
             thumbnail: nData.art || nData.thumbnail || "",
             subscribers: "",
-            songs: (nData.songs || []).map((s: any) => ({
-              id: s.id, title: s.title, artist: s.artist, album: s.album, duration: s.duration, art: s.artworkUrl || s.art || "", source: 'ytmusic'
-            })),
+            songs,
             songs_params: "",
-            albums: (nData.albums || []).map((a: any) => ({
-              id: a.id, title: a.title, year: a.year || "", thumbnail: a.art || a.thumbnail || ""
-            })),
+            albums,
             albums_params: "",
             singles: [],
             singles_params: "",
@@ -405,9 +498,44 @@ export const musicService = {
    */
   getArtistSongs: async (browseId: string, params?: string): Promise<MusicTrack[]> => {
     try {
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        if (typeof AuraYouTube.getArtistDetails === 'function') {
+          const details = await AuraYouTube.getArtistDetails(browseId);
+          if (details?.songs && details.songs.length > 0) {
+            return details.songs.map((s: any) => ({
+              id: s.id,
+              title: s.title,
+              artist: s.artist || details.name || 'Unknown Artist',
+              art: s.artworkUrl || s.art || details.art || '',
+              duration: s.duration || 240,
+              album: s.album || '',
+              albumId: s.albumId || undefined,
+              artistId: browseId,
+              source: 'ytmusic',
+            }));
+          }
+        }
+        if (typeof AuraYouTube.search === 'function') {
+          const songs = await AuraYouTube.search(browseId);
+          if (Array.isArray(songs) && songs.length > 0) {
+            return songs.map((s: any) => ({
+              id: s.id,
+              title: s.title,
+              artist: s.artist || 'Unknown Artist',
+              art: s.artworkUrl || '',
+              duration: s.duration || 240,
+              album: s.album || '',
+              albumId: s.albumId || undefined,
+              artistId: browseId,
+              source: 'ytmusic',
+            }));
+          }
+        }
+      }
+
       const response = await apiClient.get(`/artist/${browseId}/songs`, {
         params: { params },
-      });
+      }).catch(() => ({ data: [] }));
       return (response.data || []).map((s: any) => ({
         ...mapBackendSongToMusicTrack(s),
         artistId: browseId,
@@ -424,9 +552,38 @@ export const musicService = {
    */
   getArtistAlbums: async (browseId: string, params?: string): Promise<AlbumDetails[]> => {
     try {
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        if (typeof AuraYouTube.getArtistDetails === 'function') {
+          const details = await AuraYouTube.getArtistDetails(browseId);
+          if (details?.albums && details.albums.length > 0) {
+            return details.albums.map((a: any) => ({
+              id: a.id,
+              title: a.title,
+              artist: details.name || 'Unknown Artist',
+              year: a.year || '',
+              thumbnail: a.art || a.thumbnail || '',
+              type: 'album',
+            }));
+          }
+        }
+        if (typeof AuraYouTube.searchAlbums === 'function') {
+          const albums = await AuraYouTube.searchAlbums(browseId);
+          if (Array.isArray(albums) && albums.length > 0) {
+            return albums.map((a: any) => ({
+              id: a.id,
+              title: a.title,
+              artist: a.artist || 'Unknown Artist',
+              year: a.year || '',
+              thumbnail: a.art || '',
+              type: 'album',
+            }));
+          }
+        }
+      }
+
       const response = await apiClient.get(`/artist/${browseId}/albums`, {
         params: { params },
-      });
+      }).catch(() => ({ data: [] }));
       return (response.data || []).map((album: any) => ({
         id: album.id,
         title: album.title,
@@ -500,7 +657,53 @@ export const musicService = {
    */
   lookupAlbumByName: async (albumName: string): Promise<SearchEntity | null> => {
     try {
-      if (!albumName.trim()) return null;
+      const cleanTarget = albumName.trim().toLowerCase();
+      if (!cleanTarget) return null;
+
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        if (typeof AuraYouTube.searchAlbums === 'function') {
+          const albums = await AuraYouTube.searchAlbums(albumName);
+          if (Array.isArray(albums) && albums.length > 0) {
+            const match = albums.find((a: any) => {
+              const aTitle = (a.title || "").toLowerCase();
+              return aTitle.includes(cleanTarget) || cleanTarget.includes(aTitle);
+            }) || albums[0];
+
+            if (match) {
+              return {
+                type: 'album',
+                id: match.id || match.browseId,
+                title: match.title,
+                artist: match.artistName || match.artist || '',
+                art: match.thumbnail || match.art || '',
+                year: match.year,
+                source: 'ytmusic',
+              };
+            }
+          }
+        }
+        if (typeof AuraYouTube.searchUnified === 'function') {
+          const res = await AuraYouTube.searchUnified(albumName);
+          if (res?.albums && res.albums.length > 0) {
+            const match = res.albums.find((a: any) => {
+              const aTitle = (a.title || "").toLowerCase();
+              return aTitle.includes(cleanTarget) || cleanTarget.includes(aTitle);
+            }) || res.albums[0];
+
+            if (match) {
+              return {
+                type: 'album',
+                id: match.id || match.browseId,
+                title: match.title,
+                artist: match.artistName || match.artist || '',
+                art: match.thumbnail || match.art || '',
+                year: match.year,
+                source: 'ytmusic',
+              };
+            }
+          }
+        }
+      }
 
       const response = await apiClient.get(`/search`, {
         params: { q: albumName, type: 'albums' },
@@ -574,11 +777,48 @@ export const musicService = {
   },
 
   /**
-   * Fetch trending and top charts from backend.
+   * Fetch trending and top charts natively on-device.
    */
   getCharts: async (country?: string): Promise<{ trending: any[]; songs: any[]; artists: any[] }> => {
     try {
-      const response = await apiClient.get(`/charts`, { params: { country } });
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        const query = country === 'IN' ? 'Trending Songs India' : 'Top Global Hits';
+        if (typeof AuraYouTube.searchUnified === 'function') {
+          const res = await AuraYouTube.searchUnified(query);
+          if (res) {
+            const songs = (res.songs || []).map((t: any) => ({
+              id: t.id,
+              title: t.title,
+              artist: t.artistName || t.artist || 'Unknown Artist',
+              album: t.albumName || t.album || '',
+              duration: t.duration || '--:--',
+              art: t.thumbnail || t.artworkUrl || '',
+              source: 'ytmusic',
+            }));
+            const artists = (res.artists || []).map((a: any) => ({
+              id: a.id || a.browseId,
+              title: a.title || a.name || 'Unknown Artist',
+              art: a.thumbnail || a.art || '',
+            }));
+            return { trending: songs, songs, artists };
+          }
+        }
+        if (typeof AuraYouTube.search === 'function') {
+          const rawSongs = await AuraYouTube.search(query);
+          const songs = (rawSongs || []).map((t: any) => ({
+            id: t.id,
+            title: t.title,
+            artist: t.artist || 'Unknown Artist',
+            album: t.album || '',
+            duration: t.duration ? `${Math.floor(t.duration / 60)}:${(t.duration % 60).toString().padStart(2, '0')}` : '--:--',
+            art: t.artworkUrl || '',
+            source: 'ytmusic',
+          }));
+          return { trending: songs, songs, artists: [] };
+        }
+      }
+
+      const response = await apiClient.get(`/charts`, { params: { country } }).catch(() => ({ data: { trending: [], songs: [], artists: [] } }));
       return response.data || { trending: [], songs: [], artists: [] };
     } catch (error) {
       console.error('[MusicAPI] Error fetching charts:', error);

@@ -1,5 +1,6 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "kotlinx-serialization"
 apply plugin: "com.facebook.react"
 apply plugin: "com.google.devtools.ksp"
 
@@ -95,8 +96,6 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
-
-        buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
     signingConfigs {
         debug {
@@ -114,12 +113,11 @@ android {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
             signingConfig signingConfigs.debug
-            def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
-            shrinkResources enableShrinkResources.toBoolean()
+            shrinkResources = (findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false').toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
-            crunchPngs enablePngCrunchInRelease.toBoolean()
+            crunchPngs = enablePngCrunchInRelease.toBoolean()
         }
     }
     packagingOptions {
@@ -153,13 +151,27 @@ android {
     }
 }
 
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    compilerOptions {
+        freeCompilerArgs.add("-Xskip-metadata-version-check")
+    }
+}
+
 dependencies {
     implementation "androidx.media3:media3-exoplayer:1.9.2"
     implementation "androidx.media3:media3-session:1.9.2"
+    implementation "androidx.media3:media3-datasource:1.9.2"
     implementation "androidx.media3:media3-datasource-okhttp:1.9.2"
+    implementation "androidx.media3:media3-database:1.9.2"
     implementation "androidx.room:room-runtime:2.7.1"
     implementation "androidx.room:room-ktx:2.7.1"
     ksp "androidx.room:room-compiler:2.7.1"
+    implementation fileTree(dir: "libs", include: ["*.jar"])
+    implementation "org.brotli:dec:0.1.2"
+    implementation "io.ktor:ktor-client-core:3.5.2"
+    implementation "io.ktor:ktor-client-okhttp:3.5.2"
+    implementation "io.ktor:ktor-client-content-negotiation:3.5.2"
+    implementation "io.ktor:ktor-serialization-kotlinx-json:3.5.2"
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 

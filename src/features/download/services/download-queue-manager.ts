@@ -13,11 +13,78 @@ export class DownloadQueueManager {
     const store = useDownloadStore.getState();
     const now = Date.now();
 
+    // 0. Sync with Native AuraDownloadModule if available
+    const { AuraDownload, onDownloadProgress, onDownloadStateChanged } = await import("@/src/services/native-core");
+    if (AuraDownload) {
+      try {
+        const nativeTracks = await AuraDownload.getDownloadedTracks();
+        const downloadedMap = { ...store.downloadedTracks };
+        nativeTracks.forEach((t) => {
+          downloadedMap[t.id] = {
+            id: t.id,
+            url: `auramusic://track/${t.id}`,
+            title: t.title,
+            artist: t.artist,
+            art: t.artworkUrl || "",
+            localAudioPath: `auramusic://track/${t.id}`,
+            localArtPath: t.artworkUrl || "",
+            fileSize: t.contentLength || 0,
+            downloadedAt: t.downloadedAt || Date.now(),
+          };
+        });
+        useDownloadStore.setState({ downloadedTracks: downloadedMap });
+      } catch (e) {
+        console.warn("[DownloadQueueManager] Failed to sync native downloaded tracks:", e);
+      }
+
+      onDownloadProgress((progress) => {
+        useDownloadStore.getState().updateProgress(
+          progress.trackId,
+          progress.percentage / 100,
+          progress.bytesDownloaded,
+          progress.totalBytes
+        );
+      });
+
+      onDownloadStateChanged((state) => {
+        const s = useDownloadStore.getState();
+        if (state.stateName === "COMPLETED" || state.isDownloaded) {
+          const task = s.activeTasks[state.trackId];
+          const track = task?.track || { id: state.trackId, title: "Unknown", artist: "Unknown" };
+          s.setDownloaded({
+            id: state.trackId,
+            url: (track as any).url || `auramusic://track/${state.trackId}`,
+            title: track.title,
+            artist: track.artist,
+            art: (track as any).art || (track as any).artwork || "",
+            localAudioPath: `auramusic://track/${state.trackId}`,
+            localArtPath: (track as any).art || (track as any).artwork || "",
+            fileSize: state.contentLength || state.bytesDownloaded || 0,
+            downloadedAt: Date.now(),
+          });
+          s.updateStatus(state.trackId, "completed");
+        } else if (state.stateName === "DOWNLOADING") {
+          s.updateStatus(state.trackId, "downloading");
+        } else if (state.stateName === "QUEUED") {
+          s.updateStatus(state.trackId, "queued");
+        } else if (state.stateName === "PAUSED") {
+          s.updateStatus(state.trackId, "paused");
+        } else if (state.stateName === "FAILED") {
+          s.updateStatus(state.trackId, "failed", state.error);
+        } else if (state.stateName === "REMOVING") {
+          s.removeDownload(state.trackId);
+        }
+      });
+    }
+
     // 1. Reconcile downloadedTracks with physical files on disk
     const downloadedTracks = { ...store.downloadedTracks };
     let hasChanges = false;
     for (const trackId of Object.keys(downloadedTracks)) {
       const track = downloadedTracks[trackId];
+      if (track.localAudioPath?.startsWith("auramusic://")) {
+        continue;
+      }
       const audioExists = await StorageService.fileExists(track.localAudioPath);
       if (!audioExists) {
         delete downloadedTracks[trackId];
@@ -97,12 +164,11 @@ export class DownloadQueueManager {
 
     // 3. Listen to store changes to trigger queue processing
     useDownloadStore.subscribe((state, prevState) => {
-      const queueStatusString = (q: any[]) => JSON.stringify((q || []).map((item) => item.status));
+      const queuedCount = (state.queue || []).filter(item => item.status === 'queued').length;
+      const prevQueuedCount = (prevState.queue || []).filter(item => item.status === 'queued').length;
       if (
-        state.queue.length !== prevState.queue.length ||
-        state.isQueuePaused !== prevState.isQueuePaused ||
-        state.maxConcurrentDownloads !== prevState.maxConcurrentDownloads ||
-        queueStatusString(state.queue) !== queueStatusString(prevState.queue)
+        queuedCount > prevQueuedCount ||
+        (!state.isQueuePaused && prevState.isQueuePaused)
       ) {
         this.processQueue();
       }

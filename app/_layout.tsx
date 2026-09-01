@@ -414,11 +414,14 @@ export default function RootLayout() {
       LibraryHealthService.scheduleStartupScan();
     });
 
-// Deferred heavy store hydration to preserve startup frame budget
+    // Deferred heavy store hydration to preserve startup frame budget
     requestIdleTask(async () => {
+      const { usePlaylistStore } = await import('../src/features/playlist/store/playlist.store');
+      await usePlaylistStore.getState().initialize();
       const { useAnalyticsStore } = await import('../src/features/analytics/store/analytics.store');
       await useAnalyticsStore.getState().initialize();
       const { useRecommendationsStore } = await import('../src/features/recommendations/store/recommendations.store');
+      await useRecommendationsStore.getState().generateRecommendations();
       useRecommendationsStore.getState().refreshTrendingIfNeeded();
     });
 
@@ -426,16 +429,6 @@ export default function RootLayout() {
     if (__DEV__) {
       RenderDiagnostics.startMonitoring();
     }
-    
-    // POC TEST
-    import('react-native').then(({ NativeModules }) => {
-      console.log("[POC] Starting testPlay...");
-      NativeModules.AuraPoc.testPlay("jNQXAC9IVRw").then((result: any) => {
-        console.log("[POC_RESULT_SUCCESS] ", JSON.stringify(result));
-      }).catch((e: any) => {
-        console.log("[POC_RESULT_ERROR] ", e.message);
-      });
-    });
 
     return () => {
       RenderDiagnostics.stopMonitoring();

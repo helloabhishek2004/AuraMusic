@@ -188,10 +188,32 @@ function AlbumScreen() {
 
       setIsLoading(true);
       try {
-        const data = await musicService.getAlbumDetails(id);
+        let targetBrowseId = id;
+        let data = null;
+
+        if (targetBrowseId.startsWith("MPREb_") || targetBrowseId.startsWith("FEmusic_") || targetBrowseId.startsWith("VL")) {
+          data = await musicService.getAlbumDetails(targetBrowseId);
+        } else {
+          // If id is an album title, look up the album browseId first
+          const albumEntity = await musicService.lookupAlbumByName(targetBrowseId);
+          if (albumEntity?.id) {
+            targetBrowseId = albumEntity.id;
+            data = await musicService.getAlbumDetails(targetBrowseId);
+          }
+        }
+
+        // Fallback: If not found yet and id wasn't an MPREb_ browseId, try lookupAlbumByName
+        if (!data && !id.startsWith("MPREb_")) {
+          const albumEntity = await musicService.lookupAlbumByName(id);
+          if (albumEntity?.id) {
+            data = await musicService.getAlbumDetails(albumEntity.id);
+          }
+        }
+
         if (data) {
           setAlbum(data);
           IN_MEMORY_CACHE[id] = data;
+          IN_MEMORY_CACHE[targetBrowseId] = data;
           await AsyncStorage.setItem(CACHE_PREFIX + id, JSON.stringify(data));
         } else {
           setError("Album not found.");

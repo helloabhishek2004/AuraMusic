@@ -394,10 +394,18 @@ const SectionHead = ({
 const SongRow = ({
   song,
   onPlay,
+  onPressArtist,
   isActive = false,
 }: any) => {
   const p = usePress();
-  const h = useHeart(song);
+  const displayArtist = song.artist || song.artistName || song.subtitle || "Unknown Artist";
+  const songData = useMemo(() => ({
+    ...song,
+    artist: displayArtist,
+    art: song.art || song.thumbnail || song.artworkUrl || "",
+    thumbnail: song.thumbnail || song.art || song.artworkUrl || "",
+  }), [song, displayArtist]);
+  const h = useHeart(songData);
 
   return (
     <Animated.View style={{ transform: [{ scale: p.sc }] }}>
@@ -411,31 +419,22 @@ const SongRow = ({
           style={s.songInner}
           onPressIn={p.onIn}
           onPressOut={p.onOut}
-          onPress={() => onPlay(song)}
+          onPress={() => onPlay(songData)}
           activeOpacity={1}
           accessibilityRole="button"
-          accessibilityLabel={`Play ${song.title} by ${song.artist}`}
+          accessibilityLabel={`Play ${song.title} by ${displayArtist}`}
         >
           {/* Artwork */}
-          {getArtworkUrl(song, 'card') ? (
-            <Image
-              source={{ uri: getArtworkUrl(song, 'card') }}
-              style={s.songArt}
-              contentFit="cover"
-              transition={200}
-              cachePolicy="memory-disk"
-            />
-          ) : (
-            <LinearGradient
-              colors={["rgba(191,90,242,0.22)", "rgba(90,20,160,0.12)"]}
-              style={[
-                s.songArt,
-                { justifyContent: "center", alignItems: "center" },
-              ]}
-            >
-              <Ionicons name="musical-note" size={20} color={C.primary} />
-            </LinearGradient>
-          )}
+          <AuraArtwork
+            source={resolveArtwork(songData, 'card')}
+            entityName={song.title}
+            entityType="song"
+            style={s.songArt}
+            contentFit="cover"
+            transition={200}
+            cachePolicy="memory-disk"
+            borderRadius={13}
+          />
 
           {/* Info */}
           <View style={s.songMeta}>
@@ -445,13 +444,23 @@ const SongRow = ({
             >
               {song.title}
             </Text>
-            <Text style={s.songArtist} numberOfLines={1}>
-              {song.artist}
-            </Text>
+            <TouchableOpacity
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                if (onPressArtist) {
+                  onPressArtist(song.artistId, displayArtist);
+                }
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={s.songArtist} numberOfLines={1}>
+                {displayArtist}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* Duration */}
-          <Text style={s.songTime}>{song.time}</Text>
+          <Text style={s.songTime}>{song.time || song.duration || ""}</Text>
 
           {/* Heart */}
           <Animated.View style={{ transform: [{ scale: h.sc }] }}>
@@ -474,8 +483,8 @@ const SongRow = ({
             track={{
               id: song.id,
               title: song.title,
-              artist: song.artist,
-              art: song.art,
+              artist: displayArtist,
+              art: songData.art,
               url: song.url || TRACK_URLS[song.id] || "",
               duration: 0,
             }}
@@ -495,6 +504,9 @@ const ArtistRow = ({ artist, onPress }: any) => {
   const p = usePress();
   const [following, setFollowing] = useState(false);
   const followSc = useRef(new Animated.Value(1)).current;
+
+  const displayName = artist.name || artist.title || artist.artistName || "Unknown Artist";
+  const displayFollowers = artist.followers || artist.subscribers || artist.subtitle || "Artist";
 
   const onFollow = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -523,15 +535,18 @@ const ArtistRow = ({ artist, onPress }: any) => {
           onPress={onPress}
           activeOpacity={1}
           accessibilityRole="button"
-          accessibilityLabel={`Open ${artist.name}`}
+          accessibilityLabel={`Open ${displayName}`}
         >
           {/* Avatar */}
           <View style={s.avatarWrap}>
-            <Image
-              source={{ uri: getArtworkUrl({ art: artist.art }, 'card') }}
+            <AuraArtwork
+              source={resolveArtwork(artist, 'artist')}
+              entityName={displayName}
+              entityType="artist"
               style={s.artistAvatar}
               contentFit="cover"
               cachePolicy="memory-disk"
+              borderRadius={AVATAR_SIZE / 2}
             />
             {/* Purple ring */}
             <View
@@ -549,10 +564,10 @@ const ArtistRow = ({ artist, onPress }: any) => {
           {/* Info */}
           <View style={s.artistMeta}>
             <Text style={s.artistName} numberOfLines={1}>
-              {artist.name}
+              {displayName}
             </Text>
             <Text style={s.artistFollowers}>
-              {artist.followers} followers
+              {displayFollowers}
             </Text>
           </View>
 
@@ -598,6 +613,8 @@ const ArtistRow = ({ artist, onPress }: any) => {
 
 const AlbumCard = ({ album, onPress }: any) => {
   const p = usePress();
+  const displayArtist = album.artist || album.artistName || "";
+
   return (
     <Animated.View style={{ transform: [{ scale: p.sc }], width: ALBUM_W }}>
       <TouchableOpacity
@@ -609,12 +626,15 @@ const AlbumCard = ({ album, onPress }: any) => {
         accessibilityLabel={`Open album ${album.title}`}
       >
         <View style={[s.albumArtWrap, { width: ALBUM_W, height: ALBUM_W }]}>
-          <Image
-            source={{ uri: getArtworkUrl({ art: album.art }, 'card') }}
+          <AuraArtwork
+            source={resolveArtwork(album, 'card')}
+            entityName={album.title}
+            entityType="album"
             style={{ width: ALBUM_W, height: ALBUM_W, borderRadius: 18 }}
             contentFit="cover"
             transition={200}
             cachePolicy="memory-disk"
+            borderRadius={18}
           />
           {/* Top specular */}
           <View
@@ -646,7 +666,7 @@ const AlbumCard = ({ album, onPress }: any) => {
         <Text style={s.albumTitle} numberOfLines={1}>
           {album.title}
         </Text>
-        {album.artist && (
+        {displayArtist ? (
           <Text
             style={[
               s.albumTitle,
@@ -659,9 +679,88 @@ const AlbumCard = ({ album, onPress }: any) => {
             ]}
             numberOfLines={1}
           >
-            {album.artist}
+            {displayArtist}
           </Text>
-        )}
+        ) : null}
+      </TouchableOpacity>
+    </Animated.View>
+  );
+};
+
+// ─── Playlist Card ────────────────────────────────────────────────────────────
+
+const PlaylistCard = ({ playlist, onPress }: any) => {
+  const p = usePress();
+  const displaySubtitle = playlist.artistName || playlist.artist || playlist.subtitle || "Playlist";
+
+  return (
+    <Animated.View style={{ transform: [{ scale: p.sc }], width: ALBUM_W }}>
+      <TouchableOpacity
+        onPressIn={p.onIn}
+        onPressOut={p.onOut}
+        activeOpacity={1}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`Open playlist ${playlist.title}`}
+      >
+        <View style={[s.albumArtWrap, { width: ALBUM_W, height: ALBUM_W }]}>
+          <AuraArtwork
+            source={resolveArtwork(playlist, 'card')}
+            entityName={playlist.title}
+            entityType="playlist"
+            style={{ width: ALBUM_W, height: ALBUM_W, borderRadius: 18 }}
+            contentFit="cover"
+            transition={200}
+            cachePolicy="memory-disk"
+            borderRadius={18}
+          />
+          {/* Playlist badge overlay */}
+          <View
+            style={{
+              position: "absolute",
+              bottom: 8,
+              right: 8,
+              backgroundColor: "rgba(0,0,0,0.65)",
+              paddingHorizontal: 7,
+              paddingVertical: 3,
+              borderRadius: 6,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 3,
+            }}
+          >
+            <Ionicons name="list" size={11} color="#FFF" />
+            <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "600" }}>PLAYLIST</Text>
+          </View>
+          {/* Border overlay */}
+          <View
+            style={[
+              StyleSheet.absoluteFillObject,
+              {
+                borderRadius: 18,
+                borderWidth: 0.7,
+                borderColor: "rgba(255,255,255,0.12)",
+              },
+            ]}
+          />
+        </View>
+        <Text style={s.albumTitle} numberOfLines={1}>
+          {playlist.title}
+        </Text>
+        <Text
+          style={[
+            s.albumTitle,
+            {
+              fontSize: 12,
+              color: C.muted,
+              fontWeight: "500",
+              marginTop: 1,
+            },
+          ]}
+          numberOfLines={1}
+        >
+          {displaySubtitle}
+        </Text>
       </TouchableOpacity>
     </Animated.View>
   );
@@ -688,8 +787,10 @@ const RecentItem = ({ item, onPress, onDelete }: any) => {
           accessibilityLabel={`${item.title}, ${item.type}`}
           accessibilityHint="Long press to remove"
         >
-          <Image
-            source={{ uri: getArtworkUrl({ art: item.thumbnail }, 'card') }}
+          <AuraArtwork
+            source={resolveArtwork({ art: item.thumbnail, thumbnail: item.thumbnail }, 'card')}
+            entityName={item.title}
+            entityType={item.type === 'artist' ? 'artist' : 'song'}
             style={[
               s.recentArt,
               item.type === "artist" && { borderRadius: RECENT_W * 0.22 },
@@ -697,6 +798,7 @@ const RecentItem = ({ item, onPress, onDelete }: any) => {
             contentFit="cover"
             transition={200}
             cachePolicy="memory-disk"
+            borderRadius={item.type === "artist" ? RECENT_W * 0.22 : 12}
           />
           <View style={{ flex: 1 }}>
             <Text style={s.recentTitle} numberOfLines={1}>
@@ -720,17 +822,63 @@ const RecentItem = ({ item, onPress, onDelete }: any) => {
   );
 };
 
-// ─── Top Result Card ──────────────────────────────────────────────────────────
+// ─── Polymorphic Top Result Card ──────────────────────────────────────────────
 
 const TopResultCard = ({
-  song,
+  item,
   label,
   onPlay,
+  onPressArtist,
+  onPressAlbum,
+  onPressPlaylist,
   goArtistByName,
 }: any) => {
-  const h = useHeart(song);
   const p = usePress();
   const pb = usePress();
+
+  const isArtist = item?.type === 'ARTIST' || item?.type === 'artist';
+  const isAlbum = item?.type === 'ALBUM' || item?.type === 'album';
+  const isPlaylist = item?.type === 'PLAYLIST' || item?.type === 'playlist';
+  const isSong = !isArtist && !isAlbum && !isPlaylist;
+
+  const displayArtist = item?.artistName || item?.artist || (isArtist ? "Artist" : isAlbum ? "Album" : isPlaylist ? "Playlist" : "Unknown Artist");
+
+  const songData = useMemo(() => ({
+    id: item?.id || item?.videoId,
+    title: item?.title || '',
+    artist: displayArtist,
+    artistName: item?.artistName || item?.artist,
+    artistId: item?.artistId,
+    album: item?.albumName || item?.album || '',
+    albumName: item?.albumName,
+    albumId: item?.albumId,
+    art: item?.thumbnail || item?.art || ''
+  }), [item, displayArtist]);
+
+  const h = useHeart(songData);
+
+  const cardLabel = useMemo(() => {
+    if (label) return label;
+    if (isArtist) return "BEST MATCH  ·  ARTIST";
+    if (isAlbum) return "BEST MATCH  ·  ALBUM";
+    if (isPlaylist) return "BEST MATCH  ·  PLAYLIST";
+    if (item?.versionType && item.versionType !== 'canonical') {
+      return `BEST MATCH  ·  ${item.versionType.toUpperCase()}`;
+    }
+    return "BEST MATCH  ·  SONG";
+  }, [label, isArtist, isAlbum, isPlaylist, item?.versionType]);
+
+  const handleCardPress = () => {
+    if (isArtist) {
+      onPressArtist(item);
+    } else if (isAlbum) {
+      onPressAlbum(item);
+    } else if (isPlaylist) {
+      if (onPressPlaylist) onPressPlaylist(item);
+    } else {
+      onPlay(songData);
+    }
+  };
 
   return (
     <View style={s.section}>
@@ -759,45 +907,52 @@ const TopResultCard = ({
             style={s.topInner}
             onPressIn={p.onIn}
             onPressOut={p.onOut}
-            onPress={() => onPlay(song)}
+            onPress={handleCardPress}
             activeOpacity={1}
-            onLongPress={() => goArtistByName(song.artist)}
             accessibilityRole="button"
-            accessibilityLabel={`Play ${song.title} by ${song.artist}`}
+            accessibilityLabel={`${item?.title} by ${displayArtist}`}
           >
-            {/* Artwork */}
+            {/* Artwork / Avatar */}
             <View style={s.topArtWrap}>
-              <Image
-                source={{ uri: getArtworkUrl(song, 'album') }}
-                style={s.topArt}
+              <AuraArtwork
+                source={resolveArtwork(item, isArtist ? 'artist' : 'album')}
+                entityName={item?.title}
+                entityType={isArtist ? 'artist' : isAlbum ? 'album' : isPlaylist ? 'playlist' : 'song'}
+                style={[
+                  s.topArt,
+                  isArtist && { borderRadius: (SW * 0.54) / 2 }
+                ]}
                 contentFit="cover"
                 transition={300}
                 cachePolicy="memory-disk"
+                borderRadius={isArtist ? (SW * 0.54) / 2 : 22}
               />
               {/* Rim */}
               <View
                 style={[
                   StyleSheet.absoluteFillObject,
                   {
-                    borderRadius: 22,
+                    borderRadius: isArtist ? (SW * 0.54) / 2 : 22,
                     borderWidth: 1,
                     borderColor: "rgba(255,255,255,0.16)",
                   },
                 ]}
               />
               {/* Art specular */}
-              <View
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 16,
-                  right: 16,
-                  height: 1.5,
-                  backgroundColor: "rgba(255,255,255,0.30)",
-                  borderRadius: 1,
-                }}
-              />
-              {/* Purple glow below */}
+              {!isArtist && (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 16,
+                    right: 16,
+                    height: 1.5,
+                    backgroundColor: "rgba(255,255,255,0.30)",
+                    borderRadius: 1,
+                  }}
+                />
+              )}
+              {/* Glow below */}
               <View style={s.topArtGlow} />
             </View>
 
@@ -819,29 +974,33 @@ const TopResultCard = ({
                   ]}
                 />
                 <Text style={s.topLabel}>
-                  {label || song.label || "BEST MATCH  ·  SONG"}
+                  {cardLabel}
                 </Text>
               </View>
             </View>
 
             {/* Title */}
             <Text style={s.topTitle} numberOfLines={2}>
-              {song.title}
+              {item?.title}
             </Text>
 
-            {/* Artist tap */}
+            {/* Subtitle / Artist */}
             <TouchableOpacity
-              onPress={() => goArtistByName(song.artist)}
+              onPress={() => {
+                if (isArtist) onPressArtist(item);
+                else if (item?.artistName || item?.artist) goArtistByName(item?.artistName || item?.artist);
+              }}
               activeOpacity={0.7}
               accessibilityRole="button"
-              accessibilityLabel={`Open artist ${song.artist}`}
             >
-              <Text style={s.topArtist}>{song.artist}</Text>
+              <Text style={s.topArtist}>
+                {item?.subtitle || displayArtist}
+              </Text>
             </TouchableOpacity>
 
             {/* Action row */}
             <View style={s.topActions}>
-              {/* Play pill */}
+              {/* Primary Action Button */}
               <Animated.View
                 style={{ transform: [{ scale: pb.sc }], flex: 1 }}
               >
@@ -849,10 +1008,9 @@ const TopResultCard = ({
                   style={s.topPlayBtn}
                   onPressIn={pb.onIn}
                   onPressOut={pb.onOut}
-                  onPress={() => onPlay(song)}
+                  onPress={handleCardPress}
                   activeOpacity={1}
                   accessibilityRole="button"
-                  accessibilityLabel="Play now"
                 >
                   <LinearGradient
                     colors={[C.primary, C.primaryMid, C.primaryDp]}
@@ -860,97 +1018,62 @@ const TopResultCard = ({
                     end={{ x: 1, y: 1 }}
                     style={StyleSheet.absoluteFill}
                   />
-                  {/* Specular */}
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 3,
-                      left: 18,
-                      right: 18,
-                      height: 2,
-                      borderRadius: 1,
-                      backgroundColor: "rgba(255,255,255,0.22)",
-                    }}
-                  />
-                  {/* Left fresnel */}
-                  <View
-                    style={{
-                      position: "absolute",
-                      left: 8,
-                      top: 7,
-                      bottom: 7,
-                      width: 18,
-                      borderRadius: 8,
-                      backgroundColor: "rgba(255,255,255,0.14)",
-                      transform: [{ skewX: "-8deg" }],
-                    }}
-                  />
-                  {/* Border */}
-                  <View
-                    style={[
-                      StyleSheet.absoluteFillObject,
-                      {
-                        borderRadius: 26,
-                        borderWidth: 0.7,
-                        borderColor: "rgba(255,255,255,0.22)",
-                      },
-                    ]}
-                  />
                   <Ionicons
-                    name="play"
+                    name={isArtist ? "person" : isAlbum ? "disc" : isPlaylist ? "list" : "play"}
                     size={17}
                     color="#FFF"
                     style={{ marginLeft: 2, zIndex: 2 }}
                   />
-                  <Text style={s.topPlayText}>Play Now</Text>
+                  <Text style={s.topPlayText}>
+                    {isArtist ? "View Artist" : isAlbum ? "View Album" : isPlaylist ? "View Playlist" : "Play Now"}
+                  </Text>
                 </TouchableOpacity>
               </Animated.View>
 
-              {/* Heart */}
-              <Animated.View style={{ transform: [{ scale: h.sc }] }}>
-                <TouchableOpacity
-                  style={s.topIconBtn}
-                  onPress={h.toggle}
-                  accessibilityRole="button"
-                  accessibilityLabel={h.liked ? "Unlike" : "Like"}
-                >
-                  {Platform.OS === 'ios' ? (
-                    <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
-                  ) : (
-                    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(25, 25, 35, 0.94)' }]} />
-                  )}
-                  <View
-                    style={[
-                      StyleSheet.absoluteFillObject,
-                      {
-                        borderRadius: 24,
-                        borderWidth: 0.7,
-                        borderColor: h.liked ? h2r(C.primary, 0.5) : C.border,
-                      },
-                    ]}
-                  />
-                  <Ionicons
-                    name={h.liked ? "heart" : "heart-outline"}
+              {/* Heart & Download only for songs */}
+              {isSong && (
+                <>
+                  <Animated.View style={{ transform: [{ scale: h.sc }] }}>
+                    <TouchableOpacity
+                      style={s.topIconBtn}
+                      onPress={h.toggle}
+                      accessibilityRole="button"
+                      accessibilityLabel={h.liked ? "Unlike" : "Like"}
+                    >
+                      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(25, 25, 35, 0.94)', borderRadius: 24 }]} />
+                      <View
+                        style={[
+                          StyleSheet.absoluteFillObject,
+                          {
+                            borderRadius: 24,
+                            borderWidth: 0.7,
+                            borderColor: h.liked ? h2r(C.primary, 0.5) : C.border,
+                          },
+                        ]}
+                      />
+                      <Ionicons
+                        name={h.liked ? "heart" : "heart-outline"}
+                        size={20}
+                        color={h.liked ? C.primary : C.text}
+                      />
+                    </TouchableOpacity>
+                  </Animated.View>
+
+                  <DownloadButton
+                    track={{
+                      id: songData.id,
+                      title: songData.title,
+                      artist: songData.artist,
+                      art: songData.art,
+                      url: "",
+                      duration: 0,
+                    }}
                     size={20}
-                    color={h.liked ? C.primary : C.text}
+                    color={C.text}
+                    style={s.topIconBtn}
                   />
-                </TouchableOpacity>
-              </Animated.View>
-
-              {/* Download */}
-              <DownloadButton
-                track={{
-                  id: song.id,
-                  title: song.title,
-                  artist: song.artist,
-                  art: song.art || song.thumbnail,
-                  url: song.url || TRACK_URLS[song.id] || "",
-                  duration: 0,
-                }}
-                size={20}
-                color={C.text}
-                style={s.topIconBtn}
-              />
+                </>
+              )}
             </View>
           </TouchableOpacity>
         </Glass>
@@ -958,6 +1081,7 @@ const TopResultCard = ({
     </View>
   );
 };
+
 
 // ─── Category Filter Bar ──────────────────────────────────────────────────────
 const FilterBar = memo(({
@@ -1313,7 +1437,7 @@ const AnimatedBg = () => {
 
 // ─── MAIN SCREEN ──────────────────────────────────────────────────────────────
 
-const SEARCH_CATEGORIES = ["All", "Songs", "Artists", "Albums"];
+const SEARCH_CATEGORIES = ["All", "Songs", "Artists", "Albums", "Playlists"];
 
 export default function SearchScreen() {
   const scrollRef = useRef<any>(null);
@@ -1371,15 +1495,31 @@ export default function SearchScreen() {
   });
 
   const createPlayerTrack = useCallback(
-    (track: any): PlayerTrack => ({
-      id: track.id,
-      title: track.title ?? "",
-      artist: track.artist ?? "",
-      art: track.art || track.thumbnail || "",
-      url: track.url || TRACK_URLS[track.id] || "",
-      duration: track.duration || 240,
-      dominantColors: [C.primary, C.primaryMid],
-    }),
+    (track: any): PlayerTrack => {
+      const displayArtist = track.artist || track.artistName || track.author || "Unknown Artist";
+      const displayAlbum = track.album || track.albumName || "";
+      const displayAlbumId = track.albumId || track.albumBrowseId || "";
+      const displayArtistId = track.artistId || track.channelId || "";
+      const displayArt = track.art || track.thumbnail || track.artworkUrl || "";
+      const durationSec = typeof track.duration === 'number' 
+        ? track.duration 
+        : track.durationMs 
+        ? Math.floor(track.durationMs / 1000) 
+        : 240;
+
+      return {
+        id: track.id || track.videoId,
+        title: track.title ?? "",
+        artist: displayArtist,
+        art: displayArt,
+        url: track.url || TRACK_URLS[track.id] || "",
+        duration: durationSec,
+        dominantColors: [C.primary, C.primaryMid],
+        album: displayAlbum,
+        albumId: displayAlbumId,
+        artistId: displayArtistId,
+      };
+    },
     [],
   );
 
@@ -1418,22 +1558,35 @@ export default function SearchScreen() {
   const handlePlaySong = useCallback(
     async (song: any) => {
       Keyboard.dismiss();
+      const displayArtist = song.artist || song.artistName || song.author || "Unknown Artist";
+      const displayAlbum = song.album || song.albumName || "";
+      const displayAlbumId = song.albumId || "";
+      const displayArtistId = song.artistId || "";
+      const displayArt = song.art || song.thumbnail || song.artworkUrl || "";
+
       // Play and get the queue context used
       const playedQueue = await handlePlay({
-        id: song.id,
+        id: song.id || song.videoId,
         title: song.title,
-        artist: song.artist || "",
-        art: song.art || song.thumbnail || "",
-      });
+        artist: displayArtist,
+        artistName: song.artistName || song.artist,
+        artistId: displayArtistId,
+        album: displayAlbum,
+        albumName: song.albumName || song.album,
+        albumId: displayAlbumId,
+        art: displayArt,
+        thumbnail: displayArt,
+        duration: song.duration,
+      } as any);
 
       if (playedQueue) {
         // Add to recent with original context for restoration
         addRecentSearch({
-          id: song.id,
+          id: song.id || song.videoId,
           type: "song",
           title: song.title,
-          subtitle: song.artist,
-          thumbnail: song.art || song.thumbnail || "",
+          subtitle: displayArtist,
+          thumbnail: displayArt,
           data: song,
           queueTracks: playedQueue,
         });
@@ -1506,37 +1659,55 @@ export default function SearchScreen() {
     !results?.isEmpty &&
     ((results?.songs?.length ?? 0) > 0 ||
       (results?.artists?.length ?? 0) > 0 ||
-      (results?.albums?.length ?? 0) > 0);
+      (results?.albums?.length ?? 0) > 0 ||
+      (results?.playlists?.length ?? 0) > 0 ||
+      !!results?.topResult);
 
   const topResult = results?.topResult;
   const remainingSongs = results?.songs || [];
   const filteredArtists = results?.artists || [];
   const filteredAlbums = results?.albums || [];
+  const filteredPlaylists = results?.playlists || [];
 
   const categoryFilteredSongs = useMemo(() => {
     if (activeCategory !== "All" && activeCategory !== "Songs") return [];
-    if (topResult?.type === "song")
+    if (topResult && topResult.type === "SONG")
       return remainingSongs.filter((s) => s.id !== topResult.id);
     return remainingSongs;
   }, [activeCategory, remainingSongs, topResult]);
 
   const categoryFilteredArtists = useMemo(() => {
     if (activeCategory !== "All" && activeCategory !== "Artists") return [];
-    if (topResult?.type === "artist")
+    if (topResult && topResult.type === "ARTIST")
       return filteredArtists.filter((a) => a.id !== topResult.id);
     return filteredArtists;
   }, [activeCategory, filteredArtists, topResult]);
 
   const categoryFilteredAlbums = useMemo(() => {
     if (activeCategory !== "All" && activeCategory !== "Albums") return [];
+    if (topResult && topResult.type === "ALBUM")
+      return filteredAlbums.filter((a) => a.id !== topResult.id);
     return filteredAlbums;
-  }, [activeCategory, filteredAlbums]);
+  }, [activeCategory, filteredAlbums, topResult]);
+
+  const categoryFilteredPlaylists = useMemo(() => {
+    if (activeCategory !== "All" && activeCategory !== "Playlists") return [];
+    if (topResult && topResult.type === "PLAYLIST")
+      return filteredPlaylists.filter((p) => p.id !== topResult.id);
+    return filteredPlaylists;
+  }, [activeCategory, filteredPlaylists, topResult]);
 
   const showTopResult =
-    !!topResult && (activeCategory === "All" || activeCategory === "Songs");
+    !!topResult && (activeCategory === "All" ||
+      (activeCategory === "Songs" && topResult.type === "SONG") ||
+      (activeCategory === "Artists" && topResult.type === "ARTIST") ||
+      (activeCategory === "Albums" && topResult.type === "ALBUM") ||
+      (activeCategory === "Playlists" && topResult.type === "PLAYLIST"));
+
   const showSongs = activeCategory === "All" || activeCategory === "Songs";
   const showArtists = activeCategory === "All" || activeCategory === "Artists";
   const showAlbums = activeCategory === "All" || activeCategory === "Albums";
+  const showPlaylists = activeCategory === "All" || activeCategory === "Playlists";
 
   // Bottom safe zone — where thumb reaches. Keep interactive elements above insets.bottom + 80
   const scrollBottom = bottomPadding;
@@ -1548,6 +1719,14 @@ export default function SearchScreen() {
     }
     return chunks;
   }, [categoryFilteredAlbums]);
+
+  const chunkedPlaylists = useMemo(() => {
+    const chunks = [];
+    for (let i = 0; i < categoryFilteredPlaylists.length; i += 2) {
+      chunks.push(categoryFilteredPlaylists.slice(i, i + 2));
+    }
+    return chunks;
+  }, [categoryFilteredPlaylists]);
 
   const listData = useMemo(() => {
     const list = [];
@@ -1572,30 +1751,37 @@ export default function SearchScreen() {
           list.push({ id: 'top_result', type: 'top_result', data: topResult });
         }
         
-        if (showSongs && categoryFilteredSongs.length > 0) {
-          list.push({
-            id: 'songs_header',
-            type: 'section_header',
-            title: showTopResult && topResult?.type === "song" ? "Related Songs" : "Songs"
-          });
-          categoryFilteredSongs.forEach((song, idx) => {
-            list.push({ id: `song-${song.id}-${idx}`, type: 'song_row', song, idx });
-          });
-        }
-        
-        if (showArtists && categoryFilteredArtists.length > 0) {
-          list.push({ id: 'artists_header', type: 'section_header', title: 'Artists', accent: true });
-          categoryFilteredArtists.forEach((artist, idx) => {
-            list.push({ id: `artist-${artist.id}-${idx}`, type: 'artist_row', artist, idx });
-          });
-        }
-        
-        if (showAlbums && categoryFilteredAlbums.length > 0) {
-          list.push({ id: 'albums_header', type: 'section_header', title: 'Albums' });
-          chunkedAlbums.forEach((chunk, idx) => {
-            list.push({ id: `album-row-${idx}`, type: 'album_row', albums: chunk, idx });
-          });
-        }
+        // Section order determined dynamically by Search Intent Engine
+        const sectionOrder = results?.sectionOrder || ['topResult', 'songs', 'artists', 'albums', 'playlists'];
+
+        sectionOrder.forEach(sec => {
+          if (sec === 'songs' && showSongs && categoryFilteredSongs.length > 0) {
+            const isSongTop = topResult && topResult.type === 'SONG';
+            list.push({
+              id: 'songs_header',
+              type: 'section_header',
+              title: showTopResult && isSongTop ? "Related Songs" : "Songs"
+            });
+            categoryFilteredSongs.forEach((song, idx) => {
+              list.push({ id: `song-${song.id}-${idx}`, type: 'song_row', song, idx });
+            });
+          } else if (sec === 'artists' && showArtists && categoryFilteredArtists.length > 0) {
+            list.push({ id: 'artists_header', type: 'section_header', title: 'Artists', accent: true });
+            categoryFilteredArtists.forEach((artist, idx) => {
+              list.push({ id: `artist-${artist.id}-${idx}`, type: 'artist_row', artist, idx });
+            });
+          } else if (sec === 'albums' && showAlbums && categoryFilteredAlbums.length > 0) {
+            list.push({ id: 'albums_header', type: 'section_header', title: 'Albums' });
+            chunkedAlbums.forEach((chunk, idx) => {
+              list.push({ id: `album-row-${idx}`, type: 'album_row', albums: chunk, idx });
+            });
+          } else if (sec === 'playlists' && showPlaylists && categoryFilteredPlaylists.length > 0) {
+            list.push({ id: 'playlists_header', type: 'section_header', title: 'Playlists' });
+            chunkedPlaylists.forEach((chunk, idx) => {
+              list.push({ id: `playlist-row-${idx}`, type: 'playlist_row', playlists: chunk, idx });
+            });
+          }
+        });
       }
     }
     
@@ -1613,7 +1799,11 @@ export default function SearchScreen() {
     showArtists,
     categoryFilteredArtists,
     showAlbums,
-    chunkedAlbums
+    chunkedAlbums,
+    showPlaylists,
+    categoryFilteredPlaylists,
+    chunkedPlaylists,
+    results?.sectionOrder
   ]);
 
   const renderSearchItem = useCallback(({ item }: any) => {
@@ -1683,8 +1873,11 @@ export default function SearchScreen() {
       case 'top_result':
         return (
           <TopResultCard
-            song={item.data}
+            item={item.data}
             onPlay={handlePlaySong}
+            onPressArtist={handlePressArtist}
+            onPressAlbum={handlePressAlbum}
+            onPressPlaylist={handlePressAlbum}
             goArtistByName={goArtistByName}
           />
         );
@@ -1699,13 +1892,23 @@ export default function SearchScreen() {
           <View style={{ marginBottom: 10 }}>
             <SongRow
               song={{
-                id: item.song.id,
+                id: item.song.id || item.song.videoId,
                 title: item.song.title,
-                artist: item.song.artist || "",
+                artist: item.song.artistName || item.song.artist || item.song.subtitle || "Unknown Artist",
+                artistName: item.song.artistName,
+                artistId: item.song.artistId,
+                album: item.song.albumName || item.song.album || "",
+                albumName: item.song.albumName,
+                albumId: item.song.albumId,
                 time: item.song.duration || "",
-                art: item.song.art || "",
+                art: item.song.thumbnail || item.song.art || item.song.artworkUrl || "",
+                thumbnail: item.song.thumbnail || item.song.art || item.song.artworkUrl || "",
               }}
               onPlay={handlePlaySong}
+              onPressArtist={(artistId: string, name: string) => {
+                if (artistId) goArtist(artistId);
+                else if (name) goArtistByName(name);
+              }}
             />
           </View>
         );
@@ -1714,10 +1917,11 @@ export default function SearchScreen() {
           <View style={{ marginBottom: 10 }}>
             <ArtistRow
               artist={{
-                id: item.artist.id,
-                name: item.artist.title,
-                art: item.artist.art || "",
-                followers: item.artist.subscribers || "",
+                id: item.artist.id || item.artist.browseId,
+                name: item.artist.title || item.artist.artistName || item.artist.name || "Unknown Artist",
+                art: item.artist.thumbnail || item.artist.art || "",
+                thumbnail: item.artist.thumbnail || item.artist.art || "",
+                followers: item.artist.subscribers || item.artist.subtitle || "Artist",
               }}
               onPress={() => handlePressArtist(item.artist)}
             />
@@ -1728,14 +1932,34 @@ export default function SearchScreen() {
           <View style={s.albumGrid}>
             {item.albums.map((album: any) => (
               <AlbumCard
-                key={album.id}
+                key={album.id || album.browseId}
                 album={{
-                  id: album.id,
+                  id: album.id || album.browseId,
                   title: album.title,
-                  art: album.art || "",
-                  artist: album.artist,
+                  art: album.thumbnail || album.art || "",
+                  thumbnail: album.thumbnail || album.art || "",
+                  artist: album.artistName || album.artist || "",
+                  albumId: album.id || album.browseId,
                 }}
                 onPress={() => handlePressAlbum(album)}
+              />
+            ))}
+          </View>
+        );
+      case 'playlist_row':
+        return (
+          <View style={s.albumGrid}>
+            {item.playlists.map((playlist: any) => (
+              <PlaylistCard
+                key={playlist.id || playlist.browseId}
+                playlist={{
+                  ...playlist,
+                  id: playlist.id || playlist.browseId,
+                  art: playlist.thumbnail || playlist.art || "",
+                  thumbnail: playlist.thumbnail || playlist.art || "",
+                  artist: playlist.artistName || playlist.artist || playlist.subtitle || "Playlist",
+                }}
+                onPress={() => handlePressAlbum(playlist)}
               />
             ))}
           </View>

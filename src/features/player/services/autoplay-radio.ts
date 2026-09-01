@@ -71,7 +71,7 @@ export const AutoplayRadio = {
       id: t.id,
       title: t.title,
       artist: t.artist,
-      art: t.art || 'https://picsum.photos/400/400?random=105',
+      art: t.art || '',
       url: '', // resolve at runtime
       duration: t.durationSec || 240,
       dominantColors: t.dominantColors || ['#bf5af2', '#1a0033'],

@@ -71,65 +71,43 @@ class LyricsAPIService {
     this.activeControllers.set(canonicalId, controller);
 
     const promise = (async () => {
-      let timeoutId: NodeJS.Timeout | null = null;
       try {
         const cleanTitle = (title || '').trim() || 'Unknown Title';
         const cleanArtist = (artist || '').trim() || 'Unknown Artist';
 
-        const params = new URLSearchParams();
-        params.append("title", cleanTitle);
-        params.append("artist", cleanArtist);
-
-        // Standardized Duration parsing - Never send bogus duration
+        // Standardized Duration parsing
         const parsedDuration = normalizeDuration(duration);
-        if (parsedDuration !== null && parsedDuration > 0) {
-          params.append("duration", parsedDuration.toString());
-        }
+        const durationSec = parsedDuration !== null && parsedDuration > 0 ? parsedDuration : 0;
 
-        const url = `${this.baseUrl}/lyrics/${trackId}?${params.toString()}`;
+        console.log(`[Lyrics Service] Fetching lyrics on-device: "${cleanTitle}" - "${cleanArtist}" (${durationSec}s)`);
 
-        // 5. Diagnostics Logging
-        console.log(`[Lyrics Diagnostics] Requesting lyrics:
-- Title: "${cleanTitle}"
-- Artist: "${cleanArtist}"
-- Normalized Duration: ${parsedDuration !== null ? `${parsedDuration}s` : 'OMITTED'}
-- Canonical ID: "${canonicalId}"
-- Endpoint: "${url}"`);
+        const { NativeModules } = require("react-native");
+        const { AuraLyricsModule } = NativeModules;
 
-        timeoutId = setTimeout(() => {
-          console.warn(`[Lyrics Service] Timeout reached for track: ${canonicalId}`);
-          controller.abort();
-        }, this.requestTimeout);
+        if (AuraLyricsModule && AuraLyricsModule.fetchLyrics) {
+          const data: LyricsFetchResponse = await AuraLyricsModule.fetchLyrics(
+            trackId,
+            cleanTitle,
+            cleanArtist,
+            durationSec,
+            null
+          );
 
-        const response = await fetch(url, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          signal: controller.signal,
-        });
-
-        if (timeoutId) clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          if (response.status === 404) {
-            console.log(`[Lyrics Service] 404 Not Found for track ${canonicalId}. Caching negative results for 1 hour.`);
-            // Cache negative results temporarily (1h) to prevent API spam
+          if (data.unavailable) {
+            console.log(`[Lyrics Service] Lyrics unavailable for track ${canonicalId}. Caching negative result.`);
             const negativeEntry = { unavailable: true, cachedAt: Date.now() };
             cacheStore.cacheLyrics(canonicalId, negativeEntry);
             return { unavailable: true, trackId } as any;
           }
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+
+          console.log(`[Lyrics Service] On-device lyrics received for ${canonicalId} (source=${data.source}, synced=${data.synced}, lines=${data.lyrics?.length || 0})`);
+          cacheStore.cacheLyrics(canonicalId, data);
+          return data;
+        } else {
+          console.warn("[Lyrics Service] AuraLyricsModule is not available on this platform.");
+          return { unavailable: true, trackId } as any;
         }
-
-        const data: LyricsFetchResponse = await response.json();
-
-        // Cache successful result in central store using canonical identity
-        cacheStore.cacheLyrics(canonicalId, data);
-        return data;
       } catch (error: any) {
-        if (timeoutId) clearTimeout(timeoutId);
-
         if (error.name === 'AbortError') {
           console.log(`[Lyrics Service] Request aborted for track: ${canonicalId}`);
           throw new Error("Request aborted");
@@ -155,43 +133,7 @@ class LyricsAPIService {
     artist: string,
     duration?: number | string
   ): Promise<LyricsFetchResponse> {
-    try {
-      const params = new URLSearchParams();
-      params.append("title", title);
-      params.append("artist", artist);
-
-      const parsedDuration = normalizeDuration(duration);
-      if (parsedDuration !== null && parsedDuration > 0) {
-        params.append("duration", parsedDuration.toString());
-      }
-
-      const url = `${this.baseUrl}/lyrics/search?${params.toString()}`;
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.requestTimeout);
-
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error("Lyrics not found");
-        }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data: LyricsFetchResponse = await response.json();
-      return data;
-    } catch (error) {
-      throw error;
-    }
+    return this.fetchLyrics("", title, artist, duration);
   }
 
   /**

@@ -73,7 +73,7 @@ export function applyDiversityFilter(tracks: any[], targetSize: number = 25): Pl
       id: trackId,
       title: item.title,
       artist: trackArtist,
-      art: item.art || item.thumbnail || 'https://picsum.photos/400/400?random=105',
+      art: item.art || item.thumbnail || '',
       url: '', 
       duration: durationSec,
       album: trackAlbum || undefined,
@@ -488,7 +488,7 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
             id: s.id || s.videoId,
             title: s.title,
             artist: s.artist || seed.title.replace(' Mix', ''),
-            art: s.art || s.thumbnail || 'https://picsum.photos/400/400?random=15',
+            art: s.art || s.thumbnail || seed.image || '',
             url: '',
             duration: s.duration ? parseDurationToSeconds(s.duration) : 240,
             artistId: seed.id,
@@ -535,7 +535,7 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
             id: t.id || t.videoId,
             title: t.title,
             artist: t.artist || seed.artistName || 'Unknown Artist',
-            art: seed.image || 'https://picsum.photos/400/400?random=7',
+            art: seed.image || t.art || '',
             url: '',
             duration: t.duration ? parseDurationToSeconds(t.duration) : 240,
             album: seed.title,
@@ -576,7 +576,7 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
             id: seed.id,
             title: seed.title,
             artist: seed.artistName || 'Unknown Artist',
-            art: seed.image || 'https://picsum.photos/400/400?random=17',
+            art: seed.image || '',
             url: '',
             duration: 240,
             source: 'ytmusic',
@@ -698,19 +698,31 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
           return hydrateTrendingForYou(seed);
         }
 
-        // Trending mixes hydrated dynamically on-demand from backend charts
+        // Trending mixes hydrated dynamically on-demand from native YouTube charts / search
         if (seed.id === 'trending-global') {
           const { musicService } = require('../../../services/api/music');
           const charts = await musicService.getCharts();
-          const songs = charts.songs?.length > 0 ? charts.songs : charts.trending;
-          return applyDiversityFilter(songs || [], 25);
+          const songs = charts.songs?.length > 0 ? charts.songs : (charts.trending || []);
+          if (songs && songs.length > 0) {
+            return applyDiversityFilter(songs, 25);
+          }
+          const searched = await musicService.searchSongs('Top Global Hits');
+          if (searched && searched.length > 0) {
+            return applyDiversityFilter(searched, 25);
+          }
         }
 
         if (seed.id === 'trending-india') {
           const { musicService } = require('../../../services/api/music');
           const charts = await musicService.getCharts('IN');
-          const songs = charts.songs?.length > 0 ? charts.songs : charts.trending;
-          return applyDiversityFilter(songs || [], 25);
+          const songs = charts.songs?.length > 0 ? charts.songs : (charts.trending || []);
+          if (songs && songs.length > 0) {
+            return applyDiversityFilter(songs, 25);
+          }
+          const searched = await musicService.searchSongs('Trending Hits India');
+          if (searched && searched.length > 0) {
+            return applyDiversityFilter(searched, 25);
+          }
         }
 
         if (seed.id === 'trending-synthwave') {
@@ -721,7 +733,6 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
               return applyDiversityFilter(songs, 25);
             }
           } catch (e) {}
-          return catalogTracks.map(t => ({ id: t.id, title: t.title, artist: t.artist, art: t.art, artwork: t.art, url: '', duration: t.durationSec || 240, dominantColors: t.dominantColors, artistId: t.artistId, albumId: t.albumId, source: 'local' as any }));
         }
 
         // Generic fallback for any other named seed
@@ -736,11 +747,34 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
           } catch (e) {}
         }
 
+        // Check local downloaded tracks or local history if offline
+        try {
+          const { useDownloadStore } = require('../../download/store/download.store');
+          const downloads = Object.values(useDownloadStore.getState().downloadedTracks || {}) as any[];
+          if (downloads.length > 0) {
+            return applyDiversityFilter(downloads, 25);
+          }
+        } catch (e) {}
+
+        const historyTracks = (useAnalyticsStore.getState().history || [])
+          .map((h: any) => h.trackSnapshot || h)
+          .filter((t: any) => t && t.id);
+        if (historyTracks.length > 0) {
+          return applyDiversityFilter(historyTracks, 25);
+        }
+
         return catalogTracks.map(t => ({ id: t.id, title: t.title, artist: t.artist, art: t.art, artwork: t.art, url: '', duration: t.durationSec || 240, dominantColors: t.dominantColors, artistId: t.artistId, albumId: t.albumId, source: 'local' as any }));
       }
     }
   } catch (error) {
     console.error('[RecommendationHydrator] Critical error during seed hydration:', error);
+  }
+
+  const fallbackHist = (useAnalyticsStore.getState().history || [])
+    .map((h: any) => h.trackSnapshot || h)
+    .filter((t: any) => t && t.id);
+  if (fallbackHist.length > 0) {
+    return applyDiversityFilter(fallbackHist, 25);
   }
 
   return catalogTracks.map(t => ({ id: t.id, title: t.title, artist: t.artist, art: t.art, artwork: t.art, url: '', duration: t.durationSec || 240, dominantColors: t.dominantColors, artistId: t.artistId, albumId: t.albumId, source: 'local' as any }));

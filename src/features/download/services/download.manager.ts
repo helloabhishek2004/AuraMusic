@@ -39,6 +39,27 @@ export class DownloadManager {
     const store = useDownloadStore.getState();
     const downloadStartTime = Date.now();
 
+    const { AuraDownload } = await import("@/src/services/native-core");
+    if (AuraDownload) {
+      try {
+        store.updateStatus(trackId, "downloading");
+        store.updateTelemetry("started");
+        await AuraDownload.startDownload({
+          id: task.track.id,
+          title: task.track.title,
+          artist: task.track.artist,
+          album: task.track.album,
+          duration: task.track.duration,
+          artworkUrl: task.track.art || (task.track as any).artworkUrl,
+        });
+        return;
+      } catch (e: any) {
+        logger.error(`[DownloadManager] Native startDownload failed for ${trackId}:`, e);
+        store.updateStatus(trackId, "failed", e.message || "Native download failed");
+        return;
+      }
+    }
+
     // Ensure notifications permission dynamically when starting download
     try {
       const Notifications = require('expo-notifications');
@@ -278,6 +299,12 @@ export class DownloadManager {
   }
 
   static async pauseDownload(trackId: string) {
+    const { AuraDownload } = await import("@/src/services/native-core");
+    if (AuraDownload) {
+      await AuraDownload.pauseDownload(trackId);
+      useDownloadStore.getState().updateStatus(trackId, "paused");
+      return;
+    }
     const resumable = this.downloadResumables[trackId];
     if (resumable) {
       try {
@@ -289,10 +316,22 @@ export class DownloadManager {
   }
 
   static async resumeDownload(trackId: string) {
+    const { AuraDownload } = await import("@/src/services/native-core");
+    if (AuraDownload) {
+      await AuraDownload.resumeDownload(trackId);
+      useDownloadStore.getState().updateStatus(trackId, "downloading");
+      return;
+    }
     useDownloadStore.getState().resumeDownload(trackId);
   }
 
   static async cancelDownload(trackId: string) {
+    const { AuraDownload } = await import("@/src/services/native-core");
+    if (AuraDownload) {
+      await AuraDownload.removeDownload(trackId);
+      useDownloadStore.getState().cancelDownload(trackId);
+      return;
+    }
     const resumable = this.downloadResumables[trackId];
     if (resumable) {
       try {
@@ -310,6 +349,12 @@ export class DownloadManager {
   }
 
   static async removeDownload(trackId: string) {
+    const { AuraDownload } = await import("@/src/services/native-core");
+    if (AuraDownload) {
+      await AuraDownload.removeDownload(trackId);
+      await useDownloadStore.getState().removeDownload(trackId);
+      return;
+    }
     const track = useDownloadStore.getState().downloadedTracks[trackId];
 
     if (track) {

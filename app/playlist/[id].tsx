@@ -75,6 +75,7 @@ import { PlayerTrack } from "@/src/features/player/types/player";
 import PlaylistArtwork from "@/src/features/playlist/components/PlaylistArtwork";
 import { usePlaylistStore } from "@/src/features/playlist/store/playlist.store";
 import { useRecommendationsStore } from "@/src/features/recommendations/store/recommendations.store";
+import { hydrateRecommendationSeed } from "@/src/features/recommendations/services/recommendation-hydrator";
 import { openArtistByName } from "@/src/navigation/music-navigation";
 import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
 import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
@@ -958,23 +959,51 @@ const AddSongsModal = React.memo(({ isVisible, onClose, playlistId }: any) => {
     if (trimmed.length < 2) {
       setOnlineResults([]);
       setIsSearching(false);
+      if (abortControllerRef.current) abortControllerRef.current.abort();
       return;
     }
+
+    if (abortControllerRef.current) abortControllerRef.current.abort();
     const ac = new AbortController();
     abortControllerRef.current = ac;
+
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
         const { musicService } = await import("@/src/services/api/music");
         const results = await musicService.searchSongs(query);
         if (!ac.signal.aborted) {
-          setOnlineResults(results.slice(0, 8).map(r => ({ ...r, duration: 0, isLocal: false } as any)));
+          setOnlineResults(results.slice(0, 10).map(r => ({
+            id: r.id,
+            title: r.title,
+            artist: r.artist || 'Unknown Artist',
+            album: r.album || '',
+            albumId: r.albumId,
+            art: r.art || '',
+            artworkUrl: r.art || '',
+            url: '',
+            duration: typeof r.duration === 'string' && r.duration.includes(':')
+              ? r.duration.split(':').reduce((acc, time) => {
+                  const parsed = parseInt(time, 10);
+                  return isNaN(parsed) ? acc : (60 * acc) + parsed;
+                }, 0) * 1000
+              : 0,
+            isLocal: false,
+            source: r.source || 'ytmusic'
+          } as PlayerTrack)));
+        }
+      } catch (err: any) {
+        if (err.name !== 'AbortError' && err.name !== 'CanceledError') {
+          console.warn('[AddSongsModal] Search failed:', err);
         }
       } finally {
         if (!ac.signal.aborted) setIsSearching(false);
       }
-    }, 400);
-    return () => { ac.abort(); clearTimeout(timer); };
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+    };
   }, [query]);
 
   return (
@@ -991,13 +1020,29 @@ const AddSongsModal = React.memo(({ isVisible, onClose, playlistId }: any) => {
               <LiquidGlassSurface style={{ height: 52, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", gap: 10 }} borderRadius={26} showLeftGlow glowOpacity={searchFocused ? 0.1 : 0}>
                 <Ionicons name="search" size={20} color={searchFocused ? COLORS.primary : "rgba(255,255,255,0.5)"} />
                 <TextInput ref={inputRef} placeholder="Search online..." placeholderTextColor="rgba(255,255,255,0.3)" style={{ flex: 1, color: "#FFF", fontSize: 16 }} value={query} onChangeText={setQuery} onFocus={handleSearchFocus} onBlur={handleSearchBlur} />
+                {isSearching && <ActivityIndicator size="small" color={COLORS.primary} />}
               </LiquidGlassSurface>
             </AnimatedReanimated.View>
           </View>
           <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: insets.bottom + 20 }}>
             {onlineResults.map((t, idx) => (
-              <SearchResultRow key={`online-${t.id}-${idx}`} track={t} added={!!playlist?.trackIds.includes(t.id)} onToggle={(tr: any) => playlist?.trackIds.includes(tr.id) ? removeTrack(playlistId, tr.id) : addTrack(playlistId, tr)} index={idx} />
+              <SearchResultRow
+                key={`online-${t.id}-${idx}`}
+                track={t}
+                added={!!playlist?.trackIds.includes(t.id)}
+                onToggle={(tr: any) => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  playlist?.trackIds.includes(tr.id) ? removeTrack(playlistId, tr.id) : addTrack(playlistId, tr);
+                }}
+                index={idx}
+              />
             ))}
+            {query.trim().length >= 2 && !isSearching && onlineResults.length === 0 && (
+              <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+                <Ionicons name="search-outline" size={36} color="rgba(255,255,255,0.3)" />
+                <Text style={{ color: "rgba(255,255,255,0.5)", marginTop: 10, fontSize: 15, fontWeight: "600" }}>No songs found</Text>
+              </View>
+            )}
           </ScrollView>
         </AnimatedReanimated.View>
       </View>
@@ -1007,16 +1052,22 @@ const AddSongsModal = React.memo(({ isVisible, onClose, playlistId }: any) => {
 
 const SearchResultRow = ({ track, added, onToggle, index }: any) => {
   const enterAnim = useSharedValue(0);
-  useEffect(() => { enterAnim.value = withDelay(index * 50, withSpring(1)); }, [index]);
+  useEffect(() => { enterAnim.value = withDelay(index * 40, withSpring(1)); }, [index]);
   const enterStyle = useAnimatedStyle(() => ({ opacity: enterAnim.value, transform: [{ translateY: interpolate(enterAnim.value, [0, 1], [10, 0]) }] }));
   return (
     <AnimatedReanimated.View style={[{ flexDirection: "row", alignItems: "center", marginBottom: 12 }, enterStyle]}>
-      <Image source={{ uri: getArtworkUrl(track, 'card') }} style={{ width: 50, height: 50, borderRadius: 10 }} cachePolicy="memory-disk" />
+      <AuraArtwork
+        source={resolveArtwork(track, 'card')}
+        entityName={track.title}
+        entityType="song"
+        style={{ width: 50, height: 50, borderRadius: 10 }}
+        cachePolicy="memory-disk"
+      />
       <View style={{ flex: 1, marginLeft: 14 }}>
-        <Text style={{ color: "#FFF", fontSize: 15, fontWeight: "600" }}>{track.title}</Text>
-        <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }}>{track.artist}</Text>
+        <Text style={{ color: "#FFF", fontSize: 15, fontWeight: "600" }} numberOfLines={1}>{track.title}</Text>
+        <Text style={{ color: "rgba(255,255,255,0.5)", fontSize: 13 }} numberOfLines={1}>{track.artist}</Text>
       </View>
-      <TouchableOpacity onPress={() => onToggle(track)}>
+      <TouchableOpacity onPress={() => onToggle(track)} hitSlop={8}>
         <Ionicons name={added ? "checkmark-circle" : "add-circle-outline"} size={28} color={added ? COLORS.primary : "#FFF"} />
       </TouchableOpacity>
     </AnimatedReanimated.View>
@@ -1074,13 +1125,11 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
     setIsSeedLoading(true);
     (async () => {
       try {
-        const { hydrateRecommendationSeed } = await import('@/src/features/recommendations/services/recommendation-hydrator');
         const hydrated = await hydrateRecommendationSeed(seed);
         if (active && hydrated && hydrated.length > 0) {
           setSeedTracks(hydrated);
           // Persist hydrated tracks in recommendation store so next open is instant
           try {
-            const { useRecommendationsStore } = await import('@/src/features/recommendations/store/recommendations.store');
             const state = useRecommendationsStore.getState();
             const updateSeedInList = (list: any[]) => (list || []).map(item => item.id === seed.id ? { ...item, tracks: hydrated, trackIds: hydrated.map(t => t.id) } : item);
             useRecommendationsStore.setState({

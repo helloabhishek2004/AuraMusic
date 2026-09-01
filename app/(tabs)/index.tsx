@@ -1390,8 +1390,8 @@ export default function HomeScreen() {
       sections.push({ id: 'hero', type: 'hero', heroType: 'track', data: topTracks[0] });
     } else if (continueListening.length > 0) {
       sections.push({ id: 'hero', type: 'hero', heroType: 'track', data: continueListening[0] });
-    } else if (catalogTracks.length > 0) {
-      sections.push({ id: 'hero', type: 'hero', heroType: 'track', data: catalogTracks[0] });
+    } else if (trendingSeeds.length > 0) {
+      sections.push({ id: 'hero', type: 'hero', heroType: 'mix', data: trendingSeeds[0] });
     }
 
     if (continueListening.length > 0) sections.push({ id: 'continue_listening', type: 'continue_listening' });
@@ -1416,17 +1416,22 @@ export default function HomeScreen() {
       sections.push({ id: 'because_you_like', type: 'because_you_like', data: becauseYouLike });
     }
     
-    // Top Tracks
-    const effectiveTopTracks = topTracks.length > 0 ? topTracks : catalogTracks;
-    if (effectiveTopTracks.length > 0) sections.push({ id: 'top_tracks', type: 'top_tracks', data: effectiveTopTracks });
+    // 5. Top Tracks (Strictly based on real listening affinity)
+    if (topTracks.length > 0) {
+      sections.push({ id: 'top_tracks', type: 'top_tracks', data: topTracks });
+    }
 
-    // Favorite Artists
-    const effectiveFavoriteArtists = (favoriteArtists.length > 0 ? favoriteArtists : (topArtists.length > 0 ? topArtists : catalogArtists));
-    if (effectiveFavoriteArtists.length > 0) sections.push({ id: 'favorite_artists', type: 'favorite_artists', data: effectiveFavoriteArtists });
+    // 6. Favorite Artists (Derived from real play counts & affinities)
+    const effectiveFavoriteArtists = (favoriteArtists.length > 0 ? favoriteArtists : topArtists).filter(Boolean);
+    if (effectiveFavoriteArtists.length > 0) {
+      sections.push({ id: 'favorite_artists', type: 'favorite_artists', data: effectiveFavoriteArtists });
+    }
 
-    // Favorite Albums
-    const effectiveFavoriteAlbums = (favoriteAlbums.length > 0 ? favoriteAlbums : (topAlbums.length > 0 ? topAlbums : catalogAlbums));
-    if (effectiveFavoriteAlbums.length > 0) sections.push({ id: 'favorite_albums', type: 'favorite_albums', data: effectiveFavoriteAlbums });
+    // 7. Favorite Albums (Derived from real play counts & affinities)
+    const effectiveFavoriteAlbums = (favoriteAlbums.length > 0 ? favoriteAlbums : topAlbums).filter(Boolean);
+    if (effectiveFavoriteAlbums.length > 0) {
+      sections.push({ id: 'favorite_albums', type: 'favorite_albums', data: effectiveFavoriteAlbums });
+    }
 
     if (recentlyPlayed.length > 0) sections.push({ id: 'recently_played', type: 'recently_played' });
 

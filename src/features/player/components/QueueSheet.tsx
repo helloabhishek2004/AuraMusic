@@ -288,7 +288,7 @@ export const QueueSheet = ({
   const handleTrackPress = useCallback(
     async (trackId: string) => {
       const state = usePlayerStore.getState();
-      const index = state.queue.findIndex(t => t.id === trackId);
+      const index = state.queue.findIndex((t: PlayerTrack) => t.id === trackId);
       if (index === -1 || index === state.currentIndex) return;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       await state.jumpToQueueIndex(index);
@@ -300,7 +300,7 @@ export const QueueSheet = ({
   const handleMenuPress = useCallback(
     (track: PlayerTrack) => {
       const state = usePlayerStore.getState();
-      const index = state.queue.findIndex(t => t.id === track.id);
+      const index = state.queue.findIndex((t: PlayerTrack) => t.id === track.id);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setActionTrack(track);
       setActionIndex(index);
@@ -491,10 +491,15 @@ const QueueRow = React.memo(
     onMenuPress,
     onDrag,
   }: QueueRowProps) => {
-    const duration = item.duration ? Math.floor(item.duration / 1000) : 0;
-    const mm = Math.floor(duration / 60);
-    const ss = duration % 60;
-    const durationText = `${mm}:${ss.toString().padStart(2, "0")}`;
+    const durationSec = typeof item.duration === 'number'
+      ? (item.duration > 1000 ? Math.floor(item.duration / 1000) : item.duration)
+      : (item as any).durationMs 
+      ? Math.floor((item as any).durationMs / 1000) 
+      : 0;
+    const mm = Math.floor(durationSec / 60);
+    const ss = durationSec % 60;
+    const durationText = durationSec > 0 ? `${mm}:${ss.toString().padStart(2, "0")}` : "--:--";
+    const displayArtist = item.artist || (item as any).artistName || (item as any).author || "Unknown Artist";
 
     const rowOpacity = useSharedValue(1);
     useEffect(() => {
@@ -573,10 +578,10 @@ const QueueRow = React.memo(
                     style={[s.trackTitle, isPlaying && { color: accentColor }]} 
                     numberOfLines={1}
                   >
-                    {item.title}
+                    {item.title || "—"}
                   </Text>
                   <Text style={s.trackArtist} numberOfLines={1}>
-                    {item.artist}
+                    {displayArtist}
                   </Text>
                 </View>
 

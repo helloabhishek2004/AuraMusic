@@ -33,4 +33,6 @@ export interface LyricsFetchResponse {
   lyrics: LyricsLine[];
   source: string;
   lrcId?: string;
+  unavailable?: boolean;
+  cachedAt?: number;
 }

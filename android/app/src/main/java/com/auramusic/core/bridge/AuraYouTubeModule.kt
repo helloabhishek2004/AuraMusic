@@ -1,4 +1,4 @@
-﻿package com.auramusic.core.bridge
+package com.auramusic.core.bridge
 
 import com.facebook.react.bridge.*
 import com.auramusic.core.youtube.AuraYouTubeEngine
@@ -11,6 +11,30 @@ class AuraYouTubeModule(reactContext: ReactApplicationContext) : ReactContextBas
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val engine = AuraYouTubeEngine(reactContext)
+
+    @ReactMethod
+    fun searchUnified(query: String, promise: Promise) {
+        scope.launch {
+            try {
+                val result = engine.searchUnified(query)
+                promise.resolve(convertJsonToMap(result))
+            } catch (e: Exception) {
+                promise.reject("SEARCH_UNIFIED_ERROR", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun searchPlaylists(query: String, promise: Promise) {
+        scope.launch {
+            try {
+                val result = engine.searchPlaylists(query)
+                promise.resolve(convertJsonToArray(result))
+            } catch (e: Exception) {
+                promise.reject("SEARCH_PLAYLIST_ERROR", e.message, e)
+            }
+        }
+    }
 
     @ReactMethod
     fun search(query: String, promise: Promise) {

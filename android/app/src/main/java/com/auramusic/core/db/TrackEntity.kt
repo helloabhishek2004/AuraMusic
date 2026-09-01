@@ -13,5 +13,8 @@ data class TrackEntity(
     val artworkUrl: String?,
     val createdAt: Long = System.currentTimeMillis(),
     val lastPlayedAt: Long? = null,
-    val playCount: Int = 0
+    val playCount: Int = 0,
+    val isDownloaded: Boolean = false,
+    val downloadedAt: Long? = null,
+    val contentLength: Long? = null
 )

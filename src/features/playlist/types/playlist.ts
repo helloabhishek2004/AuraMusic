@@ -86,6 +86,7 @@ export interface PlaylistStoreState {
 }
 
 export interface PlaylistStoreActions {
+  initialize(): Promise<void>;
   // CRUD
   createPlaylist(
     id: string,

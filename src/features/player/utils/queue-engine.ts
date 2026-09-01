@@ -89,12 +89,16 @@ export const QueueEngine = {
 
   /**
    * Reorders the queue array for shuffle toggle.
-   * Anchor playing track at index 0, shuffles remaining items.
+   * Anchors playing track at index 0, shuffles remaining items using Fisher-Yates.
+   * Preserves duplicate tracks in queue.
    */
   buildShuffledQueue(
     queue: PlayerTrack[],
-    currentTrack: PlayerTrack
+    currentTrack: PlayerTrack,
+    currentIndex: number = -1
   ): PlayerTrack[] {
+    if (queue.length <= 1) return [...queue];
+
     try {
       const { useSettingsStore } = require("../../settings/store/settings.store");
       const smartShuffle = useSettingsStore.getState().smartShuffleEnabled;
@@ -106,9 +110,28 @@ export const QueueEngine = {
       console.warn("[QueueEngine] Failed to resolve settings for smart shuffle:", e);
     }
 
-    const remaining = queue.filter((t) => t.id !== currentTrack.id);
-    const shuffled = [...remaining].sort(() => Math.random() - 0.5);
-    return [currentTrack, ...shuffled];
+    // Resolve index of playing track: prefer explicit currentIndex, fallback to findIndex
+    let targetIdx = currentIndex;
+    if (targetIdx < 0 || targetIdx >= queue.length || queue[targetIdx]?.id !== currentTrack.id) {
+      targetIdx = queue.findIndex((t) => t.id === currentTrack.id);
+    }
+    if (targetIdx === -1) targetIdx = 0;
+
+    const activeItem = queue[targetIdx] || currentTrack;
+    const remaining = [
+      ...queue.slice(0, targetIdx),
+      ...queue.slice(targetIdx + 1),
+    ];
+
+    // True Fisher-Yates (Knuth) shuffle
+    for (let i = remaining.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const temp = remaining[i];
+      remaining[i] = remaining[j];
+      remaining[j] = temp;
+    }
+
+    return [activeItem, ...remaining];
   },
 
   /**
@@ -119,7 +142,13 @@ export const QueueEngine = {
     originalQueue: PlayerTrack[],
     currentTrack: PlayerTrack
   ): { queue: PlayerTrack[]; restoredIndex: number } {
-    const idx = originalQueue.findIndex((t) => t.id === currentTrack.id);
+    if (!originalQueue || !Array.isArray(originalQueue) || originalQueue.length === 0) {
+      return {
+        queue: currentTrack ? [currentTrack] : [],
+        restoredIndex: 0,
+      };
+    }
+    const idx = originalQueue.findIndex((t) => t?.id === currentTrack?.id);
     return {
       queue: [...originalQueue],
       restoredIndex: idx >= 0 ? idx : 0,

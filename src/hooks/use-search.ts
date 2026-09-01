@@ -1,15 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { musicService } from '../services/api/music';
-import { AuraYouTube, isNativeCoreAvailable } from '../services/native-core';
-import { SearchEntity, getBestThumbnail } from '../utils/search-utils';
+import { SearchRepository } from '../features/search/engine/search-repository';
+import { UnifiedSearchResponse, RankedSearchResult, SearchEntity } from '../features/search/types/search-engine.types';
+import { useLikesStore } from '../features/likes/store/likes.store';
 
 export interface SearchCategoryResults {
-  songs: SearchEntity[];
-  artists: SearchEntity[];
-  albums: SearchEntity[];
-  playlists: SearchEntity[];
-  topResult: SearchEntity | null;
+  songs: RankedSearchResult[];
+  artists: RankedSearchResult[];
+  albums: RankedSearchResult[];
+  playlists: RankedSearchResult[];
+  videos: RankedSearchResult[];
+  topResult: RankedSearchResult | null;
+  intent: any;
   isEmpty: boolean;
+  isOffline: boolean;
+  sectionOrder: string[];
 }
 
 const EMPTY_RESULT: SearchCategoryResults = {
@@ -17,53 +21,16 @@ const EMPTY_RESULT: SearchCategoryResults = {
   artists: [],
   albums: [],
   playlists: [],
+  videos: [],
   topResult: null,
+  intent: null,
   isEmpty: true,
+  isOffline: false,
+  sectionOrder: ['topResult', 'songs', 'artists', 'albums', 'playlists']
 };
 
 /**
- * Extract unique artists from song results for contextual enrichment
- */
-function extractUniqueArtists(songs: SearchEntity[]): string[] {
-  const artistMap = new Map<string, number>();
-  
-  songs.forEach(song => {
-    if (song.artist) {
-      const artistLower = song.artist.toLowerCase().trim();
-      const count = artistMap.get(artistLower) || 0;
-      artistMap.set(artistLower, count + 1);
-    }
-  });
-
-  // Sort by frequency (most mentioned first)
-  const sorted = Array.from(artistMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5) // Limit to 5 artists
-    .map(([name]) => name);
-
-  console.log('[Search] Extracted artists:', sorted);
-  return sorted;
-}
-
-/**
- * Extract unique albums from song results for contextual enrichment
- */
-function extractUniqueAlbums(songs: SearchEntity[]): string[] {
-  // Album detection from song metadata - check for album info in artist field
-  // or use a more sophisticated approach based on song patterns
-  // For now, we'll use the artist-based approach + top songs
-  
-  // Get unique artist names to search albums for
-  const artistNames = extractUniqueArtists(songs);
-  
-  // For now, we'll primarily rely on artist-based album lookup
-  // Future: enhance with album field in song metadata
-  return artistNames.slice(0, 3);
-}
-
-/**
- * useSearch Hook
- * Manages unified search with contextual enrichment.
+ * useSearch Hook — Powered by Intent-Aware Search Engine
  */
 export function useSearch(initialQuery: string = '') {
   const [query, setQuery] = useState(initialQuery);
@@ -74,6 +41,8 @@ export function useSearch(initialQuery: string = '') {
 
   const lastQueryRef = useRef(initialQuery);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const likedRecord = useLikesStore(s => s.likedTrackIds);
+  const likedTrackIds = Object.keys(likedRecord).filter(k => likedRecord[k]);
 
   const performSearch = useCallback(async (searchQuery: string) => {
     const trimmed = searchQuery.trim();
@@ -94,57 +63,31 @@ export function useSearch(initialQuery: string = '') {
     setError(null);
 
     try {
-      // 1. PARALLEL SEARCH
-      console.log(`[Search] PRIMARY: Searching for: ${trimmed}`);
-      
-      const [songsData, artistResults, albumResults] = await Promise.all([
-        musicService.searchSongs(trimmed),
-        musicService.searchArtists(trimmed).catch(() => []),
-        musicService.searchAlbums(trimmed).catch(() => [])
-      ]);
-      
+      // Refresh local personalization signals (likes, downloads, history)
+      await SearchRepository.refreshPersonalization(likedTrackIds);
+
+      const response: UnifiedSearchResponse = await SearchRepository.search(trimmed, {
+        signal: controller.signal,
+        likedIds: likedTrackIds
+      });
+
       if (controller.signal.aborted) return;
 
-      if (songsData.length === 0 && artistResults.length === 0 && albumResults.length === 0) {
-        setResults(EMPTY_RESULT);
-        setIsLoading(false);
-        return;
-      }
-
-      setIsEnriching(true);
-
-      // Filter and Deduplicate Artists
-      const enrichedArtists: SearchEntity[] = [];
-      const seenArtistIds = new Set<string>();
-      artistResults.forEach(artist => {
-        if (artist && !seenArtistIds.has(artist.id)) {
-          seenArtistIds.add(artist.id);
-          enrichedArtists.push(artist);
-        }
-      });
-
-      // Filter and Deduplicate Albums
-      const enrichedAlbums: SearchEntity[] = [];
-      const seenAlbumIds = new Set<string>();
-      albumResults.flat().forEach(album => {
-        if (album && !seenAlbumIds.has(album.id)) {
-          seenAlbumIds.add(album.id);
-          enrichedAlbums.push(album);
-        }
-      });
-
-      // SINGLE COMMIT: Update all results at once to minimize render churn
       setResults({
-        songs: songsData.slice(0, 15),
-        artists: enrichedArtists.slice(0, 6),
-        albums: enrichedAlbums.slice(0, 8),
-        playlists: [],
-        topResult: songsData[0],
-        isEmpty: false,
+        songs: response.songs,
+        artists: response.artists,
+        albums: response.albums,
+        playlists: response.playlists,
+        videos: response.videos,
+        topResult: response.topResult,
+        intent: response.intent,
+        isEmpty: response.isEmpty,
+        isOffline: response.isOffline,
+        sectionOrder: response.sectionOrder
       });
 
     } catch (err: any) {
-      if (err.name === 'AbortError' || err.name === 'CanceledError') return;
+      if (err.name === 'AbortError' || err.name === 'CanceledError' || err.message === 'Aborted') return;
       console.error('[Search] Error:', err);
       setError('Search temporarily unavailable. Please try again.');
     } finally {
@@ -153,16 +96,16 @@ export function useSearch(initialQuery: string = '') {
         setIsEnriching(false);
       }
     }
-  }, []);
+  }, [likedTrackIds]);
 
   useEffect(() => {
-    // 150ms single debounce for optimized production latency
+    // 250ms debounce for responsive typing & cancellation
     const timer = setTimeout(() => {
       if (query.trim() !== lastQueryRef.current.trim()) {
         lastQueryRef.current = query;
         performSearch(query);
       }
-    }, 150);
+    }, 250);
 
     return () => {
       clearTimeout(timer);
@@ -179,4 +122,3 @@ export function useSearch(initialQuery: string = '') {
     refresh: () => performSearch(query),
   };
 }
-

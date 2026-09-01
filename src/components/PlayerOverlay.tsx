@@ -65,7 +65,7 @@ import MiniPlayer from "./MiniPlayer";
 import { InsightPanel } from "@/src/features/player/components/InsightPanel";
 import { QueueSheet } from "@/src/features/player/components/QueueSheet";
 import AddToPlaylistSheet from "@/src/features/playlist/components/AddToPlaylistSheet";
-import { openAlbum, openArtistByName } from "@/src/navigation/music-navigation";
+import { openAlbum, openArtist, openArtistByName } from "@/src/navigation/music-navigation";
 import { LyricLine as LyricLineType } from "@/src/features/player/utils/lyrics-parser";
 import { getArtworkUrl } from "../features/player/utils/track-identity";
 import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
@@ -564,6 +564,8 @@ const LyricsSurface = memo(({
     
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     isLyricsUserScrolling.value = false;
+    setShowPaused(false);
+    playbackProgress.positionMs.value = lyrics[idx].time;
     scrollToLyric(idx);
     usePlayerStore.getState().seek(lyrics[idx].time);
   }, [isSynced, lyrics, scrollToLyric, isLocked]);
@@ -691,7 +693,6 @@ const LyricsSurface = memo(({
     </Animated.View>
   );
 });
-
 // ── Secondary Sheets ─────────────────────────────────────────────────────────
 const MoreMenuSurface = memo(({ visible, onClose, accentColor, currentTrack, onAddToPlaylist, onShare }: any) => {
   const isShuffle = usePlayerStore(s => s.isShuffle);
@@ -700,6 +701,16 @@ const MoreMenuSurface = memo(({ visible, onClose, accentColor, currentTrack, onA
   const router = useRouter();
   const menuAnim = useSharedValue(120);
   const menuOpacity = useSharedValue(0);
+
+  const rawAlbum = currentTrack?.album || (currentTrack as any)?.albumName || "";
+  const rawTitle = currentTrack?.title || "";
+  const hasAlbum = Boolean(currentTrack?.albumId) || (
+    Boolean(rawAlbum) && 
+    rawAlbum.trim() !== "" &&
+    rawAlbum.toLowerCase() !== rawTitle.toLowerCase() && 
+    rawAlbum.toLowerCase() !== "single" && 
+    rawAlbum.toLowerCase() !== "unknown album"
+  );
 
   useEffect(() => {
     menuAnim.value = withTiming(visible ? 0 : 120, { duration: 240, easing: REasing.out(REasing.quad) });
@@ -748,7 +759,53 @@ const MoreMenuSurface = memo(({ visible, onClose, accentColor, currentTrack, onA
             </Text>
           </TouchableOpacity>
         </View>
-        <View style={st.menuOptions}><TouchableOpacity style={st.menuItem} onPress={() => { onClose(); onAddToPlaylist(); }}><Ionicons name="add-circle-outline" size={22} color="#FFF" /><Text style={st.menuItemText}>Add to Playlist</Text></TouchableOpacity><TouchableOpacity style={st.menuItem} onPress={() => { onClose(); onShare(); }}><Ionicons name="share-outline" size={22} color="#FFF" /><Text style={st.menuItemText}>Share Song</Text></TouchableOpacity><TouchableOpacity style={st.menuItem} onPress={() => { onClose(); openAlbum(router, currentTrack?.albumId); }}><Ionicons name="disc-outline" size={22} color="#FFF" /><Text style={st.menuItemText}>View Album</Text></TouchableOpacity><TouchableOpacity style={[st.menuItem, { borderBottomWidth: 0, marginTop: 12, borderTopWidth: 0.5, borderTopColor: "rgba(255,255,255,0.08)" }]} onPress={onClose}><Ionicons name="close-circle-outline" size={22} color="#FF3B30" /><Text style={[st.menuItemText, { color: "#FF3B30", fontWeight: "700" }]}>Cancel</Text></TouchableOpacity></View>
+        <View style={st.menuOptions}>
+          <TouchableOpacity style={st.menuItem} onPress={() => { onClose(); onAddToPlaylist(); }}>
+            <Ionicons name="add-circle-outline" size={22} color="#FFF" />
+            <Text style={st.menuItemText}>Add to Playlist</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={st.menuItem} onPress={() => { onClose(); onShare(); }}>
+            <Ionicons name="share-outline" size={22} color="#FFF" />
+            <Text style={st.menuItemText}>Share Song</Text>
+          </TouchableOpacity>
+          {hasAlbum && (
+            <TouchableOpacity 
+              style={st.menuItem} 
+              onPress={() => { 
+                onClose(); 
+                const targetAlbum = currentTrack?.albumId || rawAlbum;
+                if (targetAlbum) {
+                  openAlbum(router, targetAlbum); 
+                }
+              }}
+            >
+              <Ionicons name="disc-outline" size={22} color="#FFF" />
+              <Text style={st.menuItemText}>View Album</Text>
+            </TouchableOpacity>
+          )}
+          {Boolean(currentTrack?.artist || currentTrack?.artistName || currentTrack?.author) && (
+            <TouchableOpacity 
+              style={st.menuItem} 
+              onPress={() => { 
+                onClose(); 
+                const artistName = currentTrack?.artist || currentTrack?.artistName || currentTrack?.author || "";
+                const artistId = currentTrack?.artistId;
+                if (artistId) {
+                  openArtist(router, artistId);
+                } else if (artistName) {
+                  openArtistByName(router, artistName);
+                }
+              }}
+            >
+              <Ionicons name="person-outline" size={22} color="#FFF" />
+              <Text style={st.menuItemText}>View Artist</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={[st.menuItem, { borderBottomWidth: 0, marginTop: 12, borderTopWidth: 0.5, borderTopColor: "rgba(255,255,255,0.08)" }]} onPress={onClose}>
+            <Ionicons name="close-circle-outline" size={22} color="#FF3B30" />
+            <Text style={[st.menuItemText, { color: "#FF3B30", fontWeight: "700" }]}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
       </Animated.View>
     </Animated.View>
   );
@@ -863,18 +920,35 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   }, [isPlaying, play, pause]);
 
   const handleSingleArtistPress = useCallback((artistName: string) => {
-    if (artistName && !isLocked) {
+    if (artistName) {
       collapse();
-      openArtistByName(router, artistName.trim());
+      const trimmed = artistName.trim();
+      const currentArtist = currentTrack?.artist || (currentTrack as any)?.artistName || (currentTrack as any)?.author || "";
+      if (currentTrack?.artistId && (currentArtist.toLowerCase().includes(trimmed.toLowerCase()) || parseArtists(currentArtist)[0]?.toLowerCase() === trimmed.toLowerCase())) {
+        openArtist(router, currentTrack.artistId);
+      } else {
+        openArtistByName(router, trimmed);
+      }
     }
-  }, [router, collapse, isLocked]);
+  }, [router, collapse, currentTrack]);
 
   const renderFormattedArtists = useCallback(() => {
-    const artistStr = currentTrack?.artist;
-    if (!artistStr) return <Text style={st.artistName}>—</Text>;
+    const rawArtist = currentTrack?.artist || (currentTrack as any)?.artistName || (currentTrack as any)?.author;
+    if (!rawArtist || typeof rawArtist !== 'string' || rawArtist.trim() === '') {
+      return <Text style={st.artistName}>—</Text>;
+    }
 
+    const artistStr = rawArtist.trim();
     const artists = parseArtists(artistStr);
-    if (artists.length === 0) return <Text style={st.artistName}>—</Text>;
+    if (!artists || artists.length === 0) {
+      return (
+        <Text style={st.artistName} numberOfLines={1}>
+          <Text onPress={() => handleSingleArtistPress(artistStr)}>
+            {artistStr}
+          </Text>
+        </Text>
+      );
+    }
 
     if (artists.length === 1) {
       return (
@@ -925,7 +999,7 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
         </Text>
       </Text>
     );
-  }, [currentTrack?.artist, handleSingleArtistPress]);
+  }, [currentTrack?.artist, (currentTrack as any)?.artistName, (currentTrack as any)?.author, handleSingleArtistPress]);
 
   const handleLikePress = useCallback(() => {
     if (currentTrack) toggleLike(currentTrack);
@@ -1404,7 +1478,6 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
               transition={400}
               cachePolicy="memory-disk"
             />
-            {isTransitionLoading && <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)", borderRadius: 12, alignItems: "center", justifyContent: "center" }}><ActivityIndicator size="large" color="rgba(255,255,255,0.8)" /></View>}
           </Animated.View>
         </GestureDetector>
 

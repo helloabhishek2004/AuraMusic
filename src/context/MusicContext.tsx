@@ -146,10 +146,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               await usePlayerStore.getState().setQueue(tracks, startIndex ?? 0, context);
           }
       },
-      playNext: (track: Track) => { console.warn('playNext unimplemented natively'); },
-      addToQueue: (track: Track) => { console.warn('addToQueue unimplemented natively'); },
+      playNext: (track: Track) => { usePlayerStore.getState().playNext(track); },
+      addToQueue: (track: Track) => { usePlayerStore.getState().addToQueue(track); },
       toggleRepeat,
-      toggleShuffle: async () => usePlayerStore.getState().setShuffle(!usePlayerStore.getState().isShuffle),
+      toggleShuffle: async () => { await usePlayerStore.getState().toggleShuffle(); },
       setVolume: async (volume: number) => {
 
           await PlaybackService.setVolume(volume);

@@ -13,7 +13,10 @@ class AuraCorePackage : ReactPackage {
         return listOf(
             AuraPlayerModule(reactContext),
             AuraYouTubeModule(reactContext),
-            AuraHistoryModule(reactContext)
+            AuraHistoryModule(reactContext),
+            AuraLyricsModule(reactContext),
+            AuraDownloadModule(reactContext),
+            AuraPlaylistModule(reactContext)
         )
     }
 

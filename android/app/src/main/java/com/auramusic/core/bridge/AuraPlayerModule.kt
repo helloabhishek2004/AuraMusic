@@ -11,6 +11,8 @@ import com.auramusic.core.playback.AuraPlayer
 import com.auramusic.core.playback.AuraPlaybackState
 import com.auramusic.core.playback.PlaybackEvent
 import com.auramusic.core.stream.AndroidVrStreamResolver
+import com.auramusic.core.stream.InnerTubeStreamResolver
+import com.auramusic.core.stream.UnifiedStreamResolver
 import com.auramusic.core.youtube.AuraYouTubeEngine
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
@@ -21,8 +23,10 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
 
     private val visitorDataManager = VisitorDataManager()
     private val poTokenManager by lazy { PoTokenManager(reactApplicationContext) }
-    private val streamResolver by lazy { AndroidVrStreamResolver(visitorDataManager, poTokenManager) }
-    private val player by lazy { AuraPlayer(reactApplicationContext, streamResolver) }
+    private val androidVrResolver by lazy { AndroidVrStreamResolver(visitorDataManager, poTokenManager) }
+    private val innerTubeResolver by lazy { InnerTubeStreamResolver(reactApplicationContext) }
+    private val streamResolver by lazy { UnifiedStreamResolver(reactApplicationContext, innerTubeResolver, androidVrResolver) }
+    private val player by lazy { AuraPlayer.getInstance(reactApplicationContext, streamResolver) }
     private val database by lazy { AuraDatabase.getInstance(reactApplicationContext) }
     private val historyManager by lazy { PlaybackHistoryManager(database) }
 
@@ -102,6 +106,9 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
     @ReactMethod
     fun saveTrackMetadata(id: String, title: String, artist: String, album: String?, duration: Int, artworkUrl: String?) {
         historyManager.saveTrackMetadata(id, title, artist, album, duration, artworkUrl)
+        mainHandler.post {
+            player.saveTrackMetadata(id, title, artist, album, duration, artworkUrl)
+        }
     }
 
     @ReactMethod
@@ -111,6 +118,16 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
             trackIds.getString(i)?.let { ids.add(it) }
         }
         mainHandler.post { player.setQueue(ids) }
+    }
+
+    @ReactMethod
+    fun setRepeatMode(mode: String) {
+        mainHandler.post { player.setRepeatMode(mode) }
+    }
+
+    @ReactMethod
+    fun setVolume(volume: Double) {
+        mainHandler.post { player.setVolume(volume.toFloat()) }
     }
 
     @ReactMethod

@@ -60,9 +60,10 @@ const parseArtists = (artistStr?: string): string[] => {
 };
 
 const formatArtistDisplay = (artistStr?: string): string => {
-  if (!artistStr) return "—";
-  const artists = parseArtists(artistStr);
-  if (artists.length === 0) return "—";
+  if (!artistStr || typeof artistStr !== 'string' || artistStr.trim() === '') return "—";
+  const raw = artistStr.trim();
+  const artists = parseArtists(raw);
+  if (!artists || artists.length === 0) return raw;
   if (artists.length === 1) return artists[0];
   if (artists.length === 2) return `${artists[0]} with ${artists[1]}`;
   if (artists.length === 3) return `${artists[0]} with ${artists[1]} and ${artists[2]}`;
@@ -239,7 +240,9 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
             <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.title} numberOfLines={1}>{track.title}</Text>
           </Marquee>
           <Marquee style={{ width: '100%', marginTop: 2 }}>
-            <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.artist} numberOfLines={1}>{formatArtistDisplay(track.artist)}</Text>
+            <Text allowFontScaling maxFontSizeMultiplier={1.25} style={styles.artist} numberOfLines={1}>
+              {formatArtistDisplay(track.artist || (track as any)?.artistName || (track as any)?.author)}
+            </Text>
           </Marquee>
         </View>
         <View style={styles.progressRail}>

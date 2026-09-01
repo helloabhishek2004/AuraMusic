@@ -956,6 +956,103 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
         set({ currentSession });
       },
       initialize: async () => {
+        try {
+          const { isNativeCoreAvailable, AuraHistory } = require('../../../services/native-core');
+          if (isNativeCoreAvailable() && AuraHistory && typeof AuraHistory.getHistory === 'function') {
+            const rawRoomHistory = await AuraHistory.getHistory();
+            if (Array.isArray(rawRoomHistory) && rawRoomHistory.length > 0) {
+              const currentHistory = get().history || [];
+              const existingKeys = new Set(
+                currentHistory.map((h) => `${h.id}_${Math.floor((h.playedAt || 0) / 1000)}`)
+              );
+
+              let hasNewEntries = false;
+              const mergedHistory = [...currentHistory];
+
+              for (const entry of rawRoomHistory) {
+                if (!entry || !entry.trackId) continue;
+                const timestamp = entry.timestamp || Date.now();
+                const key = `${entry.trackId}_${Math.floor(timestamp / 1000)}`;
+
+                if (!existingKeys.has(key)) {
+                  existingKeys.add(key);
+                  hasNewEntries = true;
+
+                  const durationSec = entry.duration || 0;
+                  const durationMs = durationSec > 0 ? durationSec * 1000 : (entry.listenDuration || 240000);
+                  const positionMs = entry.listenDuration || 0;
+                  const completed = !!entry.completed;
+                  const skipped = !!entry.skipped;
+                  const completionRatio = durationMs > 0 ? Math.min(1, positionMs / durationMs) : (completed ? 1 : 0);
+
+                  mergedHistory.push({
+                    id: entry.trackId,
+                    title: entry.title || 'Unknown Title',
+                    artist: entry.artist || 'Unknown Artist',
+                    artistId: null,
+                    album: entry.album || null,
+                    albumId: null,
+                    art: entry.artworkUrl || null,
+                    artwork: entry.artworkUrl || null,
+                    playedAt: timestamp,
+                    durationMs,
+                    positionMs,
+                    skipped,
+                    completionRatio,
+                    trackSnapshot: {
+                      id: entry.trackId,
+                      title: entry.title || 'Unknown Title',
+                      artist: entry.artist || 'Unknown Artist',
+                      album: entry.album || undefined,
+                      art: entry.artworkUrl || undefined,
+                      duration: durationSec || Math.round(durationMs / 1000),
+                      url: '',
+                    }
+                  });
+
+                  // Increment track and artist affinity for Room historical record
+                  get().incrementTrackAffinity(entry.trackId, {
+                    playCount: 1,
+                    completionCount: completed ? 1 : 0,
+                    skipCount: skipped ? 1 : 0,
+                    totalListenMs: positionMs,
+                    lastPlayedAt: timestamp,
+                  });
+
+                  if (entry.artist) {
+                    get().incrementArtistAffinity(entry.artist, {
+                      playCount: 1,
+                      completionCount: completed ? 1 : 0,
+                      skipCount: skipped ? 1 : 0,
+                      totalListenMs: positionMs,
+                      lastPlayedAt: timestamp,
+                      trackId: entry.trackId,
+                    });
+                  }
+
+                  if (entry.album) {
+                    get().incrementAlbumAffinity(entry.album, {
+                      playCount: 1,
+                      completionCount: completed ? 1 : 0,
+                      skipCount: skipped ? 1 : 0,
+                      totalListenMs: positionMs,
+                      lastPlayedAt: timestamp,
+                    });
+                  }
+                }
+              }
+
+              if (hasNewEntries) {
+                mergedHistory.sort((a, b) => b.playedAt - a.playedAt);
+                const trimmedHistory = mergedHistory.slice(0, 500);
+                set({ history: trimmedHistory, totalHistoryCount: trimmedHistory.length });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[AnalyticsStore] Failed to synchronize history from native Room DB:', e);
+        }
+
         // Deferred heavy re-computations
         if (get().history.length > 0) {
           get().rebuildComputedCollections();

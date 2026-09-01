@@ -52,12 +52,16 @@ interface AuraPlayerModuleInterface {
   skipNext(): void;
   skipPrevious(): void;
   setQueue(trackIds: string[]): void;
+  setRepeatMode(mode: string): void;
+  setVolume(volume: number): void;
   stop(): void;
   getState(): Promise<NativePlaybackState>;
 }
 
 interface AuraYouTubeModuleInterface {
   search(query: string): Promise<NativeTrack[]>;
+  searchUnified(query: string): Promise<any>;
+  searchPlaylists(query: string): Promise<any[]>;
   getTrack(videoId: string): Promise<NativeTrack>;
   getArtistDetails(browseId: string): Promise<any>;
   getAlbumDetails(browseId: string): Promise<any>;
@@ -68,6 +72,54 @@ interface AuraYouTubeModuleInterface {
 interface AuraHistoryModuleInterface {
   getHistory(): Promise<NativeHistoryEntry[]>;
   clearHistory(): Promise<void>;
+}
+
+export interface NativeRoomPlaylist {
+  id: string;
+  name: string;
+  title: string;
+  description: string;
+  mood: string;
+  coverArt: string;
+  createdAt: number;
+  updatedAt: number;
+  pinned: boolean;
+  liked: boolean;
+  gradientColors: [string, string];
+  trackIds: string[];
+  trackSnapshots: Record<string, {
+    id: string;
+    title: string;
+    artist: string;
+    album: string;
+    duration: number;
+    art: string;
+    artworkUrl: string;
+    isDownloaded: boolean;
+    isLocal: boolean;
+  }>;
+}
+
+interface AuraPlaylistModuleInterface {
+  getPlaylists(): Promise<NativeRoomPlaylist[]>;
+  getPlaylist(id: string): Promise<NativeRoomPlaylist | null>;
+  createPlaylist(
+    id: string,
+    title: string,
+    description?: string | null,
+    mood?: string | null,
+    coverArt?: string | null,
+    gradientPrimary?: string | null,
+    gradientSecondary?: string | null
+  ): Promise<boolean>;
+  renamePlaylist(id: string, newName: string): Promise<boolean>;
+  deletePlaylist(id: string): Promise<boolean>;
+  addTrack(playlistId: string, track: any): Promise<boolean>;
+  addTracks(playlistId: string, tracks: any[]): Promise<number>;
+  removeTrack(playlistId: string, trackId: string): Promise<boolean>;
+  reorderTracks(playlistId: string, trackIds: string[]): Promise<boolean>;
+  clearPlaylist(playlistId: string): Promise<boolean>;
+  syncPlaylistsFromJs(playlistsJson: string): Promise<number>;
 }
 
 // ─── Module Access ────────────────────────────────────────────────
@@ -84,6 +136,10 @@ export const AuraYouTube: AuraYouTubeModuleInterface | null = isAndroid
 
 export const AuraHistory: AuraHistoryModuleInterface | null = isAndroid
   ? NativeModules.AuraHistoryModule
+  : null;
+
+export const AuraPlaylist: AuraPlaylistModuleInterface | null = isAndroid
+  ? NativeModules.AuraPlaylistModule
   : null;
 
 // ─── Event Emitter ────────────────────────────────────────────────
@@ -112,6 +168,82 @@ export function onTrackChanged(
   const emitter = getEmitter();
   if (!emitter) return { remove: () => {} };
   return emitter.addListener('onTrackChanged', callback);
+}
+
+// ─── Download Module Types & Access ────────────────────────────────
+
+export interface NativeDownloadProgress {
+  trackId: string;
+  bytesDownloaded: number;
+  totalBytes: number;
+  percentage: number;
+}
+
+export interface NativeDownloadState {
+  trackId: string;
+  state: number;
+  stateName: string;
+  isDownloaded: boolean;
+  bytesDownloaded?: number;
+  contentLength?: number;
+  percentage?: number;
+  error?: string;
+}
+
+export interface NativeDownloadedTrack {
+  id: string;
+  title: string;
+  artist: string;
+  album: string | null;
+  duration: number;
+  artworkUrl: string | null;
+  isDownloaded: boolean;
+  downloadedAt: number;
+  contentLength: number;
+}
+
+interface AuraDownloadModuleInterface {
+  startDownload(track: {
+    id: string;
+    title: string;
+    artist: string;
+    album?: string | null;
+    duration?: number;
+    artworkUrl?: string | null;
+    artwork?: string | null;
+    art?: string | null;
+  }): Promise<boolean>;
+  removeDownload(trackId: string): Promise<boolean>;
+  pauseDownload(trackId: string): Promise<boolean>;
+  resumeDownload(trackId: string): Promise<boolean>;
+  getDownloadState(trackId: string): Promise<NativeDownloadState>;
+  isTrackDownloaded(trackId: string): Promise<boolean>;
+  getDownloadedTracks(): Promise<NativeDownloadedTrack[]>;
+}
+
+export const AuraDownload: AuraDownloadModuleInterface | null = isAndroid
+  ? NativeModules.AuraDownloadModule
+  : null;
+
+let _downloadEmitter: NativeEventEmitter | null = null;
+function getDownloadEmitter(): NativeEventEmitter | null {
+  if (!isAndroid || !NativeModules.AuraDownloadModule) return null;
+  if (!_downloadEmitter) {
+    _downloadEmitter = new NativeEventEmitter(NativeModules.AuraDownloadModule);
+  }
+  return _downloadEmitter;
+}
+
+export function onDownloadProgress(callback: (progress: NativeDownloadProgress) => void) {
+  const emitter = getDownloadEmitter();
+  if (!emitter) return { remove: () => {} };
+  return emitter.addListener('onDownloadProgress', callback);
+}
+
+export function onDownloadStateChanged(callback: (state: NativeDownloadState) => void) {
+  const emitter = getDownloadEmitter();
+  if (!emitter) return { remove: () => {} };
+  return emitter.addListener('onDownloadStateChanged', callback);
 }
 
 // ─── Convenience ──────────────────────────────────────────────────

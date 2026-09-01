@@ -369,7 +369,7 @@ export default function CreatePlaylistScreen() {
                setIsSearching(false);
             }
          }
-      }, 400);
+      }, 300);
 
       return () => {
          clearTimeout(timer);

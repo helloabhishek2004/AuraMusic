@@ -53,17 +53,23 @@ export class PlaybackController {
       switch (data.event) {
         case 'PLAY_STARTED':
           this.startSession(data.trackId, playbackProgress.positionMs.value);
-          // Sync store queue if needed
-          const idx = store.queue.findIndex(t => t.id === data.trackId);
-          if (idx !== -1 && idx !== store.currentIndex) {
-            usePlayerStore.setState({ currentIndex: idx, currentTrack: store.queue[idx] });
+          // Sync store queue with duplicate-awareness
+          if (store.currentIndex >= 0 && store.currentIndex < store.queue.length && store.queue[store.currentIndex]?.id === data.trackId) {
+            if (store.currentTrack?.id !== data.trackId) {
+              usePlayerStore.setState({ currentTrack: store.queue[store.currentIndex] });
+            }
+          } else {
+            const idx = store.queue.findIndex((t: any) => t.id === data.trackId);
+            if (idx !== -1) {
+              usePlayerStore.setState({ currentIndex: idx, currentTrack: store.queue[idx] });
+            }
           }
           break;
           
         case 'PLAY_COMPLETED':
           this.flushCurrentSession(true);
-          // Auto-advance is handled natively via skipNext, but we just let the event sync the store
-          store.resolveAutoAdvance();
+          // Auto-advance is handled natively by AuraPlayer (ExoPlayer).
+          // PLAY_STARTED for the next track will sync currentIndex and currentTrack.
           break;
 
         case 'PLAY_SKIPPED':
@@ -98,7 +104,7 @@ export class PlaybackController {
 
     try {
       const playerStore = usePlayerStore.getState();
-      const track = playerStore.queue.find(t => t.id === trackId) || playerStore.currentTrack;
+      const track = playerStore.queue.find((t: any) => t.id === trackId) || playerStore.currentTrack;
       if (!track) return;
       
       const duration = track.duration || playerStore.duration || 0;

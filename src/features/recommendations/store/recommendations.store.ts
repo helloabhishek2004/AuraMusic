@@ -174,35 +174,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
       discoverWeekly: null,
       deepCuts: null,
       timeMix: null,
-      dailyMixes: [
-        {
-          type: 'playlist',
-          id: 'daily-mix-1',
-          title: 'Daily Mix 1',
-          image: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?auto=format&fit=crop&q=80&w=480',
-          score: 5.0,
-          reason: 'Atmospheric electronic & melodic beats.',
-          confidence: 100
-        },
-        {
-          type: 'playlist',
-          id: 'daily-mix-2',
-          title: 'Daily Mix 2',
-          image: 'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?auto=format&fit=crop&q=80&w=480',
-          score: 4.8,
-          reason: 'Smooth lo-fi and ambient melodies.',
-          confidence: 95
-        },
-        {
-          type: 'playlist',
-          id: 'daily-mix-3',
-          title: 'Daily Mix 3',
-          image: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&q=80&w=480',
-          score: 4.6,
-          reason: 'High energy synthwave anthems.',
-          confidence: 90
-        }
-      ],
+      dailyMixes: [],
       madeForYou: [],
       rediscover: [],
       becauseYouLike: [],
@@ -212,7 +184,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           type: 'playlist',
           id: 'trending-global',
           title: 'Global Top Hits',
-          image: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&q=80&w=480',
+          image: 'aura://generated?name=Global%20Top%20Hits&type=playlist',
           source: 'global',
           fetchedAt: Date.now(),
         },
@@ -220,7 +192,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           type: 'playlist',
           id: 'trending-india',
           title: 'Trending in India',
-          image: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&q=80&w=480',
+          image: 'aura://generated?name=Trending%20in%20India&type=playlist',
           source: 'india',
           fetchedAt: Date.now(),
         },
@@ -228,7 +200,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           type: 'playlist',
           id: 'trending-synthwave',
           title: 'Synthwave & Chill',
-          image: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?auto=format&fit=crop&q=80&w=480',
+          image: 'aura://generated?name=Synthwave%20Chill&type=playlist',
           source: 'global',
           fetchedAt: Date.now(),
         }
@@ -336,55 +308,14 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           let hiddenGems: RecommendationSeed[] = [];
           let forgottenFavorites: RecommendationSeed[] = [];
 
-          // Standard fallback seeds (reference for Tier 2 fallbacks if needed)
-          const fallbackDailyMixes: RecommendationSeed[] = [
-            {
-              type: 'playlist',
-              id: 'late-night-drive',
-              title: 'Late Night Drive',
-              image: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?auto=format&fit=crop&q=80&w=480',
-              score: 5.0,
-              reason: 'Editorial Mix: Atmospheric late night beats.',
-              confidence: 100
-            },
-            {
-              type: 'playlist',
-              id: 'chill-vibes',
-              title: 'Chill Vibes',
-              image: 'https://images.unsplash.com/photo-1515378791036-0648a3ef77b2?auto=format&fit=crop&q=80&w=480',
-              score: 5.0,
-              reason: 'Editorial Mix: Relaxing background tracks.',
-              confidence: 100
-            },
-            {
-              type: 'playlist',
-              id: 'workout-energy',
-              title: 'Workout Energy',
-              image: 'https://images.unsplash.com/photo-1515378791036-0648a3ef77b2?auto=format&fit=crop&q=80&w=480',
-              score: 5.0,
-              reason: 'Editorial Mix: Fast-paced training beats.',
-              confidence: 100
-            }
-          ];
-
-          const fallbackTrendingForYou: RecommendationSeed = {
-            type: 'playlist',
-            id: 'trending-global',
-            title: 'Global Top Hits',
-            image: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&q=80&w=480',
-            score: 9.0,
-            reason: 'Popular global chart toppers.',
-            confidence: 100
-          };
-
           // Deduplication Pools
           const globalTrackPool = new Set<string>();
           const globalArtistPool = new Set<string>();
 
           if (historyLength === 0) {
-            // Tier 1: Cold Start fallback - populate starter editorial mixes with rich cover art
-            dailyMixes = fallbackDailyMixes;
-            trendingForYou = fallbackTrendingForYou;
+            // Cold Start - No listening history yet: personal mixes remain empty until songs are played
+            dailyMixes = [];
+            trendingForYou = null;
             madeForYou = [];
             rediscover = [];
             becauseYouLike = [];
@@ -468,13 +399,9 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             }
 
             if (historyLength <= 20) {
-              // Tier 2: 70% Editorial / 30% Personalization
-              console.log('[CurationStore] Tier 2 Curation: 70% Editorial / 30% Personalization active.');
-              dailyMixes = [
-                firstDaily || fallbackDailyMixes[0],
-                fallbackDailyMixes[1],
-                fallbackDailyMixes[2]
-              ].filter(Boolean);
+              // Tier 2: Early Personalization
+              console.log('[CurationStore] Early Personalization active.');
+              dailyMixes = personalDaily;
 
               const rawBYL = generateBecauseYouLike(artistAffinities, history, artistCache, topSongs);
               becauseYouLike = rawBYL
@@ -486,7 +413,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
                 })
                 .slice(0, 2);
 
-              trendingForYou = fallbackTrendingForYou;
+              trendingForYou = null;
             } else {
               // Tier 3 or 4: Full Personalization / Advanced Taste Engine
               console.log(`[CurationStore] Full Personalization active (Tier ${historyLength > 100 ? 4 : 3}).`);
@@ -558,7 +485,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               type: 'playlist',
               id: 'trending-global',
               title: 'Global Top Hits',
-              image: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&q=80&w=480',
+              image: 'aura://generated?name=Global%20Top%20Hits&type=playlist',
               source: 'global',
               fetchedAt: Date.now(),
             },
@@ -566,7 +493,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               type: 'playlist',
               id: 'trending-india',
               title: 'Trending in India',
-              image: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&q=80&w=480',
+              image: 'aura://generated?name=Trending%20in%20India&type=playlist',
               source: 'india',
               fetchedAt: Date.now(),
             }
@@ -836,7 +763,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               id: track.id,
               title: track.title,
               artist: track.artist,
-              art: track.art || 'https://picsum.photos/400/400?random=105',
+              art: track.art || '',
               url: '',
               duration: track.durationSec || 240,
               dominantColors: track.dominantColors || ['#bf5af2', '#1a0033'],

@@ -30,12 +30,12 @@ interface ExtendedPlayerStore extends PlayerStore {
   isRestoringSession: boolean;
   _hasHydrated: boolean;
   setHasHydrated: (val: boolean) => void;
-  // Playlist-aware playback context
   activeContext: PlaybackContext | null;
   setActiveContext: (context: PlaybackContext | null) => void;
   updateTrackMetadata: (trackId: string, partial: Partial<PlayerTrack>) => void;
   restoreSession: () => Promise<void>;
   resolveAutoAdvance: () => Promise<void>;
+  setShuffle: (shuffle: boolean) => Promise<void>;
 
   selectedTrackId?: string | null;
   selectedTrackIndex?: number | null;
@@ -43,7 +43,6 @@ interface ExtendedPlayerStore extends PlayerStore {
 }
 
 export const usePlayerStore = create<any>()( // @ts-ignore
-
   persist(
     (set, get) => ({
       // State
@@ -93,29 +92,9 @@ export const usePlayerStore = create<any>()( // @ts-ignore
       setHasHydrated: (val: boolean) => set({ _hasHydrated: val }),
       setActiveContext: (context: PlaybackContext | null) => set({ activeContext: context }),
       syncWithNative: async () => {
-        try {
-          
-          const active = null; /* Handled natively */
-          const index = get().currentIndex;
-
-          if (active) {
-            const store = get();
-            const foundIndex = store.queue.findIndex(t => t.id === (active as any).id || t.id === (active as any).mediaId);
-
-            if (foundIndex !== -1 && (foundIndex !== store.currentIndex || foundIndex !== index)) {
-               if (typeof __DEV__ !== "undefined" && __DEV__) {
-                 console.info("[Player] Store synced with Native:", foundIndex);
-               }
-               set({ 
-                 currentIndex: foundIndex, 
-                 currentTrack: store.queue[foundIndex],
-                 lyrics: null,
-                 isLyricsLoading: false
-               });
-            }
-          }
-        } catch (e) {}
+        // Handled natively via onPlaybackStateChanged / onTrackChanged
       },
+
       updateTrackMetadata: (trackId: string, partial: Partial<PlayerTrack>) => {
         const { getCanonicalTrackId } = require("../utils/track-identity");
         const state = get();
@@ -126,7 +105,7 @@ export const usePlayerStore = create<any>()( // @ts-ignore
 
         // 1. Update track in queue if it exists
         let queueChanged = false;
-        const newQueue = state.queue.map(track => {
+        const newQueue = state.queue.map((track: PlayerTrack) => {
           if (matchesTrack(track)) {
             let changed = false;
             for (const key of Object.keys(partial)) {
@@ -145,7 +124,7 @@ export const usePlayerStore = create<any>()( // @ts-ignore
 
         // 2. Update track in originalQueue if it exists
         let originalChanged = false;
-        const newOriginal = state.originalQueue.map(track => {
+        const newOriginal = state.originalQueue.map((track: PlayerTrack) => {
           if (matchesTrack(track)) {
             let changed = false;
             for (const key of Object.keys(partial)) {
@@ -195,7 +174,7 @@ export const usePlayerStore = create<any>()( // @ts-ignore
 
       // Actions
 
-      setQueue: async (tracks, startIndex = 0, context) => {
+      setQueue: async (tracks: PlayerTrack[], startIndex: number = 0, context?: any) => {
         if (!tracks || tracks.length === 0) return;
         
         const currentTrack = tracks[startIndex];
@@ -228,7 +207,6 @@ export const usePlayerStore = create<any>()( // @ts-ignore
       },
 
       setTrack: async (track: PlayerTrack) => {
-
         if (!track) {
           return;
         }
@@ -268,10 +246,6 @@ export const usePlayerStore = create<any>()( // @ts-ignore
         try {
           const resolvedTrack = track; // Bypassed JS resolution
 
-          if (false) {
-            throw new Error(`Track "${resolvedTrack.title}" has no playable stream URL.`);
-          }
-
           if (get().lastResolutionId !== resolutionId) {
             transitionManager.setTransitioning(false);
             set({ isTransitioning: false });
@@ -295,9 +269,6 @@ export const usePlayerStore = create<any>()( // @ts-ignore
           const resolvedGuard = get()._transitionGuard;
           set({
             currentTrack: resolvedTrack,
-            status: "playing",
-            isPlaying: true,
-            isBuffering: false,
             isTransitioning: false,
             preloadedTrack: null,
             _transitionGuard: { ...resolvedGuard, inProgress: false, owner: null, destinationId: null }
@@ -404,60 +375,11 @@ export const usePlayerStore = create<any>()( // @ts-ignore
 
       preloadNext: async () => {
         // Native Media3 handles buffering of the next item in the MediaItem list automatically.
-        // JS manual preload resolution is no longer needed.
       },
 
       resolveAutoAdvance: async () => {
-        const { queue, currentIndex, repeatMode, isTransitioning, currentTrack, _transitionGuard } = get();
-        console.info(`[AutoAdvance]
- repeat=${repeatMode}
- currentIndex=${currentIndex}
- currentTrack=${currentTrack?.title}`);
-        if (queue.length === 0 || isTransitioning) return;
-
-        const nextIndex = QueueEngine.resolveAutoAdvance(currentIndex, queue.length, repeatMode);
-        console.info(`[AutoAdvance] nextIndex=${nextIndex} mode=${repeatMode === 'track' ? 'RELOAD' : repeatMode === 'queue' ? 'WRAP' : 'ADVANCE'}`);
-        if (nextIndex === -1 || nextIndex < 0 || nextIndex >= queue.length) {
-          await get().stop();
-          return;
-        }
-
-        if (repeatMode === 'track' && currentTrack) {
-          set({
-            isTransitioning: true,
-            position: 0,
-            selectedTrackId: currentTrack.id,
-            selectedTrackIndex: currentIndex,
-            _transitionGuard: { ..._transitionGuard, inProgress: true, owner: "autoAdvance", destinationId: currentTrack.id, operationId: _transitionGuard.operationId + 1 }
-          });
-          try {
-            await get().setTrack(currentTrack);
-          } catch (e) {
-            console.warn("[PlayerStore] resolveAutoAdvance track-repeat reload failed:", e);
-            const failGuard = get()._transitionGuard;
-            set({ isTransitioning: false, _transitionGuard: { ...failGuard, inProgress: false, owner: null, destinationId: null } });
-          }
-          return;
-        }
-
-        const nextTrack = queue[nextIndex];
-        if (!nextTrack) {
-          await get().stop();
-          return;
-        }
-        set({
-          isTransitioning: true,
-          selectedTrackId: nextTrack.id,
-          selectedTrackIndex: nextIndex,
-          _transitionGuard: { ..._transitionGuard, inProgress: true, owner: "autoAdvance", destinationId: nextTrack.id, operationId: _transitionGuard.operationId + 1 }
-        });
-        try {
-          await PlaybackService.skipToNext();
-        } catch (e) {
-          console.warn("[PlayerStore] resolveAutoAdvance skipToNext failed:", e);
-          const failGuard = get()._transitionGuard;
-          set({ isTransitioning: false, _transitionGuard: { ...failGuard, inProgress: false, owner: null, destinationId: null } });
-        }
+        // Deprecated: Natural auto-advance is handled exclusively and natively by AuraPlayer.kt (ExoPlayer STATE_ENDED).
+        console.info("[AutoAdvance] resolveAutoAdvance called on JS store (no-op; native AuraPlayer is sole authority)");
       },
 
       seek: async (position: number) => {
@@ -469,6 +391,121 @@ export const usePlayerStore = create<any>()( // @ts-ignore
         }
       },
 
+      play: async () => {
+        try {
+          await PlaybackService.play();
+        } catch (e) {
+          console.warn("[PlayerStore] play failed:", e);
+        }
+      },
+
+      pause: async () => {
+        try {
+          await PlaybackService.pause();
+        } catch (e) {
+          console.warn("[PlayerStore] pause failed:", e);
+        }
+      },
+
+      togglePlayback: async () => {
+        if (get().isPlaying) {
+          await get().pause();
+        } else {
+          await get().play();
+        }
+      },
+
+      stop: async () => {
+        try {
+          await PlaybackService.reset();
+          set({ isPlaying: false, status: "idle", position: 0 });
+        } catch (e) {
+          console.warn("[PlayerStore] stop failed:", e);
+        }
+      },
+
+      next: async () => {
+        try {
+          await PlaybackService.skipToNext();
+        } catch (e) {
+          console.warn("[PlayerStore] next failed:", e);
+        }
+      },
+
+      previous: async (forcePrevious = false) => {
+        try {
+          await PlaybackService.skipToPrevious();
+        } catch (e) {
+          console.warn("[PlayerStore] previous failed:", e);
+        }
+      },
+
+      jumpToQueueIndex: async (index: number) => {
+        const { queue } = get();
+        if (index < 0 || index >= queue.length) return;
+        const target = queue[index];
+        if (!target) return;
+        set({ currentIndex: index, currentTrack: target, isBuffering: true });
+        await PlaybackService.loadTrack(target, queue, index);
+      },
+
+      addToQueue: (track: PlayerTrack) => {
+        const { queue, originalQueue, currentIndex } = get();
+        const newQueue = [...queue, track];
+        const newOriginal = [...originalQueue, track];
+        set({ queue: newQueue, originalQueue: newOriginal });
+        PlaybackService.syncQueue(newQueue, currentIndex);
+      },
+
+      playNext: (track: PlayerTrack) => {
+        const { queue, originalQueue, currentIndex } = get();
+        const insertIdx = Math.max(0, currentIndex + 1);
+        const newQueue = [...queue.slice(0, insertIdx), track, ...queue.slice(insertIdx)];
+        const newOriginal = [...originalQueue, track];
+        set({ queue: newQueue, originalQueue: newOriginal });
+        PlaybackService.syncQueue(newQueue, currentIndex);
+      },
+
+      removeFromQueue: (index: number) => {
+        const { queue, originalQueue, currentIndex } = get();
+        if (index < 0 || index >= queue.length) return;
+        const newQueue = queue.filter((_: PlayerTrack, i: number) => i !== index);
+        const newOriginal = originalQueue.filter((t: PlayerTrack) => t.id !== queue[index]?.id);
+        let newIdx = currentIndex;
+        if (index < currentIndex) {
+          newIdx = currentIndex - 1;
+        } else if (index === currentIndex) {
+          newIdx = Math.min(currentIndex, newQueue.length - 1);
+        }
+        set({
+          queue: newQueue,
+          originalQueue: newOriginal,
+          currentIndex: newIdx,
+          currentTrack: newQueue[newIdx] || null,
+        });
+        PlaybackService.syncQueue(newQueue, newIdx);
+      },
+
+      reorderQueue: (from: number, to: number) => {
+        const { queue, currentIndex } = get();
+        if (from === to || from < 0 || from >= queue.length || to < 0 || to >= queue.length) return;
+        const newQueue = [...queue];
+        const [moved] = newQueue.splice(from, 1);
+        newQueue.splice(to, 0, moved);
+
+        let newIdx = currentIndex;
+        if (currentIndex === from) {
+          newIdx = to;
+        } else if (from < currentIndex && to >= currentIndex) {
+          newIdx = currentIndex - 1;
+        } else if (from > currentIndex && to <= currentIndex) {
+          newIdx = currentIndex + 1;
+        }
+
+        set({ queue: newQueue, currentIndex: newIdx });
+        PlaybackService.syncQueue(newQueue, newIdx);
+      },
+
       setVolume: async (volume: number) => {
         const currentVol = get().volume;
         if (Math.abs(currentVol - volume) < 0.01) return;
@@ -476,16 +513,15 @@ export const usePlayerStore = create<any>()( // @ts-ignore
         set({ volume });
 
         const now = Date.now();
-        const lastSync = (get() as any)._lastVolumeSync || 0;
-        if (now - lastSync < 100) return;
-
         set({ _lastVolumeSync: now } as any);
         await PlaybackService.setVolume(volume);
       },
 
       setRepeatMode: (mode: RepeatMode) => {
-        
+        const { repeatMode: oldMode } = get();
+        console.log(`[RepeatTrace] mode changed ${oldMode} -> ${mode}`);
         set({ repeatMode: mode });
+        PlaybackService.setRepeatMode(mode);
       },
 
       toggleRepeatMode: () => {
@@ -495,40 +531,28 @@ export const usePlayerStore = create<any>()( // @ts-ignore
         else if (repeatMode === "queue") newMode = "track";
         else if (repeatMode === "track") newMode = "off";
 
-        
+        console.log(`[RepeatTrace] toggle ${repeatMode} -> ${newMode}`);
         set({ repeatMode: newMode });
+        PlaybackService.setRepeatMode(newMode);
       },
 
       toggleShuffle: async () => {
-        const { isShuffle, queue, originalQueue, currentTrack } = get();
+        const { isShuffle, queue, originalQueue, currentIndex, currentTrack } = get();
         const newShuffle = !isShuffle;
 
         if (!currentTrack || queue.length === 0) {
+          console.log(`[ShuffleTrace] toggle with empty queue/track (enabled=${newShuffle})`);
           set({ isShuffle: newShuffle });
           return;
         }
 
-        // [Aura_Shuffle_Fix] Freshly resolve current track URL before rebuilding
-        // native queue. The current track's native media item gets replaced during
-        // updateQueue — if its URL is stale, the native player will emit a source
-        // error before JS can intervene.
         let freshCurrent = currentTrack;
-        if (!currentTrack.isLocal) {
-          try {
-            const resolved = await resolveAudioOnly({ ...currentTrack, url: "" }, null, true);
-            if (resolved && resolved.url) {
-              freshCurrent = resolved;
-            }
-          } catch (e) {
-            console.warn("[PlayerStore] Shuffle pre-resolve failed, using existing URL", e);
-          }
-        }
-
         if (newShuffle) {
           // Shuffle ON
-          const shuffledQueue = QueueEngine.buildShuffledQueue(queue, freshCurrent);
-          // Replace current track in queue with freshly resolved version
-          const resolvedQueue = shuffledQueue.map(t => t.id === freshCurrent.id ? freshCurrent : t);
+          const shuffledQueue = QueueEngine.buildShuffledQueue(queue, freshCurrent, currentIndex);
+          const resolvedQueue = shuffledQueue.map((t: PlayerTrack) => t.id === freshCurrent.id ? freshCurrent : t);
+
+          console.log(`[ShuffleTrace] enabled=true currentTrack=${freshCurrent.id} originalIndex=${currentIndex} newQueueLength=${resolvedQueue.length}`);
 
           set({
             isShuffle: newShuffle,
@@ -538,15 +562,16 @@ export const usePlayerStore = create<any>()( // @ts-ignore
           });
 
           // Mirror the shuffled queue natively (current track is stable anchor at index 0)
-          // await PlaybackService.updateQueue(resolvedQueue, 0);
+          PlaybackService.syncQueue(resolvedQueue, 0);
         } else {
           // Shuffle OFF
           const { queue: restoredQueue, restoredIndex } = QueueEngine.restoreOriginalQueue(
             originalQueue,
             freshCurrent
           );
-          // Replace current track in queue with freshly resolved version
-          const resolvedQueue = restoredQueue.map(t => t.id === freshCurrent.id ? freshCurrent : t);
+          const resolvedQueue = restoredQueue.map((t: PlayerTrack) => t.id === freshCurrent.id ? freshCurrent : t);
+
+          console.log(`[ShuffleTrace] enabled=false currentTrack=${freshCurrent.id} restoredIndex=${restoredIndex} queueLength=${resolvedQueue.length}`);
 
           set({
             isShuffle: newShuffle,
@@ -556,7 +581,14 @@ export const usePlayerStore = create<any>()( // @ts-ignore
           });
 
           // Mirror restored sequential queue natively keeping current track active
-          // await PlaybackService.updateQueue(resolvedQueue, restoredIndex);
+          PlaybackService.syncQueue(resolvedQueue, restoredIndex);
+        }
+      },
+
+      setShuffle: async (shuffle: boolean) => {
+        const current = get().isShuffle;
+        if (current !== shuffle) {
+          await get().toggleShuffle();
         }
       },
 
@@ -630,7 +662,6 @@ export const usePlayerStore = create<any>()( // @ts-ignore
         if (currentTrack && queue.length > 0) {
            console.info("[PlayerStore] Restoring session natively...");
            try {
-             // 1. Validate and repair current track immediately
              let freshCurrent = currentTrack;
              try {
                freshCurrent = currentTrack; // Bypassed JS resolution
@@ -649,9 +680,6 @@ export const usePlayerStore = create<any>()( // @ts-ignore
                console.warn("[PlayerStore] Startup validation failed for current track:", validationErr);
                useTelemetryStore.getState().incrementMetric("sourceErrorCount");
              }
-
-             // 2. Inject playable queue natively (uses filtered playable queue inside updateQueue)
-             // await PlaybackService.updateQueue(get().queue, currentIndex);
              
              if (position > 0) {
                await PlaybackService.seek(position);
@@ -659,12 +687,8 @@ export const usePlayerStore = create<any>()( // @ts-ignore
              if (volume !== undefined) {
                await PlaybackService.setVolume(volume);
              }
-             if (repeatMode) {
-               
-             }
 
-             // Explicitly force pause to guarantee that the music does not auto-play on app start.
-             
+             // Explicitly force pause to guarantee that music does not auto-play on app start.
              await PlaybackService.pause();
              set({ isPlaying: false, status: "paused" });
              
@@ -696,7 +720,7 @@ export const usePlayerStore = create<any>()( // @ts-ignore
                        const repaired = track; // Bypassed JS resolution
                        const storeInstance = usePlayerStore.getState();
                        const newQ = [...storeInstance.queue];
-                       const idx = newQ.findIndex(t => t.id === track.id);
+                       const idx = newQ.findIndex((t: PlayerTrack) => t.id === track.id);
                         if (idx !== -1) {
                           const merged = { ...track, ...repaired };
                           newQ[idx] = merged;
@@ -734,11 +758,9 @@ export const usePlayerStore = create<any>()( // @ts-ignore
       name: 'aura-player',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => {
-        // Grab real position from RNTP natively right before saving (AppState backgrounding triggers saves usually, or periodic debounce)
         try {
-          
           if (state.isPlaying) {
-            const p = { position: 0, duration: 0 }; /* Sync not supported synchronously */
+            const p = { position: 0, duration: 0 };
             if (p && p.position) state.position = p.position * 1000;
           }
         } catch(e) {}
@@ -771,4 +793,3 @@ export const usePlayerStore = create<any>()( // @ts-ignore
     }
   )
 );
-

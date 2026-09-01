@@ -11,6 +11,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDownloadStore } from '@/src/features/download/store/download.store';
+import { PlaylistRepository } from '../repository/playlist.repository';
 import type { PlayerTrack } from '@/src/features/player/types/player';
 import type {
   Playlist,
@@ -56,6 +57,27 @@ export const usePlaylistStore = create<PlaylistStore>()(
       sortBy: 'recent' as PlaylistSortBy,
       lastUsedPlaylistId: null,
 
+      // ── Initialization from Room DB ──────────────────────────────────────
+      async initialize() {
+        try {
+          const roomPlaylists = await PlaylistRepository.initialize();
+          if (Object.keys(roomPlaylists).length > 0) {
+            set((state) => {
+              const mergedOrder = [
+                ...state.playlistOrder.filter(id => roomPlaylists[id]),
+                ...Object.keys(roomPlaylists).filter(id => !state.playlistOrder.includes(id))
+              ];
+              return {
+                playlists: { ...state.playlists, ...roomPlaylists },
+                playlistOrder: mergedOrder
+              };
+            });
+          }
+        } catch (e) {
+          console.error('[PlaylistStore] Initialization error:', e);
+        }
+      },
+
       // ── CRUD ─────────────────────────────────────────────────────────────
 
       createPlaylist(id, name, description, mood, coverArt): Playlist {
@@ -79,6 +101,11 @@ export const usePlaylistStore = create<PlaylistStore>()(
           playlists: { ...state.playlists, [id]: playlist },
           playlistOrder: [id, ...state.playlistOrder],
         }));
+
+        // Persist to Room DB in background
+        PlaylistRepository.createPlaylist(id, name.trim(), description, mood, coverArt, gradientColors)
+          .catch((err: any) => console.error('[PlaylistStore] Error creating playlist in Room:', err));
+
         return playlist;
       },
 
@@ -92,6 +119,9 @@ export const usePlaylistStore = create<PlaylistStore>()(
               state.lastUsedPlaylistId === id ? null : state.lastUsedPlaylistId,
           };
         });
+
+        PlaylistRepository.deletePlaylist(id)
+          .catch((err: any) => console.error(`[PlaylistStore] Error deleting playlist ${id} in Room:`, err));
       },
 
       renamePlaylist(id, name) {
@@ -112,6 +142,9 @@ export const usePlaylistStore = create<PlaylistStore>()(
             },
           };
         });
+
+        PlaylistRepository.renamePlaylist(id, trimmed)
+          .catch((err: any) => console.error(`[PlaylistStore] Error renaming playlist ${id} in Room:`, err));
       },
 
       updateDescription(id, description) {
@@ -147,6 +180,16 @@ export const usePlaylistStore = create<PlaylistStore>()(
           playlists: { ...state.playlists, [newId]: duplicate },
           playlistOrder: [newId, ...state.playlistOrder],
         }));
+
+        PlaylistRepository.createPlaylist(newId, duplicate.name, duplicate.description, duplicate.mood, duplicate.coverArt, duplicate.gradientColors)
+          .then(() => {
+            if (duplicate.trackIds.length > 0) {
+              const tracks = duplicate.trackIds.map(tid => duplicate.trackSnapshots?.[tid]).filter(Boolean);
+              return PlaylistRepository.addTracks(newId, tracks as any);
+            }
+          })
+          .catch((err: any) => console.error(`[PlaylistStore] Error duplicating playlist ${id} to ${newId} in Room:`, err));
+
         return newId;
       },
 
@@ -166,6 +209,9 @@ export const usePlaylistStore = create<PlaylistStore>()(
             },
           };
         });
+
+        PlaylistRepository.clearPlaylist(id)
+          .catch((err: any) => console.error(`[PlaylistStore] Error clearing playlist ${id} in Room:`, err));
       },
 
       // ── Track Management ─────────────────────────────────────────────────
@@ -194,6 +240,10 @@ export const usePlaylistStore = create<PlaylistStore>()(
             },
           },
         }));
+
+        PlaylistRepository.addTrack(playlistId, track)
+          .catch((err: any) => console.error(`[PlaylistStore] Error adding track ${track.id} to playlist ${playlistId} in Room:`, err));
+
         return 'added';
       },
 
@@ -230,6 +280,10 @@ export const usePlaylistStore = create<PlaylistStore>()(
             },
           },
         }));
+
+        PlaylistRepository.addTracks(playlistId, newTracks)
+          .catch((err: any) => console.error(`[PlaylistStore] Error adding ${newTracks.length} tracks to playlist ${playlistId} in Room:`, err));
+
         return { added: newTracks.length, skipped };
       },
 
@@ -251,11 +305,15 @@ export const usePlaylistStore = create<PlaylistStore>()(
             },
           };
         });
+
+        PlaylistRepository.removeTrack(playlistId, trackId)
+          .catch((err: any) => console.error(`[PlaylistStore] Error removing track ${trackId} from playlist ${playlistId} in Room:`, err));
       },
 
       reorderTracks(playlistId, from, to) {
         // CRITICAL: This ONLY mutates playlist data.
         // It NEVER calls setQueue, never resets currentIndex, never touches player store.
+        let updatedIds: string[] | null = null;
         set((state) => {
           const playlist = state.playlists[playlistId];
           if (!playlist || from === to) return state;
@@ -265,6 +323,7 @@ export const usePlaylistStore = create<PlaylistStore>()(
           const newIds = [...playlist.trackIds];
           const [moved] = newIds.splice(from, 1);
           newIds.splice(to, 0, moved);
+          updatedIds = newIds;
           return {
             playlists: {
               ...state.playlists,
@@ -276,6 +335,11 @@ export const usePlaylistStore = create<PlaylistStore>()(
             },
           };
         });
+
+        if (updatedIds) {
+          PlaylistRepository.reorderTracks(playlistId, updatedIds)
+            .catch(err => console.error(`[PlaylistStore] Error reordering tracks in playlist ${playlistId} in Room:`, err));
+        }
       },
 
       // ── Metadata ─────────────────────────────────────────────────────────
