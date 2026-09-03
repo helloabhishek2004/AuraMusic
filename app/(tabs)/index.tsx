@@ -271,7 +271,20 @@ const IOSFeaturedMixCard = React.memo(({
   onQuickPlay,
   style
 }: IOSFeaturedMixCardProps) => {
-  const resolvedArt = resolveArtwork({ art: image, title }, 'album');
+  const resolvedArt = useMemo(() => {
+    if (item?.tracks && Array.isArray(item.tracks) && item.tracks.length > 0) {
+      for (const t of item.tracks) {
+        const a = t.art || t.artwork || t.artworkUrl || t.image;
+        if (a && typeof a === 'string' && !a.startsWith('aura://') && !a.includes('placeholder')) {
+          return getArtworkUrl(a, 'album');
+        }
+      }
+    }
+    if (image && typeof image === 'string' && !image.startsWith('aura://') && !image.includes('placeholder')) {
+      return getArtworkUrl(image, 'album');
+    }
+    return resolveArtwork(item || { art: image, title }, 'album');
+  }, [item, image, title]);
 
   return (
     <View style={[s.iosHeroContainer, style]}>
@@ -687,6 +700,21 @@ const FavoriteAlbumCard = React.memo(({ album, onPress }: any) => {
 
 // ── DAILY MIX CARD ────────────────────────────────────────────────────────
 const DailyMixCard = React.memo(({ seed, onPress }: any) => {
+  const cardArt = useMemo(() => {
+    if (seed?.tracks && Array.isArray(seed.tracks) && seed.tracks.length > 0) {
+      for (const t of seed.tracks) {
+        const a = t.art || t.artwork || t.artworkUrl || t.image;
+        if (a && typeof a === 'string' && !a.startsWith('aura://') && !a.includes('placeholder')) {
+          return getArtworkUrl(a, 'card');
+        }
+      }
+    }
+    if (seed?.image && typeof seed.image === 'string' && !seed.image.startsWith('aura://') && !seed.image.includes('placeholder')) {
+      return getArtworkUrl(seed.image, 'card');
+    }
+    return resolveArtwork(seed, 'card');
+  }, [seed]);
+
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -696,7 +724,7 @@ const DailyMixCard = React.memo(({ seed, onPress }: any) => {
       <LiquidGlass borderRadius={20} intensity={35} gradient style={s.dmCardGlass}>
         <View style={s.dmCardImageContainer}>
           <AuraArtwork 
-            source={resolveArtwork(seed, 'card')} 
+            source={cardArt} 
             entityName={seed.title}
             entityType="playlist"
             borderRadius={20}
@@ -723,6 +751,21 @@ const DailyMixCard = React.memo(({ seed, onPress }: any) => {
 
 // ── BECAUSE YOU LIKE CARD ──────────────────────────────────────────────────
 const BecauseYouLikeCard = React.memo(({ seed, onPress }: any) => {
+  const cardArt = useMemo(() => {
+    if (seed?.tracks && Array.isArray(seed.tracks) && seed.tracks.length > 0) {
+      for (const t of seed.tracks) {
+        const a = t.art || t.artwork || t.artworkUrl || t.image;
+        if (a && typeof a === 'string' && !a.startsWith('aura://') && !a.includes('placeholder')) {
+          return getArtworkUrl(a, 'album');
+        }
+      }
+    }
+    if (seed?.image && typeof seed.image === 'string' && !seed.image.startsWith('aura://') && !seed.image.includes('placeholder')) {
+      return getArtworkUrl(seed.image, 'album');
+    }
+    return resolveArtwork(seed, 'album');
+  }, [seed]);
+
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -731,13 +774,13 @@ const BecauseYouLikeCard = React.memo(({ seed, onPress }: any) => {
     >
       <LiquidGlass borderRadius={24} intensity={40} gradient style={s.bylCardGlass}>
         <AuraArtwork 
-          source={resolveArtwork(seed, 'album')} 
+          source={cardArt} 
           entityName={seed.title}
           entityType="album"
           style={s.bylCardImage} 
           contentFit="cover" 
           transition={200} 
-          cachePolicy="memory-disk"
+          cachePolicy="memory-disk" 
         />
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.85)']}
@@ -1318,6 +1361,7 @@ export default function HomeScreen() {
   const dailyMixes = useRecommendationsStore(s => s.dailyMixes ?? EMPTY_ARRAY);
   const becauseYouLike = useRecommendationsStore(s => s.becauseYouLike ?? EMPTY_ARRAY);
   const trendingSeeds = useRecommendationsStore(s => s.trendingSeeds ?? EMPTY_ARRAY);
+  const recsReadiness = useRecommendationsStore(s => s.readiness);
 
   const handlePlayTrack = useCallback((track: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -1356,13 +1400,16 @@ export default function HomeScreen() {
     );
   }, []);
 
-  // STABLE SECTIONS DATA - Dynamic "Push" Model
+  // STABLE SECTIONS DATA - Dynamic "Push" Model with Authoritative Readiness Gating
   const sectionsData = useMemo(() => {
     const sections = [];
     sections.push({ id: 'welcome', type: 'welcome' });
     
+    // Check authoritative data readiness
+    const isDataReady = recsReadiness?.isReady || (madeForYou.length > 0 && dailyMixes.length > 0);
+
     // 1. Featured Mix / Hero (Contextual & Behavior-Driven)
-    const effectiveHeroMix = featuredHeroMix || (madeForYou.length > 0 ? madeForYou[0] : (dailyMixes.length > 0 ? dailyMixes[0] : null));
+    const effectiveHeroMix = isDataReady ? (featuredHeroMix || (madeForYou.length > 0 ? madeForYou[0] : (dailyMixes.length > 0 ? dailyMixes[0] : null))) : null;
     if (effectiveHeroMix) {
       sections.push({ id: 'hero', type: 'hero', heroType: 'mix', data: effectiveHeroMix });
     } else if (topTracks.length > 0) {
@@ -1375,14 +1422,16 @@ export default function HomeScreen() {
 
     if (continueListening.length > 0) sections.push({ id: 'continue_listening', type: 'continue_listening' });
 
-    // 2. Made For You & Personal Mixes (Daily Mix, On Repeat, Repeat Rewind, Discover Weekly, Deep Cuts)
-    const allPersonalMixes = [
-      ...dailyMixes,
-      ...madeForYou.filter(m => !dailyMixes.some(dm => dm.id === m.id)),
-    ].filter(Boolean);
+    // 2. Made For You & Personal Mixes (Strictly omitted if behavioral data is not yet ready)
+    if (isDataReady && madeForYou.length > 0) {
+      const allPersonalMixes = [
+        ...dailyMixes,
+        ...madeForYou.filter(m => !dailyMixes.some(dm => dm.id === m.id)),
+      ].filter(Boolean);
 
-    if (allPersonalMixes.length > 0) {
-      sections.push({ id: 'daily_mixes', type: 'daily_mixes', data: allPersonalMixes });
+      if (allPersonalMixes.length > 0) {
+        sections.push({ id: 'daily_mixes', type: 'daily_mixes', data: allPersonalMixes });
+      }
     }
 
     // 3. Discover Music

@@ -2,9 +2,14 @@ const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
-// Securely exclude non-frontend heavy directories from the Metro file watcher and resolver.
+const path = require('path');
+
+// Securely exclude non-frontend heavy directories from the Metro file watcher and resolver at project root only.
 // Must be RegExp without flags to match Metro's internal pattern combiner.
-const rootExclusionRegex = /[\\\/](android|ios|\.expo|\.gemini|\.claude|dist|backend)([\\\/]|$)/;
+const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const rootExclusionRegex = new RegExp(
+  `^${escapeRegExp(__dirname)}[\\\\/](${['android', 'ios', '\\.expo', '\\.gemini', '\\.claude', 'dist', 'backend'].join('|')})([\\\\/]|$)`
+);
 
 if (!config.resolver) {
   config.resolver = {};

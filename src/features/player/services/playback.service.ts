@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { PlayerTrack } from "../types/player";
 import { AuraPlayer, isNativeCoreAvailable } from "../../../services/native-core";
+import { extractRawArtworkUrl } from "../utils/track-identity";
 
 /**
  * PlaybackService - Decoupled wrapper for the Native AuraPlayer.
@@ -34,13 +35,33 @@ export class PlaybackService {
     }
 
     try {
-      // Pass the entire queue to the native layer
+      // Pass the entire queue IDs and complete metadata to the native layer
       if (queue.length > 0) {
         AuraPlayer.setQueue(queue.map(t => t.id));
+        if (typeof AuraPlayer.saveTracksMetadata === 'function') {
+          AuraPlayer.saveTracksMetadata(
+            queue.map(t => ({
+              id: t.id,
+              title: t.title,
+              artist: t.artist || 'Unknown Artist',
+              album: t.album || null,
+              duration: t.duration ? Number(t.duration) : 240,
+              art: extractRawArtworkUrl(t) || null,
+            }))
+          );
+        }
       }
 
       // Instruct native player to resolve and play the track ID
-      AuraPlayer.saveTrackMetadata(track.id, track.title, track.artist || 'Unknown', track.album || null, track.duration ? Number(track.duration) : 0, track.art || null);
+      const rawArt = extractRawArtworkUrl(track);
+      AuraPlayer.saveTrackMetadata(
+        track.id,
+        track.title,
+        track.artist || 'Unknown Artist',
+        track.album || null,
+        track.duration ? Number(track.duration) : 0,
+        rawArt || null
+      );
       
       const localUrl = (track.isLocal && track.url) ? track.url : null;
       AuraPlayer.playTrack(track.id, localUrl);
@@ -104,6 +125,18 @@ export class PlaybackService {
   static async syncQueue(queue: PlayerTrack[], activeIndex: number = -1) {
     if (AuraPlayer && queue.length > 0) {
       AuraPlayer.setQueue(queue.map(t => t.id));
+      if (typeof AuraPlayer.saveTracksMetadata === 'function') {
+        AuraPlayer.saveTracksMetadata(
+          queue.map(t => ({
+            id: t.id,
+            title: t.title,
+            artist: t.artist || 'Unknown Artist',
+            album: t.album || null,
+            duration: t.duration ? Number(t.duration) : 240,
+            art: extractRawArtworkUrl(t) || null,
+          }))
+        );
+      }
     }
   }
 

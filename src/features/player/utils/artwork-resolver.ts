@@ -64,14 +64,50 @@ export function resolveArtwork(entity: any, size: ArtworkSize = 'album'): string
     return `aura://generated?name=Aura&type=song&size=${size}`;
   }
 
-  // 1. Direct resolution from entity object
+  // 1. If entity has constituent tracks (e.g. playlist / mix seed), prioritize top track's real artwork
+  if (entity.tracks && Array.isArray(entity.tracks) && entity.tracks.length > 0) {
+    for (const t of entity.tracks) {
+      const trackArt = getArtworkUrl(t, size);
+      if (trackArt && !trackArt.startsWith('aura://') && !trackArt.includes('placeholder')) {
+        return trackArt;
+      }
+    }
+  }
+
+  // 2. Direct resolution from entity object
   let url = getArtworkUrl(entity, size);
   
-  if (url && url.length > 0 && !url.includes('placeholder')) {
+  if (url && url.length > 0 && !url.includes('placeholder') && !url.startsWith('aura://')) {
     return url;
   }
 
-  // 2. Rehydrate from local cache / catalog if entity has an ID
+  // 3. If entity has trackIds, check history and downloaded tracks
+  if (entity.trackIds && Array.isArray(entity.trackIds) && entity.trackIds.length > 0) {
+    try {
+      const { useAnalyticsStore } = require("../../analytics/store/analytics.store");
+      const history = useAnalyticsStore.getState().history || [];
+      for (const id of entity.trackIds) {
+        const match = history.find((h: any) => h.id === id);
+        const candidate = match?.art || match?.artwork || match?.trackSnapshot?.art;
+        if (candidate && typeof candidate === 'string' && !candidate.startsWith('aura://') && !candidate.includes('placeholder')) {
+          return getArtworkUrl(candidate, size);
+        }
+      }
+    } catch (e) {}
+
+    try {
+      const { useDownloadStore } = require("../../download/store/download.store");
+      const downloaded = useDownloadStore.getState().downloadedTracks || {};
+      for (const id of entity.trackIds) {
+        const match = downloaded[id];
+        if (match?.art && typeof match.art === 'string' && !match.art.startsWith('aura://') && !match.art.includes('placeholder')) {
+          return getArtworkUrl(match.art, size);
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 4. Rehydrate from local cache / catalog if entity has an ID
   const candidateId = entity.id;
   if (candidateId) {
     // A. Check Media Cache Store
@@ -79,25 +115,27 @@ export function resolveArtwork(entity: any, size: ArtworkSize = 'album'): string
       const { useMediaCacheStore } = require("../../cache/store/media-cache.store");
       const cached = useMediaCacheStore.getState().getCachedTrack(candidateId);
       if (cached?.track) {
-        url = getArtworkUrl(cached.track, size);
+        const candidateArt = getArtworkUrl(cached.track, size);
+        if (candidateArt && !candidateArt.startsWith('aura://') && !candidateArt.includes('placeholder')) {
+          return candidateArt;
+        }
       }
     } catch (e) {}
 
-
-
-    // C. Check active player store queue / current track
-    if (!url || url.length === 0 || url.includes('placeholder')) {
-      try {
-        const { usePlayerStore } = require("../store/player.store");
-        const playerState = usePlayerStore.getState();
-        const activeTrack = playerState.currentTrack?.id === candidateId
-          ? playerState.currentTrack
-          : playerState.queue.find((t: any) => t.id === candidateId);
-        if (activeTrack) {
-          url = getArtworkUrl(activeTrack, size);
+    // B. Check active player store queue / current track
+    try {
+      const { usePlayerStore } = require("../store/player.store");
+      const playerState = usePlayerStore.getState();
+      const activeTrack = playerState.currentTrack?.id === candidateId
+        ? playerState.currentTrack
+        : playerState.queue.find((t: any) => t.id === candidateId);
+      if (activeTrack) {
+        const candidateArt = getArtworkUrl(activeTrack, size);
+        if (candidateArt && !candidateArt.startsWith('aura://') && !candidateArt.includes('placeholder')) {
+          return candidateArt;
         }
-      } catch (e) {}
-    }
+      }
+    } catch (e) {}
   }
 
   // 3. Name-based lookup for artists and albums

@@ -10,6 +10,7 @@ import com.auramusic.core.history.PlaybackHistoryManager
 import com.auramusic.core.playback.AuraPlayer
 import com.auramusic.core.playback.AuraPlaybackState
 import com.auramusic.core.playback.PlaybackEvent
+import com.auramusic.core.playback.TrackMetadata
 import com.auramusic.core.stream.AndroidVrStreamResolver
 import com.auramusic.core.stream.InnerTubeStreamResolver
 import com.auramusic.core.stream.UnifiedStreamResolver
@@ -112,6 +113,29 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
     }
 
     @ReactMethod
+    fun saveTracksMetadata(tracks: ReadableArray) {
+        val metaList = mutableListOf<TrackMetadata>()
+        for (i in 0 until tracks.size()) {
+            val map = tracks.getMap(i) ?: continue
+            val id = if (map.hasKey("id")) map.getString("id") ?: "" else ""
+            if (id.isEmpty()) continue
+            val title = if (map.hasKey("title")) map.getString("title") ?: id else id
+            val artist = if (map.hasKey("artist")) map.getString("artist") ?: "Unknown Artist" else "Unknown Artist"
+            val album = if (map.hasKey("album")) map.getString("album") else null
+            val duration = if (map.hasKey("duration")) map.getInt("duration") else 240
+            val artworkUrl = if (map.hasKey("artworkUrl")) map.getString("artworkUrl") else (if (map.hasKey("art")) map.getString("art") else null)
+
+            historyManager.saveTrackMetadata(id, title, artist, album, duration, artworkUrl)
+            metaList.add(TrackMetadata(id, title, artist, album, duration, artworkUrl))
+        }
+        if (metaList.isNotEmpty()) {
+            mainHandler.post {
+                player.saveTracksMetadata(metaList)
+            }
+        }
+    }
+
+    @ReactMethod
     fun setQueue(trackIds: ReadableArray) {
         val ids = mutableListOf<String>()
         for (i in 0 until trackIds.size()) {
@@ -148,6 +172,60 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
                 putString("error", state.error)
             }
             promise.resolve(map)
+        }
+    }
+
+    @ReactMethod
+    fun clearNativeCache(promise: Promise) {
+        moduleScope.launch(Dispatchers.IO) {
+            try {
+                val deletedBytes = AuraPlayer.clearMediaCache(reactApplicationContext)
+                withContext(Dispatchers.Main) {
+                    val map = Arguments.createMap().apply {
+                        putBoolean("success", true)
+                        putDouble("deletedBytes", deletedBytes.toDouble())
+                    }
+                    promise.resolve(map)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    promise.reject("CLEAR_CACHE_ERROR", e.message, e)
+                }
+            }
+        }
+    }
+
+    @ReactMethod
+    fun setStreamingQuality(quality: String, promise: Promise) {
+        mainHandler.post {
+            try {
+                player.setStreamingQuality(quality)
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.reject("SET_QUALITY_ERROR", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun setCacheLimit(bytes: Double, promise: Promise) {
+        try {
+            AuraPlayer.setCacheLimit(reactApplicationContext, bytes.toLong())
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("SET_CACHE_LIMIT_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun getAudioSessionId(promise: Promise) {
+        mainHandler.post {
+            try {
+                val sessionId = player.getAudioSessionId()
+                promise.resolve(sessionId)
+            } catch (e: Exception) {
+                promise.reject("GET_SESSION_ERROR", e.message, e)
+            }
         }
     }
 

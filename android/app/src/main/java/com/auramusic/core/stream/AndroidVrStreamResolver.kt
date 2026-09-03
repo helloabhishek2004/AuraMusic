@@ -94,7 +94,7 @@ class AndroidVrStreamResolver(
         )
     )
 
-    suspend fun resolve(videoId: String): StreamResolutionResult = withContext(Dispatchers.IO) {
+    suspend fun resolve(videoId: String, quality: String? = null): StreamResolutionResult = withContext(Dispatchers.IO) {
         android.util.Log.i("NativeCore", "[PlaybackTrace] playTrack videoId=$videoId")
         
         val visitorData = visitorDataManager.getVisitorData() ?: ""
@@ -160,32 +160,29 @@ class AndroidVrStreamResolver(
                     "https://www.youtube.com"
                 }
 
-                val requestBuilder = Request.Builder()
+                val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                
+                val reqBuilder = Request.Builder()
                     .url(endpoint)
-                    .post(json.toString().toRequestBody("application/json".toMediaType()))
+                    .post(body)
                     .header("User-Agent", candidate.userAgent)
-                    .header("X-Youtube-Client-Name", candidate.clientNameHeader)
-                    .header("X-Youtube-Client-Version", candidate.clientVersion)
                     .header("Origin", origin)
                     .header("Referer", "$origin/")
+                    .header("X-YouTube-Client-Name", candidate.clientNameHeader)
+                    .header("X-YouTube-Client-Version", candidate.clientVersion)
 
-                if (visitorData.isNotEmpty()) {
-                    requestBuilder.header("X-Goog-Visitor-Id", visitorData)
-                }
+                val response = client.newCall(reqBuilder.build()).execute()
+                val rawBody = response.body?.string() ?: ""
 
-                val request = requestBuilder.build()
-                val response = client.newCall(request).execute()
-                val code = response.code
-                val body = response.body?.string() ?: ""
-
-                if (!response.isSuccessful || body.isEmpty()) {
-                    android.util.Log.w("NativeCore", "[PlaybackTrace][Candidate] ${candidate.clientName} HTTP $code")
+                if (!response.isSuccessful || rawBody.isEmpty()) {
+                    android.util.Log.w("NativeCore", "[PlaybackTrace][Candidate] ${candidate.clientName} HTTP error: ${response.code}")
                     continue
                 }
 
-                val root = JSONObject(body)
-                val playabilityStatus = root.optJSONObject("playabilityStatus")
-                val status = playabilityStatus?.optString("status")
+                val root = JSONObject(rawBody)
+                val playability = root.optJSONObject("playabilityStatus")
+                val status = playability?.optString("status", "UNKNOWN") ?: "UNKNOWN"
+
                 if (status != "OK") {
                     android.util.Log.w("NativeCore", "[PlaybackTrace][Candidate] ${candidate.clientName} status not OK: $status")
                     continue
@@ -194,23 +191,40 @@ class AndroidVrStreamResolver(
                 val streamingData = root.optJSONObject("streamingData") ?: continue
                 val adaptiveFormats = streamingData.optJSONArray("adaptiveFormats") ?: continue
 
+                val targetMaxBitrate = when (quality?.lowercase()?.trim()) {
+                    "low" -> 96000
+                    "normal", "medium" -> 140000
+                    else -> Int.MAX_VALUE
+                }
+
                 var bestFormat: JSONObject? = null
-                var maxBitrate = -1
+                var bestBitrate = -1
+                var fallbackFormat: JSONObject? = null
+                var fallbackBitrate = -1
+
                 for (i in 0 until adaptiveFormats.length()) {
                     val format = adaptiveFormats.getJSONObject(i)
                     val mimeType = format.optString("mimeType", "")
                     if (mimeType.startsWith("audio/")) {
                         val bitrate = format.optInt("averageBitrate", format.optInt("bitrate", 0))
                         val url = format.optString("url", "")
-                        if (url.isNotEmpty() && bitrate > maxBitrate) {
-                            maxBitrate = bitrate
-                            bestFormat = format
+                        if (url.isNotEmpty()) {
+                            if (bitrate in 1..targetMaxBitrate && bitrate > bestBitrate) {
+                                bestBitrate = bitrate
+                                bestFormat = format
+                            }
+                            if (bitrate > fallbackBitrate) {
+                                fallbackBitrate = bitrate
+                                fallbackFormat = format
+                            }
                         }
                     }
                 }
 
-                if (bestFormat != null) {
-                    val url = bestFormat.optString("url", "")
+                val chosenFormat = bestFormat ?: fallbackFormat
+
+                if (chosenFormat != null) {
+                    val url = chosenFormat.optString("url", "")
                     if (url.isNotEmpty()) {
                         // Quick probe: Test Range 1MB-2MB on CDN
                         var isChunkable = false
@@ -236,12 +250,13 @@ class AndroidVrStreamResolver(
 
                         // If probe succeeded or if fallback to ANDROID_VR
                         if (isChunkable || candidate.clientName == "ANDROID_VR") {
-                            android.util.Log.i("NativeCore", "[PlaybackTrace] Selected client ${candidate.clientName} (chunkable=$isChunkable)")
+                            val chosenBitrate = if (bestFormat != null) bestBitrate else fallbackBitrate
+                            android.util.Log.i("NativeCore", "[PlaybackTrace] Selected client ${candidate.clientName} (chunkable=$isChunkable, bitrate=$chosenBitrate)")
                             return@withContext StreamResolutionResult(
                                 url = url,
-                                format = bestFormat.optString("mimeType", "audio/mp4"),
-                                codec = bestFormat.optString("mimeType", "").substringAfter("codecs=\"").substringBefore("\""),
-                                bitrate = maxBitrate,
+                                format = chosenFormat.optString("mimeType", "audio/mp4"),
+                                codec = chosenFormat.optString("mimeType", "").substringAfter("codecs=\"", "").substringBefore("\""),
+                                bitrate = if (chosenBitrate > 0) chosenBitrate else 128000,
                                 userAgent = candidate.userAgent
                             )
                         }

@@ -36,6 +36,7 @@ import type { Playlist } from '../types/playlist';
 import { getArtworkUrl } from '@/src/features/player/utils/track-identity';
 import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
 import { AuraArtwork } from '@/src/components/ui/aura-artwork';
+import { useBackHandler, BackPriority } from '@/src/navigation/back';
 
 interface AddToPlaylistSheetProps {
   visible: boolean;
@@ -51,6 +52,16 @@ interface FeedbackState {
 const AddToPlaylistSheet = React.memo(
   ({ visible, track, onClose }: AddToPlaylistSheetProps) => {
     const router = useRouter();
+
+    useBackHandler({
+      id: 'add-to-playlist-sheet',
+      enabled: visible,
+      priority: BackPriority.BOTTOM_SHEET,
+      onBack: () => {
+        onClose();
+        return true;
+      },
+    });
 
     const playlistsMap = usePlaylistStore(s => s.playlists);
     const sortBy = usePlaylistStore(s => s.sortBy);

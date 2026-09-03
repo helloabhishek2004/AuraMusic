@@ -69,7 +69,29 @@ export class PlaybackController {
         case 'PLAY_COMPLETED':
           this.flushCurrentSession(true);
           // Auto-advance is handled natively by AuraPlayer (ExoPlayer).
-          // PLAY_STARTED for the next track will sync currentIndex and currentTrack.
+          // Check for autoplay queue continuation if at the end of the queue
+          try {
+            const { useSettingsStore } = require('../../settings/store/settings.store');
+            const autoplayEnabled = useSettingsStore.getState().autoplayEnabled;
+            const isAtEnd = store.currentIndex >= store.queue.length - 1;
+            const isRepeatOff = store.repeatMode === 'off';
+
+            if (autoplayEnabled && isAtEnd && isRepeatOff && store.currentTrack) {
+              const { AutoplayRadio } = require('./autoplay-radio');
+              AutoplayRadio.generateContinuationQueue(store.currentTrack)
+                .then((continuationTracks: any[]) => {
+                  if (continuationTracks && continuationTracks.length > 0) {
+                    console.log(`[AutoplayRadio] Injected ${continuationTracks.length} continuation tracks at queue end`);
+                    usePlayerStore.getState().injectAutoplayQueue(continuationTracks);
+                  }
+                })
+                .catch((err: any) => {
+                  console.warn('[AutoplayRadio] Error generating continuation queue:', err);
+                });
+            }
+          } catch (e) {
+            console.warn('[PlaybackController] Autoplay trigger error:', e);
+          }
           break;
 
         case 'PLAY_SKIPPED':

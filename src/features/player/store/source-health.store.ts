@@ -21,8 +21,7 @@ interface SourceHealthActions {
 }
 
 export const useSourceHealthStore = create<SourceHealthState & SourceHealthActions>()(
-  persist(
-    (set, get) => ({
+  (set, get) => ({
       records: {},
 
       registerSuccess: (trackId) => {
@@ -72,10 +71,5 @@ export const useSourceHealthStore = create<SourceHealthState & SourceHealthActio
       clearHealthHistory: () => {
         set({ records: {} });
       },
-    }),
-    {
-      name: 'aura-source-health',
-      storage: createJSONStorage(() => AsyncStorage),
-    }
-  )
+    })
 );

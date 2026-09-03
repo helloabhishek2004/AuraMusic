@@ -1,6 +1,7 @@
 import { useDownloadStore } from "../store/download.store";
 import { DownloadManager } from "./download.manager";
 import { StorageService } from "./storage.service";
+import { DownloadedTrack } from "../types/download";
 
 export class DownloadQueueManager {
   private static isInitialized = false;
@@ -17,8 +18,9 @@ export class DownloadQueueManager {
     const { AuraDownload, onDownloadProgress, onDownloadStateChanged } = await import("@/src/services/native-core");
     if (AuraDownload) {
       try {
+        await AuraDownload.reconcileDownloads();
         const nativeTracks = await AuraDownload.getDownloadedTracks();
-        const downloadedMap = { ...store.downloadedTracks };
+        const downloadedMap: Record<string, DownloadedTrack> = {};
         nativeTracks.forEach((t) => {
           downloadedMap[t.id] = {
             id: t.id,

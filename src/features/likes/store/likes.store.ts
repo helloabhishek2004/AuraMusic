@@ -20,6 +20,7 @@ interface LikesActions {
   isLiked: (trackId: string) => boolean;
   getLikedIds: () => string[];
   clearLikes: () => void;
+  backfillAutoDownloads: () => Promise<void>;
 }
 
 export const useLikesStore = create<LikesState & LikesActions>()(
@@ -112,6 +113,32 @@ export const useLikesStore = create<LikesState & LikesActions>()(
 
       clearLikes: () => {
         set({ likedTrackIds: {}, likedAt: {}, trackMetadata: {}, latestLikedTrackId: null });
+      },
+
+      backfillAutoDownloads: async () => {
+        const { likedTrackIds, trackMetadata } = get();
+        const { useDownloadStore } = require('../../download/store/download.store');
+        const downloadStore = useDownloadStore.getState();
+        const downloadedMap = downloadStore.downloadedTracks;
+
+        for (const trackId of Object.keys(likedTrackIds)) {
+          if (!downloadedMap[trackId]) {
+            const meta = trackMetadata[trackId];
+            if (meta && meta.title && meta.artist) {
+              const fullTrack: PlayerTrack = {
+                id: meta.id || trackId,
+                title: meta.title,
+                artist: meta.artist,
+                art: meta.art || '',
+                url: meta.url || '',
+                duration: meta.duration || 0,
+                isLocal: meta.isLocal,
+                source: meta.source,
+              };
+              downloadStore.addDownload(fullTrack);
+            }
+          }
+        }
       },
     }),
     {

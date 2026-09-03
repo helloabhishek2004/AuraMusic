@@ -34,8 +34,7 @@ interface MediaCacheActions {
 }
 
 export const useMediaCacheStore = create<MediaCacheState & MediaCacheActions>()(
-    persist(
-        (set, get) => ({
+    (set, get) => ({
             metadata: {},
             albumMap: {},
 
@@ -154,10 +153,5 @@ export const useMediaCacheStore = create<MediaCacheState & MediaCacheActions>()(
                     totalSizeEstimate: `${(JSON.stringify(get()).length / 1024 / 1024).toFixed(2)} MB`
                 };
             },
-        }),
-        {
-            name: 'aura-media-cache',
-            storage: createJSONStorage(() => AsyncStorage),
-        }
-    )
+        })
 );

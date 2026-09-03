@@ -17,8 +17,7 @@ export interface TelemetryActions {
 }
 
 export const useTelemetryStore = create<TelemetryState & TelemetryActions>()(
-  persist(
-    (set, get) => ({
+  (set, get) => ({
       sourceErrorCount: 0,
       localRecoveryCount: 0,
       streamRecoveryCount: 0,
@@ -51,10 +50,5 @@ export const useTelemetryStore = create<TelemetryState & TelemetryActions>()(
           resolverCooldownHits: state.resolverCooldownHits || 0,
         };
       },
-    }),
-    {
-      name: 'aura-playback-telemetry',
-      storage: createJSONStorage(() => AsyncStorage),
-    }
-  )
+    })
 );

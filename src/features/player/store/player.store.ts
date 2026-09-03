@@ -42,25 +42,24 @@ interface ExtendedPlayerStore extends PlayerStore {
   sourceArtistId?: string | null;
 }
 
-export const usePlayerStore = create<any>()( // @ts-ignore
-  persist(
-    (set, get) => ({
-      // State
-      currentTrack: null,
-      originalQueue: [],
-      queue: [],
-      currentIndex: -1,
-      status: "idle",
-      isPlaying: false,
-      isBuffering: false,
-      duration: 0,
-      position: 0,
-      bufferedPosition: 0,
-      volume: 1.0,
-      repeatMode: "off",
-      isShuffle: false,
-      error: null,
-      _hasHydrated: false,
+export const usePlayerStore = create<any>()(
+  (set, get) => ({
+    // State
+    currentTrack: null,
+    originalQueue: [],
+    queue: [],
+    currentIndex: -1,
+    status: "idle",
+    isPlaying: false,
+    isBuffering: false,
+    duration: 0,
+    position: 0,
+    bufferedPosition: 0,
+    volume: 1.0,
+    repeatMode: "off",
+    isShuffle: false,
+    error: null,
+    _hasHydrated: true,
       queueContext: null,
       selectedTrackId: null,
       selectedTrackIndex: null,
@@ -506,6 +505,30 @@ export const usePlayerStore = create<any>()( // @ts-ignore
         PlaybackService.syncQueue(newQueue, newIdx);
       },
 
+      injectAutoplayQueue: async (continuationTracks: PlayerTrack[]) => {
+        const { queue, originalQueue, currentIndex } = get();
+        if (!continuationTracks || continuationTracks.length === 0) return;
+
+        // Filter out tracks already present in the queue
+        const existingIds = new Set(queue.map((t: PlayerTrack) => t.id));
+        const uniqueNewTracks = continuationTracks.filter((t: PlayerTrack) => !existingIds.has(t.id));
+        if (uniqueNewTracks.length === 0) return;
+
+        const newQueue = [...queue, ...uniqueNewTracks];
+        const newOriginal = [...originalQueue, ...uniqueNewTracks];
+
+        set({ queue: newQueue, originalQueue: newOriginal });
+        await PlaybackService.syncQueue(newQueue, currentIndex);
+
+        // Advance to the first injected track
+        const nextIdx = currentIndex + 1;
+        if (nextIdx < newQueue.length) {
+          const nextTrack = newQueue[nextIdx];
+          set({ currentIndex: nextIdx, currentTrack: nextTrack });
+          await PlaybackService.loadTrack(nextTrack, newQueue, nextIdx);
+        }
+      },
+
       setVolume: async (volume: number) => {
         const currentVol = get().volume;
         if (Math.abs(currentVol - volume) < 0.01) return;
@@ -753,43 +776,11 @@ export const usePlayerStore = create<any>()( // @ts-ignore
         }
         set({ isRestoringSession: false });
       },
-    }),
-    {
-      name: 'aura-player',
-      storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => {
-        try {
-          if (state.isPlaying) {
-            const p = { position: 0, duration: 0 };
-            if (p && p.position) state.position = p.position * 1000;
-          }
-        } catch(e) {}
-        
-        return {
-          currentTrack: state.currentTrack,
-          originalQueue: state.originalQueue,
-          queue: state.queue,
-          currentIndex: state.currentIndex,
-          position: state.position,
-          duration: state.duration,
-          volume: state.volume,
-          repeatMode: state.repeatMode,
-          isShuffle: state.isShuffle,
-          activeContext: state.activeContext,
-          queueContext: state.queueContext,
-        };
-      },
-      onRehydrateStorage: () => {
-        return (hydratedState, error) => {
-          if (!error && hydratedState) {
-            usePlayerStore.setState({ _hasHydrated: true, status: "paused", isPlaying: false });
-            // Restore session asynchronously
-            setTimeout(() => {
-              usePlayerStore.getState().restoreSession();
-            }, 1000);
-          }
-        };
-      },
-    }
-  )
+    })
 );
+
+// Compatibility stub for any legacy code checking usePlayerStore.persist
+(usePlayerStore as any).persist = {
+  hasHydrated: () => true,
+  rehydrate: () => Promise.resolve(),
+};

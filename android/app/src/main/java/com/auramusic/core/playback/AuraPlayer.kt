@@ -53,16 +53,62 @@ class AuraPlayer(
         @Volatile
         private var instance: AuraPlayer? = null
 
+        @Volatile
+        private var configuredCacheLimitBytes: Long = 512 * 1024 * 1024L
+
         @Synchronized
         fun getMediaCache(context: Context): androidx.media3.datasource.cache.SimpleCache {
             return mediaCache ?: run {
+                val prefs = context.getSharedPreferences("aura_player_prefs", Context.MODE_PRIVATE)
+                val savedLimit = prefs.getLong("cache_limit_bytes", configuredCacheLimitBytes)
                 val cacheDir = java.io.File(context.cacheDir, "aura_media_cache")
-                val evictor = androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor(512 * 1024 * 1024L)
+                val evictor = if (savedLimit > 0) {
+                    androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor(savedLimit)
+                } else {
+                    androidx.media3.datasource.cache.NoOpCacheEvictor()
+                }
                 val databaseProvider = androidx.media3.database.StandaloneDatabaseProvider(context)
                 androidx.media3.datasource.cache.SimpleCache(cacheDir, evictor, databaseProvider).also {
                     mediaCache = it
                 }
             }
+        }
+
+        @Synchronized
+        fun setCacheLimit(context: Context, bytes: Long) {
+            configuredCacheLimitBytes = bytes
+            val prefs = context.getSharedPreferences("aura_player_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putLong("cache_limit_bytes", bytes).apply()
+        }
+
+        @Synchronized
+        fun clearMediaCache(context: Context): Long {
+            var bytesDeleted = 0L
+            try {
+                val cache = mediaCache
+                if (cache != null) {
+                    bytesDeleted = cache.cacheSpace
+                    val keys = cache.keys.toList()
+                    for (key in keys) {
+                        try {
+                            cache.removeResource(key)
+                        } catch (_: Exception) {}
+                    }
+                } else {
+                    val cacheDir = java.io.File(context.cacheDir, "aura_media_cache")
+                    if (cacheDir.exists()) {
+                        bytesDeleted = cacheDir.walkTopDown().filter { it.isFile }.map { it.length() }.sum()
+                        cacheDir.listFiles()?.forEach { file ->
+                            if (file.name != "exoplayer_internal.db" && !file.name.startsWith("exoplayer_internal.db")) {
+                                file.deleteRecursively()
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuraPlayer", "Error clearing media cache: ${e.message}")
+            }
+            return bytesDeleted
         }
 
         fun getInstance(context: Context, streamResolver: UnifiedStreamResolver? = null): AuraPlayer {
@@ -115,6 +161,17 @@ class AuraPlayer(
     @Volatile
     private var resolutionRequestId: Long = 0L
 
+    private var currentStreamingQuality: String = "high"
+
+    fun setStreamingQuality(quality: String) {
+        currentStreamingQuality = quality
+        Log.i(TAG, "[QualityTrace] Streaming quality updated to $quality")
+    }
+
+    fun getAudioSessionId(): Int {
+        return exoPlayer?.audioSessionId ?: 0
+    }
+
     fun getMediaSession(): MediaSession? {
         initialize()
         return mediaSession
@@ -127,19 +184,37 @@ class AuraPlayer(
         }
     }
 
+    fun saveTracksMetadata(tracks: List<TrackMetadata>) {
+        for (track in tracks) {
+            metadataCache[track.id] = track
+        }
+        val currentId = currentState.currentTrackId
+        if (currentId != null && metadataCache.containsKey(currentId)) {
+            updateMediaMetadataForCurrentTrack()
+        }
+    }
+
+    private fun isValidArtworkUri(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val uri = try { Uri.parse(url) } catch (_: Exception) { return false }
+        val scheme = uri.scheme?.lowercase() ?: return false
+        return scheme == "http" || scheme == "https" || scheme == "file" || scheme == "content"
+    }
+
     private fun updateMediaMetadataForCurrentTrack() {
         val trackId = currentState.currentTrackId ?: return
         val meta = metadataCache[trackId] ?: return
+        val artUri = if (isValidArtworkUri(meta.artworkUrl)) Uri.parse(meta.artworkUrl) else null
         val mediaMetadata = MediaMetadata.Builder()
             .setTitle(meta.title)
             .setArtist(meta.artist)
             .setAlbumTitle(meta.album)
-            .setArtworkUri(meta.artworkUrl?.let { Uri.parse(it) })
+            .setArtworkUri(artUri)
             .setIsPlayable(true)
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
             .build()
         exoPlayer?.playlistMetadata = mediaMetadata
-        Log.i(SESSION_TAG, "[MediaSessionTrace] METADATA_UPDATED trackId=$trackId title=${meta.title} artist=${meta.artist}")
+        Log.i(SESSION_TAG, "[MediaSessionTrace] METADATA_UPDATED trackId=$trackId title=${meta.title} artist=${meta.artist} artUri=$artUri")
     }
 
     fun initialize() {
@@ -302,6 +377,21 @@ class AuraPlayer(
         Log.i(SESSION_TAG, "[MediaSessionTrace] CREATED")
 
         rawPlayer.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                val trackId = mediaItem?.mediaId ?: currentState.currentTrackId
+                Log.i(TAG, "[PlaybackTrace][Lifecycle] onMediaItemTransition trackId=$trackId reason=$reason")
+                Log.i(SESSION_TAG, "[MediaSessionTrace] onMediaItemTransition trackId=$trackId reason=$reason")
+                if (trackId != null) {
+                    val meta = metadataCache[trackId]
+                    val durMs = if ((meta?.duration ?: 0) > 0) meta!!.duration.toLong() * 1000L else currentState.durationMs
+                    updateState(currentState.copy(
+                        currentTrackId = trackId,
+                        durationMs = durMs
+                    ))
+                    updateMediaMetadataForCurrentTrack()
+                }
+            }
+
             override fun onPlaybackStateChanged(state: Int) {
                 val trackId = currentState.currentTrackId
                 val elapsed = if (trackLoadStartTime > 0) System.currentTimeMillis() - trackLoadStartTime else 0
@@ -476,7 +566,7 @@ class AuraPlayer(
                     .setTitle(meta?.title ?: videoId)
                     .setArtist(meta?.artist ?: "Unknown Artist")
                     .setAlbumTitle(meta?.album)
-                    .setArtworkUri(meta?.artworkUrl?.let { Uri.parse(it) })
+                    .setArtworkUri(if (isValidArtworkUri(meta?.artworkUrl)) Uri.parse(meta?.artworkUrl) else null)
                     .setIsPlayable(true)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                     .build()
@@ -514,7 +604,7 @@ class AuraPlayer(
                 } else {
                     val resolveStart = System.currentTimeMillis()
                     val result = withContext(Dispatchers.IO) {
-                        streamResolver.resolve(videoId)
+                        streamResolver.resolve(videoId, currentStreamingQuality)
                     }
                     val resolveElapsed = System.currentTimeMillis() - resolveStart
 

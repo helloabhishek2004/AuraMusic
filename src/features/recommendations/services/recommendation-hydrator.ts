@@ -564,25 +564,60 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
       case 'playlist': {
         // 1. Made For You & Personal Models
         if (seed.id === 'mix-made-for-you') {
-          if (seed.tracks && seed.tracks.length > 0) return seed.tracks;
-          const { useAnalyticsStore } = require('../../analytics/store/analytics.store');
-          const history = useAnalyticsStore.getState().history || [];
-          const topTracks = history.filter((h: any) => h.completionRatio >= 0.8 || !h.skipped).slice(0, 25);
-          if (topTracks.length > 0) {
-            return topTracks.map((h: any) => ({
-              id: h.id,
-              title: h.title,
-              artist: h.artist,
-              art: h.art || h.artwork || h.trackSnapshot?.art,
-              artwork: h.art || h.artwork || h.trackSnapshot?.art,
-              duration: (h.durationMs ? h.durationMs / 1000 : h.duration) || 240,
-              url: h.trackSnapshot?.url || '',
-              album: h.album || h.trackSnapshot?.album,
-              artistId: h.artistId,
-              albumId: h.albumId,
-              source: (h.trackSnapshot?.source || 'youtube') as any,
-            }));
+          if (seed.tracks && seed.tracks.length >= 20) return seed.tracks;
+          
+          const { useAnalyticsStore, splitArtistNames } = require('../../analytics/store/analytics.store');
+          const analytics = useAnalyticsStore.getState();
+          const history = analytics.history || [];
+          const artistAffinities = analytics.artistAffinities || {};
+          
+          const pool: any[] = [];
+          
+          // Add existing seed tracks or high completion history tracks first
+          if (seed.tracks && seed.tracks.length > 0) {
+            pool.push(...seed.tracks);
+          } else {
+            const topTracks = history.filter((h: any) => h.completionRatio >= 0.8 || !h.skipped).slice(0, 25);
+            for (const h of topTracks) {
+              pool.push({
+                id: h.id,
+                title: h.title,
+                artist: h.artist,
+                art: h.art || h.artwork || h.trackSnapshot?.art,
+                artwork: h.art || h.artwork || h.trackSnapshot?.art,
+                duration: (h.durationMs ? h.durationMs / 1000 : h.duration) || 240,
+                url: h.trackSnapshot?.url || '',
+                album: h.album || h.trackSnapshot?.album,
+                artistId: h.artistId,
+                albumId: h.albumId,
+                source: (h.trackSnapshot?.source || 'youtube') as any,
+              });
+            }
           }
+
+          // If we need more candidates to reach 20-25, fetch top songs for the user's top seed artists
+          const seedArtists = seed.seedArtists && seed.seedArtists.length > 0 
+            ? seed.seedArtists 
+            : Object.keys(artistAffinities).sort((a, b) => (artistAffinities[b].score || 0) - (artistAffinities[a].score || 0)).slice(0, 4);
+
+          if (pool.length < 25 && seedArtists.length > 0) {
+            try {
+              const { musicService } = require('../../../services/api/music');
+              for (const artistName of seedArtists.slice(0, 3)) {
+                try {
+                  const songs = await musicService.searchSongs(artistName);
+                  if (songs && songs.length > 0) {
+                    pool.push(...songs);
+                  }
+                } catch (e) {}
+              }
+            } catch (e) {}
+          }
+
+          const filtered = applyDiversityFilter(pool, 25);
+          if (filtered.length > 0) return filtered;
+          if (seed.tracks && seed.tracks.length > 0) return seed.tracks;
+          return [];
         }
 
         if (seed.id === 'mix-on-repeat' || seed.id === 'mix-repeat-rewind') {

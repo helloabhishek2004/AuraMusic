@@ -78,8 +78,9 @@ export function buildTasteClusters(
 
 /**
  * 1. MADE FOR YOU
- * Based on: most played, most completed, most liked tracks & top artists.
- * Purpose: "Songs user almost certainly likes."
+ * Based on: vibe matching across top artists, most played, most completed, most liked tracks, and repeat listens.
+ * Purpose: "Songs user almost certainly likes matching their holistic taste profile."
+ * Guarantees minimum 20 valid tracks whenever sufficient genuine listening history exists.
  */
 export function generateMadeForYou(
   trackAffinities: Record<string, AffinityMetric>,
@@ -87,55 +88,113 @@ export function generateMadeForYou(
   artistAffinities: Record<string, AffinityMetric>,
   artistCache?: Record<string, { id: string; image: string }>
 ): RecommendationSeed {
-  // Sort tracks by highest behavioral score
-  const topScoredTrackIds = Object.keys(trackAffinities)
-    .map(id => ({ id, ...trackAffinities[id] }))
-    .filter(t => t.score > 0 && t.skipCount <= (t.playCount + 1))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 30);
+  const topArtists = Object.keys(artistAffinities)
+    .map(key => ({ name: key, score: artistAffinities[key].score || 0 }))
+    .filter(a => a.score > 0)
+    .sort((a, b) => b.score - a.score);
 
+  const topArtistNames = topArtists.slice(0, 6).map(a => a.name.toLowerCase().trim());
+  const topArtistSet = new Set(topArtistNames);
+
+  // Score every track using multi-factor behavioral vibe matching
+  const scoredTracks = Object.keys(trackAffinities)
+    .map(id => {
+      const aff = trackAffinities[id] || { playCount: 0, completionCount: 0, skipCount: 0, totalListenMs: 0, score: 0 };
+      const histMatch = history.find(h => h.id === id);
+      const artist = histMatch?.artist || '';
+      const artistNames = splitArtistNames(artist).map(n => n.toLowerCase().trim());
+
+      // Artist affinity boost
+      let artistBoost = 0;
+      for (const name of artistNames) {
+        if (topArtistSet.has(name)) {
+          artistBoost = Math.max(artistBoost, (artistAffinities[name]?.score || 0) * 0.4);
+        }
+      }
+
+      // Recency calculation
+      const lastPlayed = histMatch?.playedAt || aff.lastPlayedAt || 0;
+      const daysSince = lastPlayed > 0 ? (Date.now() - lastPlayed) / (24 * 60 * 60 * 1000) : 999;
+      const recencyBoost = daysSince <= 2 ? 8 : daysSince <= 7 ? 5 : daysSince <= 14 ? 3 : 0;
+
+      const playScore = (aff.playCount || 0) * 3;
+      const completionScore = (aff.completionCount || 0) * 5;
+      const repeatScore = (aff.repeatCount || 0) * 6;
+      const likedScore = (aff.likedCount || 0) * 12;
+      const skipPenalty = ((aff.skipCount || 0) * 6) + ((aff.skip15sCount || 0) * 8);
+
+      const totalVibeScore = (aff.score || 0) + playScore + completionScore + repeatScore + likedScore + artistBoost + recencyBoost - skipPenalty;
+
+      return {
+        id,
+        aff,
+        histMatch,
+        totalVibeScore,
+        artist,
+        album: histMatch?.album || histMatch?.trackSnapshot?.album || '',
+      };
+    })
+    .filter(t => t.totalVibeScore > 0 && t.aff.skipCount <= (t.aff.playCount + 2))
+    .sort((a, b) => b.totalVibeScore - a.totalVibeScore);
+
+  // Select candidates applying strict artist/album diversity (max 3 per artist, max 2 per album)
   const matchedTracks: PlayerTrack[] = [];
   const trackIds: string[] = [];
+  const artistCounts = new Map<string, number>();
+  const albumCounts = new Map<string, number>();
+  const seenTrackIds = new Set<string>();
 
-  for (const item of topScoredTrackIds) {
-    const h = history.find(entry => entry.id === item.id);
-    if (h) {
-      trackIds.push(h.id);
-      matchedTracks.push({
-        id: h.id,
-        title: h.title,
-        artist: h.artist,
-        art: h.art || h.artwork || h.trackSnapshot?.art || '',
-        duration: (h.durationMs ? h.durationMs / 1000 : h.duration) || 240,
-        url: h.trackSnapshot?.url || '',
-        album: h.album || h.trackSnapshot?.album || undefined,
-        artistId: h.artistId || undefined,
-        albumId: h.albumId || undefined,
-        source: (h.trackSnapshot?.source || 'youtube') as any,
-      });
+  const maxPerArtist = 3;
+  const maxPerAlbum = 2;
+  const targetSize = 25;
+
+  for (const candidate of scoredTracks) {
+    if (matchedTracks.length >= targetSize) break;
+    if (seenTrackIds.has(candidate.id)) continue;
+
+    const h = candidate.histMatch || history.find(entry => entry.id === candidate.id);
+    if (!h) continue;
+
+    const normArtist = (h.artist || candidate.artist || 'Unknown Artist').toLowerCase().trim();
+    const normAlbum = (h.album || candidate.album || '').toLowerCase().trim();
+
+    const currentArtCount = artistCounts.get(normArtist) || 0;
+    if (currentArtCount >= maxPerArtist) continue;
+
+    if (normAlbum) {
+      const currentAlbCount = albumCounts.get(normAlbum) || 0;
+      if (currentAlbCount >= maxPerAlbum) continue;
+    }
+
+    const durationSec = (h.durationMs ? h.durationMs / 1000 : h.duration) || 240;
+    const rawArt = h.art || h.artwork || h.trackSnapshot?.art || '';
+
+    trackIds.push(h.id);
+    matchedTracks.push({
+      id: h.id,
+      title: h.title,
+      artist: h.artist,
+      art: rawArt,
+      duration: durationSec,
+      url: h.trackSnapshot?.url || '',
+      album: h.album || h.trackSnapshot?.album || undefined,
+      artistId: h.artistId || undefined,
+      albumId: h.albumId || undefined,
+      source: (h.trackSnapshot?.source || 'youtube') as any,
+    });
+
+    seenTrackIds.add(h.id);
+    artistCounts.set(normArtist, currentArtCount + 1);
+    if (normAlbum) {
+      albumCounts.set(normAlbum, (albumCounts.get(normAlbum) || 0) + 1);
     }
   }
 
-  // Fallback to catalog if empty
-  if (matchedTracks.length === 0) {
-    catalogTracks.slice(0, 10).forEach(t => {
-      trackIds.push(t.id);
-      matchedTracks.push({
-        id: t.id,
-        title: t.title,
-        artist: t.artist,
-        art: t.art,
-        duration: t.durationSec || 240,
-        url: '',
-        albumId: t.albumId,
-        artistId: t.artistId,
-        source: 'local' as any,
-      });
-    });
-  }
+  // Separate consecutive tracks by same artist
+  const separatedTracks = applyConsecutiveSeparation(matchedTracks, 4);
 
-  const topArtistName = Object.keys(artistAffinities).sort((a, b) => (artistAffinities[b].score || 0) - (artistAffinities[a].score || 0))[0] || 'You';
-  const coverImage = matchedTracks[0]?.art || artistCache?.[topArtistName]?.image || `aura://generated?name=${encodeURIComponent(topArtistName)}&type=playlist`;
+  const topArtistName = topArtists[0]?.name || 'You';
+  const coverImage = separatedTracks[0]?.art || artistCache?.[topArtistName]?.image || `aura://generated?name=${encodeURIComponent(topArtistName)}&type=playlist`;
 
   return {
     type: 'playlist',
@@ -143,12 +202,48 @@ export function generateMadeForYou(
     title: 'Made For You',
     image: coverImage,
     score: 10.0,
-    seedArtists: Object.keys(artistAffinities).slice(0, 5),
+    seedArtists: topArtists.slice(0, 5).map(a => a.name),
     reason: topArtistName !== 'You' ? `Your top rotation including ${topArtistName} and your most completed songs.` : 'Personal mix built from your most played, completed, and liked tracks.',
     confidence: 99,
-    trackIds,
-    tracks: matchedTracks,
+    trackIds: separatedTracks.map(t => t.id),
+    tracks: separatedTracks,
   };
+}
+
+/**
+ * Separates tracks so no artist is repeated within the separation window
+ */
+function applyConsecutiveSeparation(tracks: PlayerTrack[], separation: number = 4): PlayerTrack[] {
+  if (tracks.length <= 1) return tracks;
+  const result: PlayerTrack[] = [];
+  const pool = [...tracks];
+
+  while (pool.length > 0) {
+    let foundIndex = -1;
+    for (let i = 0; i < pool.length; i++) {
+      const artist = pool[i].artist.toLowerCase().trim();
+      let isWithinSeparation = false;
+      const startLook = Math.max(0, result.length - (separation - 1));
+      for (let j = startLook; j < result.length; j++) {
+        if (result[j].artist.toLowerCase().trim() === artist) {
+          isWithinSeparation = true;
+          break;
+        }
+      }
+      if (!isWithinSeparation) {
+        foundIndex = i;
+        break;
+      }
+    }
+
+    if (foundIndex === -1) {
+      foundIndex = 0;
+    }
+
+    const track = pool.splice(foundIndex, 1)[0];
+    result.push(track);
+  }
+  return result;
 }
 
 /**

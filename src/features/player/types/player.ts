@@ -81,6 +81,7 @@ export interface PlaybackActions {
   toggleShuffle: () => void;
   updateProgress: (position: number, duration: number, buffered: number) => void;
   setStatus: (status: PlaybackStatus) => void;
+  injectAutoplayQueue: (continuationTracks: PlayerTrack[]) => Promise<void>;
 }
 
 export type PlayerStore = PlaybackState & PlaybackActions;

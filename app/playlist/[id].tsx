@@ -1176,16 +1176,12 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
   const downloadedTracks = useDownloadStore((s) => s.downloadedTracks);
   const activeTasks = useDownloadStore((s) => s.activeTasks);
   const likedTracks = useLikesStore((s) => s.likedTrackIds);
-  const { removeTrack, reorderTracks, renamePlaylist, deletePlaylist } = usePlaylistStore(useShallow(s => ({
+  const { removeTrack, reorderTracks } = usePlaylistStore(useShallow(s => ({
     removeTrack: s.removeTrack,
     reorderTracks: s.reorderTracks,
-    renamePlaylist: s.renamePlaylist,
-    deletePlaylist: s.deletePlaylist
   })));
 
-  const [isRenameVisible, setIsRenameVisible] = useState(false);
   const [isAddSongsVisible, setIsAddSongsVisible] = useState(false);
-  const [tempName, setTempName] = useState("");
   const [resolvedTracks, setResolvedTracks] = useState<PlayerTrack[]>([]);
   const [isResolving, setIsResolving] = useState(true);
 
@@ -1226,7 +1222,23 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
   const glowPulse = useSharedValue(0.5);
   const glowScale = useSharedValue(1.0);
   const scrollHandler = useAnimatedScrollHandler({ onScroll: (e) => { scrollY.value = e.contentOffset.y; } });
-  const headerOpacityStyle = useAnimatedStyle(() => ({ opacity: interpolate(scrollY.value, [60, 160], [0, 1], Extrapolation.CLAMP) }));
+
+  // Unified single back button transition: Hero back button fades out, Sticky compact header fades in
+  const heroBackButtonStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(scrollY.value, [40, 110], [1, 0], Extrapolation.CLAMP);
+    const translateY = interpolate(scrollY.value, [40, 110], [0, -8], Extrapolation.CLAMP);
+    return {
+      opacity,
+      transform: [{ translateY }],
+    };
+  });
+
+  const headerOpacityStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(scrollY.value, [90, 160], [0, 1], Extrapolation.CLAMP);
+    return {
+      opacity,
+    };
+  });
 
   const shufflePress = usePressScale();
   const playPress = usePressScale();
@@ -1237,6 +1249,15 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
     glowPulse.value = withRepeat(withTiming(1, { duration: 900 }), -1, true);
     glowScale.value = withRepeat(withTiming(1.3, { duration: 900 }), -1, true);
   }, []);
+
+  const handleBack = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)');
+    }
+  }, [router]);
 
   const handlePlayAll = useCallback(async (shuffle = false) => {
     if (isResolving || resolvedTracks.length === 0) return;
@@ -1261,19 +1282,9 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
   const [actionSheetConfig, setActionSheetConfig] = useState<any>(null);
   const showActionSheet = useCallback((title: string, actions: any[], subtitle?: string) => { setActionSheetConfig({ title, actions, subtitle }); setActionSheetVisible(true); }, []);
 
-  const handleOptionsPress = useCallback(() => {
-    if (isLikedPlaylist) return;
-    showActionSheet(playlist?.name || "Options", [
-      { label: "Rename", icon: "pencil", onPress: () => { setTempName(playlist?.name || ""); setIsRenameVisible(true); } },
-      { label: "Delete", icon: "trash", destructive: true, onPress: () => { deletePlaylist(playlistId); router.back(); } }
-    ]);
-  }, [playlist, playlistId, deletePlaylist, isLikedPlaylist, showActionSheet, router]);
-
   const handleTrackOptions = useCallback((track: PlayerTrack) => {
     showActionSheet(track.title, [{ label: "Remove", icon: "trash", destructive: true, onPress: () => removeTrack(playlistId, track.id) }], `by ${track.artist}`);
   }, [playlistId, removeTrack, showActionSheet]);
-
-  const saveRename = useCallback(() => { if (tempName.trim()) { renamePlaylist(playlistId, tempName.trim()); setIsRenameVisible(false); } }, [tempName, renamePlaylist, playlistId]);
 
   const gradientColors = useMemo(() => playlist?.gradientColors || [COLORS.primary, COLORS.primaryDeep] as [string, string], [playlist?.gradientColors]);
 
@@ -1285,7 +1296,7 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Ionicons name="albums-outline" size={48} color="#ffffff80" />
         <Text style={{ color: '#fff', fontSize: 20, marginTop: 16, fontWeight: '600', fontFamily: 'Manrope-Bold' }}>Playlist unavailable</Text>
-        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={{ marginTop: 24, paddingVertical: 12, paddingHorizontal: 24, backgroundColor: '#ffffff20', borderRadius: 24 }}>
+        <TouchableOpacity onPress={handleBack} style={{ marginTop: 24, paddingVertical: 12, paddingHorizontal: 24, backgroundColor: '#ffffff20', borderRadius: 24 }}>
           <Text style={{ color: '#fff', fontSize: 16, fontFamily: 'Inter-Medium' }}>Return Home</Text>
         </TouchableOpacity>
       </View>
@@ -1305,9 +1316,13 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
       <AnimatedReanimated.View style={[styles.stickyHeader, { paddingTop: insets.top }, headerOpacityStyle]}>
         <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.stickyHeaderInner}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}><Ionicons name="chevron-back" size={24} color="#FFF" /></TouchableOpacity>
+          <TouchableOpacity onPress={handleBack} style={styles.headerBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="chevron-back" size={24} color="#FFF" />
+          </TouchableOpacity>
           <Text style={styles.stickyTitle} numberOfLines={1}>{playlist?.name}</Text>
-          <TouchableOpacity onPress={() => handlePlayAll(false)} style={styles.headerBtn}><Ionicons name={isPlaying && activeContextId === playlistId ? "pause" : "play"} size={22} color="#FFF" /></TouchableOpacity>
+          <TouchableOpacity onPress={() => handlePlayAll(false)} style={styles.headerBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name={isPlaying && activeContextId === playlistId ? "pause" : "play"} size={22} color="#FFF" />
+          </TouchableOpacity>
         </View>
       </AnimatedReanimated.View>
 
@@ -1341,11 +1356,13 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
         />
       )}
 
-      <View style={[styles.floatingHeader, { top: insets.top + 16 }]} pointerEvents="box-none">
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtnCircle}><BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} /><Ionicons name="chevron-back" size={22} color="#FFF" /></TouchableOpacity>
-        <View style={{ flex: 1 }} />
-        <TouchableOpacity onPress={handleOptionsPress} style={styles.moreCircle}><BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} /><Ionicons name="ellipsis-vertical" size={20} color="#FFF" /></TouchableOpacity>
-      </View>
+      {/* Hero Initial Back Button (Fades out when scrolling past threshold) */}
+      <AnimatedReanimated.View style={[styles.floatingHeader, { top: insets.top + 16 }, heroBackButtonStyle]} pointerEvents="box-none">
+        <TouchableOpacity onPress={handleBack} style={styles.backBtnCircle} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+          <Ionicons name="chevron-back" size={22} color="#FFF" />
+        </TouchableOpacity>
+      </AnimatedReanimated.View>
 
       <Modal visible={actionSheetVisible} transparent animationType="fade" onRequestClose={() => setActionSheetVisible(false)} statusBarTranslucent>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setActionSheetVisible(false)}><BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} /></TouchableOpacity>
@@ -1367,20 +1384,6 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
         </View>
       </Modal>
 
-      <Modal visible={isRenameVisible} transparent animationType="fade" onRequestClose={() => setIsRenameVisible(false)} statusBarTranslucent>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setIsRenameVisible(false)}><BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} /></TouchableOpacity>
-        <View style={styles.modalCardWrap} pointerEvents="box-none">
-          <LiquidGlassSurface style={styles.renameCard} borderRadius={24} blurIntensity={65} showLeftGlow showTopSpecular showLeftSpecular>
-            <Text style={styles.modalTitle}>Rename Playlist</Text>
-            <View style={styles.inputWrap}><TextInput style={styles.renameInput} value={tempName} onChangeText={setTempName} autoFocus onSubmitEditing={saveRename} selectionColor={COLORS.primary} /></View>
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.modalBtn} onPress={() => setIsRenameVisible(false)}><Text style={styles.modalCancelText}>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.modalBtn, styles.modalSaveBtn]} onPress={saveRename}><LinearGradient colors={[gradientColors[0], COLORS.primaryMid]} style={StyleSheet.absoluteFill} /><Text style={styles.modalSaveText}>Save</Text></TouchableOpacity>
-            </View>
-          </LiquidGlassSurface>
-        </View>
-      </Modal>
-
       <AddSongsModal isVisible={isAddSongsVisible} onClose={() => setIsAddSongsVisible(false)} playlistId={playlistId} />
     </View>
   );
@@ -1396,7 +1399,6 @@ const styles = StyleSheet.create({
   stickyTitle: { color: "#FFF", fontSize: 16, fontWeight: "800" },
   navHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, marginBottom: 28 },
   backBtnCircle: { width: 44, height: 44, borderRadius: 22, justifyContent: "center", alignItems: "center", overflow: "hidden" },
-  moreCircle: { width: 44, height: 44, borderRadius: 22, justifyContent: "center", alignItems: "center", overflow: "hidden" },
   heroSection: { flexDirection: "column", alignItems: "center", paddingHorizontal: 20, marginBottom: 32 },
   artWrapper: { width: width * 0.76, aspectRatio: 1, borderRadius: 24, marginBottom: 28, position: "relative" },
   artAmbientGlow: { position: "absolute", inset: -20, borderRadius: 44, shadowOffset: { width: 0, height: 8 }, shadowRadius: 36 },

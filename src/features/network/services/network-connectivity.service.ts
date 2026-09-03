@@ -8,7 +8,15 @@ class NetworkConnectivityService {
   private isInitialized = false;
   private isProbing = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectionListeners = new Set<ReconnectionListener>();
+
+  private cancelDisconnection(): void {
+    if (this.disconnectTimer) {
+      clearTimeout(this.disconnectTimer);
+      this.disconnectTimer = null;
+    }
+  }
 
   /**
    * Initialize global connectivity monitoring
@@ -43,9 +51,7 @@ class NetworkConnectivityService {
     const prevStatus = store.status;
 
     let connectionType: ConnectionType = 'unknown';
-    if (!state.isConnected) {
-      connectionType = 'none';
-    } else if (state.type === 'wifi') {
+    if (state.type === 'wifi') {
       connectionType = 'wifi';
     } else if (state.type === 'cellular') {
       connectionType = 'cellular';
@@ -57,33 +63,42 @@ class NetworkConnectivityService {
       connectionType = 'other';
     }
 
-    // 1. Definitively Disconnected
+    // 1. Definitively Disconnected (Debounced by 450ms to allow smooth Wi-Fi <-> Cellular handoff without flapping)
     if (!state.isConnected) {
       this.cancelReconnection();
-      useNetworkStore.getState().setNetworkState({
-        status: 'offline',
-        connectionType: 'none',
-        isInternetReachable: false,
-        lastOfflineAt: Date.now(),
-      });
-      // Sync legacy device state
-      useDeviceStateStore.getState().setConnection('none');
+      this.cancelDisconnection();
+      this.disconnectTimer = setTimeout(() => {
+        useNetworkStore.getState().setNetworkState({
+          status: 'offline',
+          connectionType: 'none',
+          isInternetReachable: false,
+          lastOfflineAt: Date.now(),
+        });
+        // Sync legacy device state
+        useDeviceStateStore.getState().setConnection('none');
+      }, 450);
       return;
     }
 
     // 2. Connected but confirmed NO internet (Captive Portal / Wi-Fi without WAN)
     if (state.isInternetReachable === false) {
       this.cancelReconnection();
-      useNetworkStore.getState().setNetworkState({
-        status: 'offline',
-        connectionType,
-        isInternetReachable: false,
-        lastOfflineAt: Date.now(),
-      });
-      // Sync legacy device state as 'none' because there is no actual internet
-      useDeviceStateStore.getState().setConnection('none');
+      this.cancelDisconnection();
+      this.disconnectTimer = setTimeout(() => {
+        useNetworkStore.getState().setNetworkState({
+          status: 'offline',
+          connectionType,
+          isInternetReachable: false,
+          lastOfflineAt: Date.now(),
+        });
+        // Sync legacy device state as 'none' because there is no actual internet
+        useDeviceStateStore.getState().setConnection('none');
+      }, 450);
       return;
     }
+
+    // Connected with active internet -> Cancel any pending disconnect
+    this.cancelDisconnection();
 
     // 3. Connected and confirmed internet reachable
     if (state.isInternetReachable === true) {

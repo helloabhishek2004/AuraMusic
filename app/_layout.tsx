@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { BackPriorityProvider } from '../src/navigation/back';
+import { BackPriorityProvider, useNavigationBack } from '../src/navigation/back';
 import { Stack } from 'expo-router';
 import { ThemeProvider as NavigationThemeProvider, DarkTheme } from '@react-navigation/native';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
@@ -38,6 +38,7 @@ SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 import PlayerOverlay from '../src/components/PlayerOverlay';
 import { OfflineStatusBar } from '../src/features/network/components/OfflineStatusBar';
+import { RestoreBanner } from '../src/components/RestoreBanner';
 
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -397,6 +398,11 @@ export default function RootLayout() {
     PlaybackService.setupPlayer();
     PlaybackController.initialize();
     
+    // Run deterministic startup restore validation & reconciliation pipeline
+    import('../src/services/restore-validator.service').then(({ RestoreValidatorService }) => {
+      RestoreValidatorService.runStartupValidation();
+    });
+
     // Initialize Global Network Authority
     import('../src/features/network/services/network-connectivity.service').then(({ networkConnectivityService }) => {
       networkConnectivityService.initialize();
@@ -415,6 +421,11 @@ export default function RootLayout() {
       DownloadManager.initialize();
     });
 
+    // Initialize Settings & Audio Quality Sync Authority
+    import('../src/features/settings/services/settings-sync.service').then(({ SettingsSyncService }) => {
+      SettingsSyncService.initialize();
+    });
+
     // Initialize Library Health Center (Startup Fast Scan with 8s Delay)
     import('../src/services/library-health.service').then(({ LibraryHealthService }) => {
       LibraryHealthService.scheduleStartupScan();
@@ -427,8 +438,7 @@ export default function RootLayout() {
       const { useAnalyticsStore } = await import('../src/features/analytics/store/analytics.store');
       await useAnalyticsStore.getState().initialize();
       const { useRecommendationsStore } = await import('../src/features/recommendations/store/recommendations.store');
-      await useRecommendationsStore.getState().generateRecommendations();
-      useRecommendationsStore.getState().refreshTrendingIfNeeded();
+      useRecommendationsStore.getState().startPeriodicPreload();
     });
 
     // Start diagnostics monitoring loop
@@ -504,6 +514,7 @@ export default function RootLayout() {
         <MusicProvider>
           <GestureHandlerRootView style={styles.root}>
             <BackPriorityProvider>
+            <RootNavigationBack />
             <DynamicTrackTheme />
             <StatusBar style="light" translucent backgroundColor="transparent" />
             <Animated.View style={stackStyle}>
@@ -536,12 +547,18 @@ export default function RootLayout() {
             <PlayerOverlay expandProgress={expandProgress} />
             <GlobalDownloadNotification />
             <OfflineStatusBar />
+            <RestoreBanner />
             </BackPriorityProvider>
           </GestureHandlerRootView>
         </MusicProvider>
       </NavigationThemeProvider>
     </ThemeProvider>
   );
+}
+
+function RootNavigationBack() {
+  useNavigationBack();
+  return null;
 }
 
 function DynamicTrackTheme() {

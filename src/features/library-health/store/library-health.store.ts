@@ -4,8 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LibraryHealthStore, LibraryHealthReport, DuplicateGroup, PendingDeletion, HealthHistoryEntry, ScanStage } from '../types/library-health';
 
 export const useLibraryHealthStore = create<LibraryHealthStore>()(
-  persist(
-    (set, get) => ({
+  (set, get) => ({
       // State
       healthReport: null,
       duplicateGroups: [],
@@ -98,20 +97,5 @@ export const useLibraryHealthStore = create<LibraryHealthStore>()(
           return { healthHistory: updatedHistory };
         });
       },
-    }),
-    {
-      name: 'aura-library-health',
-      storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({
-        healthReport: state.healthReport,
-        duplicateGroups: state.duplicateGroups,
-        ignoredDuplicateGroups: state.ignoredDuplicateGroups,
-        healthHistory: state.healthHistory,
-        lastScanAt: state.lastScanAt,
-        libraryHash: state.libraryHash,
-        duplicateIndex: state.duplicateIndex,
-        telemetry: state.telemetry,
-      }),
-    }
-  )
+    })
 );

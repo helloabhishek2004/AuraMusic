@@ -6,6 +6,7 @@ import Animated, {
   withSpring,
   withTiming,
   interpolate,
+  runOnJS,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,9 +36,10 @@ export function OfflineStatusBar() {
         animProgress.value = withSpring(1, { damping: 18, stiffness: 180 });
 
         const timer = setTimeout(() => {
-          animProgress.value = withTiming(0, { duration: 300 }, () => {
+          animProgress.value = withTiming(0, { duration: 300 });
+          setTimeout(() => {
             setShowRestored(false);
-          });
+          }, 320);
         }, 3000);
 
         return () => clearTimeout(timer);
@@ -63,7 +65,7 @@ export function OfflineStatusBar() {
   });
 
   const isVisible = isOffline || showRestored;
-  if (!isVisible && animProgress.value === 0) {
+  if (!isVisible) {
     return null;
   }
 

@@ -1,4 +1,4 @@
-const { withAppDelegate, withMainApplication, withDangerousMod, withAppBuildGradle } = require('@expo/config-plugins');
+const { withAppDelegate, withMainApplication, withDangerousMod, withAppBuildGradle, withAndroidManifest } = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
@@ -238,9 +238,57 @@ class AuraAudioSessionPackage : ReactPackage {
 }`;
       fs.writeFileSync(path.join(mainPath, 'AuraAudioSessionPackage.kt'), packageCode);
 
+      // 3. Android Auto Backup XML rules synchronization
+      const xmlResDir = path.join(projectRoot, 'android/app/src/main/res/xml');
+      if (!fs.existsSync(xmlResDir)) {
+        fs.mkdirSync(xmlResDir, { recursive: true });
+      }
+
+      const dataExtractionRulesXml = `<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <!-- Allowlist: Only include the specific durable databases and preferences -->
+        <!-- When <include> elements are present, Android excludes all other files by default -->
+        <include domain="database" path="aura_music.db" />
+        <include domain="database" path="RKStorage" />
+        <include domain="sharedpref" path="aura_player_prefs.xml" />
+    </cloud-backup>
+
+    <device-transfer>
+        <!-- Allowlist: Only include durable user data for device-to-device transfer -->
+        <include domain="database" path="aura_music.db" />
+        <include domain="database" path="RKStorage" />
+        <include domain="sharedpref" path="aura_player_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>`;
+
+      const backupRulesXml = `<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Allowlist: Only include the specific durable databases and preferences -->
+    <!-- When <include> elements are present, Android excludes all other files by default -->
+    <include domain="database" path="aura_music.db" />
+    <include domain="database" path="RKStorage" />
+    <include domain="sharedpref" path="aura_player_prefs.xml" />
+</full-backup-content>`;
+
+      fs.writeFileSync(path.join(xmlResDir, 'data_extraction_rules.xml'), dataExtractionRulesXml);
+      fs.writeFileSync(path.join(xmlResDir, 'backup_rules.xml'), backupRulesXml);
+
       return config;
     },
   ]);
+
+  // --- AndroidManifest Backup Configuration ---
+  config = withAndroidManifest(config, (config) => {
+    const mainApplication = config.modResults.manifest.application?.[0];
+    if (mainApplication) {
+      mainApplication.$['android:allowBackup'] = 'true';
+      mainApplication.$['android:backupAgent'] = 'com.auramusic.core.backup.AuraBackupAgent';
+      mainApplication.$['android:dataExtractionRules'] = '@xml/data_extraction_rules';
+      mainApplication.$['android:fullBackupContent'] = '@xml/backup_rules';
+    }
+    return config;
+  });
 
   // --- Register Package in MainApplication.kt ---
   config = withMainApplication(config, (config) => {

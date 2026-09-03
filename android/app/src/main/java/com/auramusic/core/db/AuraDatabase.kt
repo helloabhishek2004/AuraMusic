@@ -34,6 +34,12 @@ interface TrackDao {
 
     @Query("SELECT EXISTS(SELECT 1 FROM tracks WHERE id = :id AND isDownloaded = 1)")
     suspend fun isDownloaded(id: String): Boolean
+
+    @Query("UPDATE tracks SET isDownloaded = 0, downloadedAt = NULL, contentLength = NULL")
+    suspend fun clearAllDownloads()
+
+    @Query("SELECT SUM(contentLength) FROM tracks WHERE isDownloaded = 1")
+    suspend fun getTotalDownloadedBytes(): Long?
 }
 
 @Dao
@@ -138,13 +144,56 @@ abstract class AuraDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): AuraDatabase {
             return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: Room.databaseBuilder(
-                    context.applicationContext,
-                    AuraDatabase::class.java,
-                    "aura_music.db"
-                )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
-                .build().also { INSTANCE = it }
+                INSTANCE ?: run {
+                    val appContext = context.applicationContext
+                    // Pre-flight check: Detect if restored database is newer than current app schema
+                    val dbFile = appContext.getDatabasePath("aura_music.db")
+                    if (dbFile.exists()) {
+                        try {
+                            android.database.sqlite.SQLiteDatabase.openDatabase(
+                                dbFile.path,
+                                null,
+                                android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                            ).use { sqliteDb ->
+                                val userVersion = sqliteDb.version
+                                if (userVersion > 4) {
+                                    android.util.Log.w(
+                                        "AuraRestore",
+                                        "[AuraRestore] Newer database version detected (user_version = $userVersion, app version = 4). Preserving backup copy before proceeding."
+                                    )
+                                    val backupCopy = java.io.File(dbFile.parentFile, "aura_music_v${userVersion}_backup.db")
+                                    if (!backupCopy.exists()) {
+                                        dbFile.copyTo(backupCopy, overwrite = false)
+                                        android.util.Log.i("AuraRestore", "[AuraRestore] Safe backup created: ${backupCopy.name}")
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("AuraRestore", "[AuraRestore] Pre-flight version check note: ${e.message}")
+                        }
+                    }
+
+                    Room.databaseBuilder(
+                        appContext,
+                        AuraDatabase::class.java,
+                        "aura_music.db"
+                    )
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .fallbackToDestructiveMigrationOnDowngrade()
+                    .build().also { INSTANCE = it }
+                }
+            }
+        }
+
+        fun checkpoint(context: Context) {
+            try {
+                val db = getInstance(context)
+                val supportDb = db.openHelper.writableDatabase
+                val cursor = supportDb.query("PRAGMA wal_checkpoint(FULL)")
+                cursor.close()
+                android.util.Log.i("AuraRestore", "[AuraRestore] WAL checkpoint completed successfully")
+            } catch (e: Exception) {
+                android.util.Log.w("AuraRestore", "[AuraRestore] WAL checkpoint warning: ${e.message}")
             }
         }
     }

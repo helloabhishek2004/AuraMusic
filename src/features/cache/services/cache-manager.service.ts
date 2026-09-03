@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { MetadataCache } from './metadata-cache.service';
 import { useSettingsStore } from '../../settings/store/settings.store';
+import { AuraDownload, AuraPlayer } from '../../../services/native-core';
 
 const CACHE_DIR = FileSystem.cacheDirectory + 'aura_tracks/';
 const AUDIO_DIR = FileSystem.documentDirectory + 'aura/audio/';
@@ -21,18 +22,33 @@ class CacheManagerService {
    * Calculates real storage usage across all categories.
    */
   async getCacheStats(): Promise<StorageStats> {
+    try {
+      if (AuraDownload && typeof AuraDownload.getNativeStorageStats === 'function') {
+        const stats = await AuraDownload.getNativeStorageStats();
+        if (stats && typeof stats.downloadsBytes === 'number') {
+          return {
+            downloads: stats.downloadsBytes || 0,
+            songCache: stats.songCacheBytes || 0,
+            artworkCache: stats.artworkCacheBytes || 0,
+            lyricsCache: stats.asyncStorageBytes || 0,
+            metadataCache: stats.databaseBytes || 0,
+            totalSize: stats.totalBytes || 0,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[CacheManager] Failed to get native storage stats, falling back to JS:', e);
+    }
+
     const [downloadsSize, songCacheSize, artworkCacheSize] = await Promise.all([
       this._getDirectorySize(AUDIO_DIR),
       this._getDirectorySize(CACHE_DIR),
       this._getDirectorySize(ARTWORK_DIR),
     ]);
 
-    // Metadata and Lyrics are in AsyncStorage, size estimation is tricky but we can count keys
-    // For real size, we'd need to multiGet and stringify, which is heavy.
-    // Using 0.05MB per entry as a rough estimate.
     const metrics = await MetadataCache.getMetrics();
-    const metadataSize = metrics.metadataCount * 50 * 1024; // 50KB per track
-    const lyricsSize = metrics.lyricsCount * 20 * 1024;     // 20KB per lyrics
+    const metadataSize = metrics.metadataCount * 50 * 1024;
+    const lyricsSize = metrics.lyricsCount * 20 * 1024;
 
     return {
       downloads: downloadsSize,
@@ -82,7 +98,14 @@ class CacheManagerService {
   }
 
   async clearSongCache() {
-    // Clear temporary audio files only
+    try {
+      if (AuraPlayer && typeof AuraPlayer.clearNativeCache === 'function') {
+        await AuraPlayer.clearNativeCache();
+      }
+    } catch (e) {
+      console.warn('[CacheManager] Error clearing native streaming cache:', e);
+    }
+    // Clear temporary audio files in JS directory
     await this._emptyDirectory(CACHE_DIR);
   }
 

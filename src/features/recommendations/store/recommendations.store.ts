@@ -3,6 +3,10 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAnalyticsStore, splitArtistNames } from '../../analytics/store/analytics.store';
 import {
+  calculateRecommendationReadiness,
+  RecommendationReadinessResult
+} from '../services/recommendation-readiness';
+import {
   RecommendationSeed,
   generateDailyMixes,
   generateBecauseYouLike,
@@ -37,6 +41,8 @@ import { HistoryEntry } from '../../analytics/store/analytics.store';
 import { getArtworkUrl } from '../../player/utils/track-identity';
 import { resolveArtwork } from '../../player/utils/artwork-resolver';
 
+let preloadSubscriptionInitialized = false;
+
 async function resolveSeedArtworkAsync(
   seed: RecommendationSeed,
   history: HistoryEntry[],
@@ -45,54 +51,99 @@ async function resolveSeedArtworkAsync(
   // If it's a track seed, it already has the track's artwork
   if (seed.type === 'track') {
     const url = seed.image;
-    if (url && url.length > 0 && !url.includes('placeholder')) {
+    if (url && url.length > 0 && !url.includes('placeholder') && !url.startsWith('aura://')) {
       return url;
     }
   }
 
-  // 1. Try first recommended track from history/catalog matching seed artists
-  if (seed.seedArtists && seed.seedArtists.length > 0) {
-    // Check history first
-    for (const name of seed.seedArtists) {
-      const clean = name.toLowerCase().trim();
-      const match = history.find(h => splitArtistNames(h.artist).some(an => an.toLowerCase().trim() === clean));
-      if (match?.art && !match.art.includes('placeholder')) return match.art;
+  // Priority 1: Use the highest-ranked constituent track's real album artwork
+  if (seed.tracks && seed.tracks.length > 0) {
+    for (const track of seed.tracks) {
+      const art = track.art || (track as any).image;
+      if (art && art.length > 0 && !art.includes('placeholder') && !art.startsWith('aura://')) {
+        return art;
+      }
     }
   }
 
-  // 2. Try strongest seed artist image from cache
+  // Priority 2: Check local metadata in history matching seed trackIds
+  if (seed.trackIds && seed.trackIds.length > 0) {
+    for (const id of seed.trackIds) {
+      const match = history.find(h => h.id === id);
+      const art = match?.art || match?.artwork || match?.trackSnapshot?.art;
+      if (art && art.length > 0 && !art.includes('placeholder') && !art.startsWith('aura://')) {
+        return art;
+      }
+    }
+  }
+
+  // Priority 2b: Check history matching seed artists
+  if (seed.seedArtists && seed.seedArtists.length > 0) {
+    for (const name of seed.seedArtists) {
+      const clean = name.toLowerCase().trim();
+      const match = history.find(h => splitArtistNames(h.artist).some(an => an.toLowerCase().trim() === clean));
+      const art = match?.art || match?.artwork || match?.trackSnapshot?.art;
+      if (art && art.length > 0 && !art.includes('placeholder') && !art.startsWith('aura://')) {
+        return art;
+      }
+    }
+  }
+
+  // Priority 3: Try strongest seed artist image from cache
   if (seed.seedArtists && seed.seedArtists.length > 0) {
     for (const name of seed.seedArtists) {
       const cached = artistCache[name];
-      if (cached?.image && !cached.image.includes('placeholder')) {
+      if (cached?.image && !cached.image.includes('placeholder') && !cached.image.startsWith('aura://')) {
         return cached.image;
       }
     }
   }
 
-  // 3. Try to fetch/hydrate the first track of this playlist from API
+  // Priority 4: Try to fetch/hydrate the top track from online API if online
   if (seed.type === 'playlist' || seed.type === 'artist' || seed.type === 'radio') {
     try {
-      const { musicService } = require('../../../services/api/music');
-      if (seed.seedArtists && seed.seedArtists.length > 0) {
+      const { useNetworkStore } = require('../../network/store/network.store');
+      const isOnline = useNetworkStore.getState().isOnline;
+      if (isOnline && seed.seedArtists && seed.seedArtists.length > 0) {
+        const { musicService } = require('../../../services/api/music');
         const topArtist = seed.seedArtists[0];
         const searchSongs = await musicService.searchSongs(topArtist);
-        if (searchSongs && searchSongs[0]?.art && !searchSongs[0].art.includes('placeholder')) {
+        if (searchSongs && searchSongs[0]?.art && !searchSongs[0].art.includes('placeholder') && !searchSongs[0].art.startsWith('aura://')) {
           return searchSongs[0].art;
         }
       }
-    } catch (e) {
-      // ignore
+    } catch {
+      // ignore offline or search errors
     }
   }
 
-  // Fallback to seed image if it's not a generic placeholder
-  if (seed.image && !seed.image.includes('placeholder')) {
+  // Fallback to seed image if valid
+  if (seed.image && !seed.image.includes('placeholder') && !seed.image.startsWith('aura://')) {
     return seed.image;
   }
 
   // ABSOLUTE FALLBACK: resolveArtwork will provide a deterministic aura://generated URI
   return resolveArtwork(seed, 'album');
+}
+
+async function resolveTrendingCoverAsync(
+  query: string,
+  fallbackSeed: RecommendationSeed
+): Promise<string> {
+  try {
+    const { useNetworkStore } = require('../../network/store/network.store');
+    const isOnline = useNetworkStore.getState().isOnline;
+    if (isOnline) {
+      const { musicService } = require('../../../services/api/music');
+      const searchSongs = await musicService.searchSongs(query);
+      if (searchSongs && searchSongs[0]?.art && !searchSongs[0].art.includes('placeholder') && !searchSongs[0].art.startsWith('aura://')) {
+        return searchSongs[0].art;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return resolveArtwork(fallbackSeed, 'album');
 }
 
 export interface TrendingSeed {
@@ -124,7 +175,7 @@ export interface RecommendationsState {
   forgottenFavorites: RecommendationSeed[];
   forgottenFavoritesShownAt: Record<string, number>;
   
-  // Taste Evolution State
+  readiness: RecommendationReadinessResult | null;
   listeningDNA: ListeningDNA | null;
   tasteSnapshots: TasteSnapshot[];
   tasteDriftLevel: TasteDriftLevel;
@@ -146,7 +197,8 @@ export interface RecommendationsState {
 export interface RecommendationsActions {
   generateRecommendations: () => Promise<void>;
   resetRecommendations: () => void;
-  refreshTrendingIfNeeded: () => void;
+  refreshTrendingIfNeeded: () => Promise<void>;
+  startPeriodicPreload: () => void;
   registerRecommendationShown: (seedId: string) => void;
   registerRecommendationClick: (seedId: string, action?: 'play' | 'like' | 'complete') => void;
   incrementListeningEvent: () => void;
@@ -177,7 +229,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           type: 'playlist',
           id: 'trending-global',
           title: 'Global Top Hits',
-          image: 'aura://generated?name=Global%20Top%20Hits&type=playlist',
+          image: 'https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg',
           source: 'global',
           fetchedAt: Date.now(),
         },
@@ -185,7 +237,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           type: 'playlist',
           id: 'trending-india',
           title: 'Trending in India',
-          image: 'aura://generated?name=Trending%20in%20India&type=playlist',
+          image: 'https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg',
           source: 'india',
           fetchedAt: Date.now(),
         },
@@ -193,7 +245,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           type: 'playlist',
           id: 'trending-synthwave',
           title: 'Synthwave & Chill',
-          image: 'aura://generated?name=Synthwave%20Chill&type=playlist',
+          image: 'https://i.ytimg.com/vi/4xDzrJKXOOY/hqdefault.jpg',
           source: 'global',
           fetchedAt: Date.now(),
         }
@@ -205,6 +257,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
       forgottenFavorites: [],
       forgottenFavoritesShownAt: {},
       
+      readiness: null,
       listeningDNA: null,
       tasteSnapshots: [],
       tasteDriftLevel: 'none',
@@ -305,18 +358,81 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           const globalTrackPool = new Set<string>();
           const globalArtistPool = new Set<string>();
 
-          if (historyLength === 0) {
-            // Cold Start - No listening history yet: personal mixes remain empty until songs are played
+          // Authoritative recommendation readiness calculation
+          const readiness = calculateRecommendationReadiness(analytics);
+
+          if (!readiness.isReady || historyLength === 0) {
+            // Cold Start or Insufficient Data: personal recommendations strictly omitted until enough data is collected
             dailyMixes = [];
             trendingForYou = null;
             madeForYou = [];
             rediscover = [];
             becauseYouLike = [];
             recentlyLoved = [];
-            topSongs = [];
-            topArtists = [];
+            hiddenGems = [];
+            forgottenFavorites = [];
+
+            // Top Songs and Top Artists can be derived if any history exists
+            if (historyLength > 0) {
+              const rankedTracks = Object.keys(trackAffinities)
+                .map((id) => {
+                  const aff = trackAffinities[id];
+                  const match = history.find(h => h.id === id);
+                  const score = aff.playCount + (aff.completionCount * 2) + (aff.totalListenMs / 600000) - aff.skipCount;
+                  return { id, score, match };
+                })
+                .filter(t => t.score > 0)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 25);
+
+              topSongs = rankedTracks.map(({ id, score, match }) => ({
+                type: 'track',
+                id,
+                title: match?.title || id,
+                artistName: match?.artist || 'Unknown Artist',
+                image: match?.art || undefined,
+                score,
+                reason: `Your top track. Played ${trackAffinities[id].playCount} times.`,
+                confidence: 90
+              }));
+
+              const monthlyArtistPlays = new Map<string, { playCount: number; completionCount: number; listenTimeMs: number }>();
+              history.forEach(h => {
+                const names = splitArtistNames(h.artist);
+                names.forEach(name => {
+                  const current = monthlyArtistPlays.get(name) || { playCount: 0, completionCount: 0, listenTimeMs: 0 };
+                  current.playCount += 1;
+                  if (h.completionRatio >= 0.95 || !h.skipped) {
+                    current.completionCount += 1;
+                  }
+                  current.listenTimeMs += h.positionMs || 0;
+                  monthlyArtistPlays.set(name, current);
+                });
+              });
+
+              topArtists = Array.from(monthlyArtistPlays.entries())
+                .map(([name, data]) => ({ name, score: data.playCount + (data.completionCount * 2) + (data.listenTimeMs / 600000) }))
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 10)
+                .map(({ name, score }) => {
+                  const match = history.find(h => splitArtistNames(h.artist).includes(name));
+                  return {
+                    type: 'artist',
+                    id: artistCache[name]?.id || match?.artistId || name,
+                    title: name,
+                    image: artistCache[name]?.image || match?.art || undefined,
+                    score,
+                    reason: `Top artist with play score of ${score.toFixed(1)}.`,
+                    confidence: 90
+                  };
+                });
+            } else {
+              topSongs = [];
+              topArtists = [];
+            }
           } else {
-            // Tier 2, 3, or 4 - Generate personalized components
+            // Full Personalization: User meets authoritative readiness criteria
+            console.log(`[RecommendationsStore] Data sufficiency gate passed. Generating Made for You suite.`);
             
             // Generate Top Songs (Top 25)
             const rankedTracks = Object.keys(trackAffinities)
@@ -382,8 +498,9 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               };
             });
 
-            // Generate other sections
+            // Generate personalized Daily Mixes
             const personalDaily = generateDailyMixes(artistAffinities, history, artistCache, topSongs);
+            dailyMixes = personalDaily;
             
             // Loop Protection: add top Daily Mix's seed artists to the artist pool
             const firstDaily = personalDaily[0];
@@ -391,76 +508,54 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               firstDaily.seedArtists.forEach(art => globalArtistPool.add(art.toLowerCase().trim()));
             }
 
-            if (historyLength <= 20) {
-              // Tier 2: Early Personalization
-              console.log('[CurationStore] Early Personalization active.');
-              dailyMixes = personalDaily;
+            const rawBYL = generateBecauseYouLike(artistAffinities, history, artistCache, topSongs);
+            becauseYouLike = rawBYL.filter(s => {
+              const artName = s.title.toLowerCase().trim();
+              if (globalArtistPool.has(artName)) return false;
+              globalArtistPool.add(artName);
+              return true;
+            });
 
-              const rawBYL = generateBecauseYouLike(artistAffinities, history, artistCache, topSongs);
-              becauseYouLike = rawBYL
-                .filter(s => {
-                  const artName = s.title.toLowerCase().trim();
-                  if (globalArtistPool.has(artName)) return false;
-                  globalArtistPool.add(artName);
-                  return true;
-                })
-                .slice(0, 2);
+            // Generate 7 Specialized Recommendation Models
+            const madeForYouSeed = generateMadeForYou(trackAffinities, history, artistAffinities, artistCache);
+            const onRepeatSeed = generateOnRepeat(history, trackAffinities);
+            const repeatRewindSeed = generateRepeatRewind(history, trackAffinities);
+            const discoverWeeklySeed = generateDiscoverWeekly(history, artistAffinities);
+            const deepCutsSeed = generateDeepCuts(history, artistAffinities, artistCache);
+            const timeMixSeed = generateContextualTimeMix(history, analytics.activeHoursMap);
 
-              trendingForYou = null;
-            } else {
-              // Tier 3 or 4: Full Personalization / Advanced Taste Engine
-              console.log(`[CurationStore] Full Personalization active (Tier ${historyLength > 100 ? 4 : 3}).`);
-              dailyMixes = personalDaily;
+            madeForYou = [
+              madeForYouSeed,
+              ...(onRepeatSeed ? [onRepeatSeed] : []),
+              ...(repeatRewindSeed ? [repeatRewindSeed] : []),
+              discoverWeeklySeed,
+              deepCutsSeed,
+              timeMixSeed,
+            ];
 
-              const rawBYL = generateBecauseYouLike(artistAffinities, history, artistCache, topSongs);
-              becauseYouLike = rawBYL.filter(s => {
-                const artName = s.title.toLowerCase().trim();
-                if (globalArtistPool.has(artName)) return false;
-                globalArtistPool.add(artName);
-                return true;
-              });
-
-              // Generate 7 Specialized Recommendation Models
-              const madeForYouSeed = generateMadeForYou(trackAffinities, history, artistAffinities, artistCache);
-              const onRepeatSeed = generateOnRepeat(history, trackAffinities);
-              const repeatRewindSeed = generateRepeatRewind(history, trackAffinities);
-              const discoverWeeklySeed = generateDiscoverWeekly(history, artistAffinities);
-              const deepCutsSeed = generateDeepCuts(history, artistAffinities, artistCache);
-              const timeMixSeed = generateContextualTimeMix(history, analytics.activeHoursMap);
-
-              madeForYou = [
-                madeForYouSeed,
-                ...(onRepeatSeed ? [onRepeatSeed] : []),
-                ...(repeatRewindSeed ? [repeatRewindSeed] : []),
-                discoverWeeklySeed,
-                deepCutsSeed,
-                timeMixSeed,
-              ];
-
-              // Determine Featured Hero Mix based on context and listening intensity
-              const hour = new Date().getHours();
-              let heroMixCandidate: RecommendationSeed = timeMixSeed;
-              if (hour >= 22 || hour < 4) {
-                heroMixCandidate = timeMixSeed;
-              } else if (onRepeatSeed && onRepeatSeed.tracks && onRepeatSeed.tracks.length > 0) {
-                heroMixCandidate = onRepeatSeed;
-              } else if (madeForYouSeed && madeForYouSeed.tracks && madeForYouSeed.tracks.length > 0) {
-                heroMixCandidate = madeForYouSeed;
-              } else if (personalDaily.length > 0) {
-                heroMixCandidate = personalDaily[0];
-              }
-
-              // Track Deduplication Loops protection
-              const rawRecentlyLoved = generateRecentlyLoved(history, trackAffinities);
-              recentlyLoved = rawRecentlyLoved.filter(s => {
-                if (globalTrackPool.has(s.id)) return false;
-                globalTrackPool.add(s.id);
-                return true;
-              });
-
-              const rawRediscover = generateRediscover(history);
-              rediscover = rawRediscover.filter(s => !globalTrackPool.has(s.id));
+            // Determine Featured Hero Mix based on context and listening intensity
+            const hour = new Date().getHours();
+            let heroMixCandidate: RecommendationSeed = timeMixSeed;
+            if (hour >= 22 || hour < 4) {
+              heroMixCandidate = timeMixSeed;
+            } else if (onRepeatSeed && onRepeatSeed.tracks && onRepeatSeed.tracks.length > 0) {
+              heroMixCandidate = onRepeatSeed;
+            } else if (madeForYouSeed && madeForYouSeed.tracks && madeForYouSeed.tracks.length > 0) {
+              heroMixCandidate = madeForYouSeed;
+            } else if (personalDaily.length > 0) {
+              heroMixCandidate = personalDaily[0];
             }
+
+            // Track Deduplication Loops protection
+            const rawRecentlyLoved = generateRecentlyLoved(history, trackAffinities);
+            recentlyLoved = rawRecentlyLoved.filter(s => {
+              if (globalTrackPool.has(s.id)) return false;
+              globalTrackPool.add(s.id);
+              return true;
+            });
+
+            const rawRediscover = generateRediscover(history);
+            rediscover = rawRediscover.filter(s => !globalTrackPool.has(s.id));
 
             // Generate Hidden Gems & Forgotten Favorites
             const excludeTrackIds = new Set<string>();
@@ -472,13 +567,22 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             forgottenFavorites = generateForgottenFavorites(trackAffinities, history, state.forgottenFavoritesShownAt || {});
           }
 
-          // Caching trending playlist seeds
+          // Caching trending playlist seeds with real artwork preservation
+          const prevTrending = state.trendingSeeds || [];
+          const findPrevArt = (id: string, title: string) => {
+            const match = prevTrending.find(t => t.id === id);
+            if (match?.image && !match.image.startsWith('aura://') && !match.image.includes('placeholder')) {
+              return match.image;
+            }
+            return resolveArtwork({ type: 'playlist', id, title } as any, 'album');
+          };
+
           const trendingSeeds: TrendingSeed[] = [
             {
               type: 'playlist',
               id: 'trending-global',
               title: 'Global Top Hits',
-              image: 'aura://generated?name=Global%20Top%20Hits&type=playlist',
+              image: findPrevArt('trending-global', 'Global Top Hits'),
               source: 'global',
               fetchedAt: Date.now(),
             },
@@ -486,8 +590,16 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               type: 'playlist',
               id: 'trending-india',
               title: 'Trending in India',
-              image: 'aura://generated?name=Trending%20in%20India&type=playlist',
+              image: findPrevArt('trending-india', 'Trending in India'),
               source: 'india',
+              fetchedAt: Date.now(),
+            },
+            {
+              type: 'playlist',
+              id: 'trending-synthwave',
+              title: 'Synthwave & Chill',
+              image: findPrevArt('trending-synthwave', 'Synthwave & Chill'),
+              source: 'global',
               fetchedAt: Date.now(),
             }
           ];
@@ -559,6 +671,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             topSongs,
             topArtists,
             
+            readiness,
             listeningDNA,
             tasteSnapshots: updatedSnapshots,
             tasteDriftLevel,
@@ -593,6 +706,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           hiddenGems: [],
           forgottenFavorites: [],
           forgottenFavoritesShownAt: {},
+          readiness: null,
           listeningDNA: null,
           tasteSnapshots: [],
           tasteDriftLevel: 'none',
@@ -602,19 +716,6 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           generatedAt: null,
           lastRecommendationBuild: null,
         });
-      },
-
-      refreshTrendingIfNeeded: () => {
-        const state = get();
-        const now = Date.now();
-        const sixHours = 6 * 60 * 60 * 1000;
-        
-        // If trendingSeeds is empty or fetchedAt was more than 6 hours ago, rebuild
-        const firstSeed = state.trendingSeeds[0];
-        if (!firstSeed || now - firstSeed.fetchedAt > sixHours) {
-          console.log('[RecommendationsStore] Refreshing trending seeds due to 6-hour TTL expiration.');
-          state.generateRecommendations();
-        }
       },
 
       registerRecommendationShown: (seedId: string) => {
@@ -771,36 +872,132 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
         }
 
         return queue;
+      },
+
+      refreshTrendingIfNeeded: async () => {
+        const state = get();
+        const currentTrending = state.trendingSeeds || [];
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        const lastFetched = currentTrending[0]?.fetchedAt || 0;
+        const hasRealImages = currentTrending.length >= 3 && currentTrending.every(s => s.image && !s.image.startsWith('aura://'));
+        if (Date.now() - lastFetched < oneDayMs && hasRealImages) {
+          return;
+        }
+
+        try {
+          const globalCover = await resolveTrendingCoverAsync('Top Global Hits', { type: 'playlist', id: 'trending-global', title: 'Global Top Hits' } as any);
+          const indiaCover = await resolveTrendingCoverAsync('Top Hindi Songs', { type: 'playlist', id: 'trending-india', title: 'Trending in India' } as any);
+          const synthwaveCover = await resolveTrendingCoverAsync('Synthwave Chill', { type: 'playlist', id: 'trending-synthwave', title: 'Synthwave & Chill' } as any);
+
+          set({
+            trendingSeeds: [
+              {
+                type: 'playlist',
+                id: 'trending-global',
+                title: 'Global Top Hits',
+                image: globalCover,
+                source: 'global',
+                fetchedAt: Date.now(),
+              },
+              {
+                type: 'playlist',
+                id: 'trending-india',
+                title: 'Trending in India',
+                image: indiaCover,
+                source: 'india',
+                fetchedAt: Date.now(),
+              },
+              {
+                type: 'playlist',
+                id: 'trending-synthwave',
+                title: 'Synthwave & Chill',
+                image: synthwaveCover,
+                source: 'global',
+                fetchedAt: Date.now(),
+              }
+            ]
+          });
+        } catch (e) {
+          console.warn('[RecommendationsStore] Error refreshing trending covers:', e);
+        }
+      },
+
+      startPeriodicPreload: () => {
+        if (preloadSubscriptionInitialized) return;
+        preloadSubscriptionInitialized = true;
+
+        const checkAndPreload = async () => {
+          const state = get();
+          const lastBuild = state.lastRecommendationBuild || 0;
+          const fifteenMinutes = 15 * 60 * 1000;
+          if (Date.now() - lastBuild > fifteenMinutes) {
+            console.log('[RecommendationsStore] Preload trigger: recommendations stale (>15m). Refreshing...');
+            await state.generateRecommendations();
+            state.refreshTrendingIfNeeded();
+          }
+        };
+
+        // 1. Initial preload on app mount
+        checkAndPreload();
+
+        // 2. React Native AppState listener: background -> active
+        try {
+          const { AppState } = require('react-native');
+          AppState.addEventListener('change', (nextAppState: string) => {
+            if (nextAppState === 'active') {
+              checkAndPreload();
+            }
+          });
+        } catch (e) {
+          console.warn('[RecommendationsStore] Failed to register AppState listener:', e);
+        }
       }
     }),
     {
-      name: 'aura-recommendations-s11',
+      name: 'aura-recommendations-s12',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
-        dailyMixes: state.dailyMixes,
-        madeForYou: state.madeForYou,
-        rediscover: state.rediscover,
-        becauseYouLike: state.becauseYouLike,
-        recentlyLoved: state.recentlyLoved,
-        trendingSeeds: state.trendingSeeds,
-        trendingForYou: state.trendingForYou,
-        topSongs: state.topSongs,
-        topArtists: state.topArtists,
-        hiddenGems: state.hiddenGems,
-        forgottenFavorites: state.forgottenFavorites,
-        forgottenFavoritesShownAt: state.forgottenFavoritesShownAt || {},
+        // Durable signals only — generated cards/mixes (dailyMixes, madeForYou, rediscover, etc.)
+        // are excluded from backup and freshly regenerated from restored history & affinities
         listeningDNA: state.listeningDNA,
         tasteSnapshots: state.tasteSnapshots,
         tasteDriftLevel: state.tasteDriftLevel,
         tasteDriftDetected: state.tasteDriftDetected,
         fatigueTracker: state.fatigueTracker,
         listeningEventsCountSinceBuild: state.listeningEventsCountSinceBuild,
-        generatedAt: state.generatedAt,
         lastRecommendationBuild: state.lastRecommendationBuild,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           state.isHydrated = true;
+
+          // Cleanse legacy aura:// placeholders from trendingSeeds
+          if (Array.isArray(state.trendingSeeds)) {
+            state.trendingSeeds = state.trendingSeeds.map((s) => {
+              if (!s.image || s.image.startsWith('aura://')) {
+                const fallbackImg = s.id === 'trending-global'
+                  ? 'https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg'
+                  : s.id === 'trending-india'
+                  ? 'https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg'
+                  : 'https://i.ytimg.com/vi/4xDzrJKXOOY/hqdefault.jpg';
+                return { ...s, image: fallbackImg };
+              }
+              return s;
+            });
+          }
+
+          // Cleanse legacy aura:// placeholders from dailyMixes and madeForYou
+          const cleanseList = (list: any[]) => (list || []).map((seed: any) => {
+            if (seed.image && seed.image.startsWith('aura://')) {
+              const trackArt = seed.tracks?.[0]?.art || seed.tracks?.[0]?.artwork;
+              if (trackArt && !trackArt.startsWith('aura://')) {
+                return { ...seed, image: trackArt };
+              }
+            }
+            return seed;
+          });
+          state.dailyMixes = cleanseList(state.dailyMixes);
+          state.madeForYou = cleanseList(state.madeForYou);
         }
       },
     }

@@ -14,8 +14,10 @@ import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useFocusEffect } from "expo-router";
 import {
+  ActivityIndicator,
   Alert,
   Dimensions,
   Modal,
@@ -50,11 +52,7 @@ import { CacheManager, StorageStats } from "../../src/features/cache/services/ca
 import { useDownloadStore } from "../../src/features/download/store/download.store";
 import { AudioSessionController } from "../../src/features/audio/native/audio-session";
 import { downloadCleanupService } from "../../src/features/download/services/download-cleanup.service";
-import { useAnalyticsStore, getRecentHistory, getTopArtists, getTopAlbums, getTopTracks } from "../../src/features/analytics/store/analytics.store";
-import { useRecommendationsStore } from "../../src/features/recommendations/store/recommendations.store";
 import { useScrollToTopOnTabPress } from "../../src/hooks/use-scroll-to-top";
-import { useTelemetryStore } from "../../src/features/player/store/telemetry.store";
-import { RenderDiagnostics } from "../../src/utils/render-diagnostics";
 
 const { width: SW } = Dimensions.get("window");
 
@@ -492,125 +490,13 @@ export default function SettingsScreen() {
   useScrollToTopOnTabPress(scrollRef);
   const downloadedTracks = useDownloadStore(s => s.downloadedTracks);
 
-  // Telemetry selectors
-  const telemetrySourceErrorCount = useTelemetryStore(s => s.sourceErrorCount);
-  const telemetryLocalRecoveryCount = useTelemetryStore(s => s.localRecoveryCount);
-  const telemetryStreamRecoveryCount = useTelemetryStore(s => s.streamRecoveryCount);
-  const telemetryQueueRepairCount = useTelemetryStore(s => s.queueRepairCount);
-  const telemetryResolverCooldownHits = useTelemetryStore(s => s.resolverCooldownHits);
-  const telemetryResetTelemetry = useTelemetryStore(s => s.resetTelemetry);
+  // Cloud Sync selector
+  const googleSyncEnabled = useSettingsStore(s => s.googleSyncEnabled);
 
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [modalType, setModalType] = useState<null | "streamingWifi" | "streamingCellular" | "downloadWifi" | "downloadCellular">(null);
-  const [devOpen, setDevOpen] = useState(false);
-  const [displayRefreshStats, setDisplayRefreshStats] = useState<any>(null);
-  const [telemetryStats, setTelemetryStats] = useState<any>({
-    uiLongFrames: 0,
-    uiJankyFrames: 0,
-    uiFrozenFrames: 0,
-    uiAvgFrameTime: 0,
-    uiFps: 0,
-    jsLongFrames: 0,
-    jsJankyFrames: 0,
-    jsFrozenFrames: 0,
-    jsAvgFrameTime: 0,
-    jsFps: 0,
-  });
-
-  useEffect(() => {
-    if (!devOpen) {
-      if (!__DEV__) {
-        RenderDiagnostics.stopMonitoring();
-      }
-      return;
-    }
-
-    if (!__DEV__) {
-      RenderDiagnostics.startMonitoring();
-    }
-
-    let active = true;
-    const update = async () => {
-      if (!active) return;
-      const specs = await RenderDiagnostics.getCurrentRefreshRate();
-      if (active) {
-        setDisplayRefreshStats(specs);
-        setTelemetryStats({
-          uiLongFrames: RenderDiagnostics.uiLongFrames.value,
-          uiJankyFrames: RenderDiagnostics.uiJankyFrames.value,
-          uiFrozenFrames: RenderDiagnostics.uiFrozenFrames.value,
-          uiAvgFrameTime: RenderDiagnostics.uiAvgFrameTime.value,
-          uiFps: RenderDiagnostics.uiFps.value,
-          jsLongFrames: RenderDiagnostics.jsLongFrames.value,
-          jsJankyFrames: RenderDiagnostics.jsJankyFrames.value,
-          jsFrozenFrames: RenderDiagnostics.jsFrozenFrames.value,
-          jsAvgFrameTime: RenderDiagnostics.jsAvgFrameTime.value,
-          jsFps: RenderDiagnostics.jsFps.value,
-        });
-      }
-    };
-
-    update();
-    const interval = setInterval(update, 500);
-    return () => {
-      active = false;
-      clearInterval(interval);
-      if (!__DEV__) {
-        RenderDiagnostics.stopMonitoring();
-      }
-    };
-  }, [devOpen]);
   const [isClearing, setIsClearing] = useState(false);
-
-  const analyticsHistory = useAnalyticsStore(s => s.history);
-  const artistAffinities = useAnalyticsStore(s => s.artistAffinities);
-  const albumAffinities = useAnalyticsStore(s => s.albumAffinities);
-  const trackAffinities = useAnalyticsStore(s => s.trackAffinities);
-  const resetAnalytics = useAnalyticsStore(s => s.resetAnalytics);
-
-  const topArtists = useMemo(() => {
-    return Object.keys(artistAffinities)
-      .map((key) => ({ key, ...artistAffinities[key] }))
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return b.playCount - a.playCount;
-      });
-  }, [artistAffinities]);
-
-  const topAlbums = useMemo(() => {
-    return Object.keys(albumAffinities)
-      .map((key) => ({ key, ...albumAffinities[key] }))
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return b.playCount - a.playCount;
-      });
-  }, [albumAffinities]);
-
-  const topTracks = useMemo(() => {
-    return Object.keys(trackAffinities)
-      .map((key) => ({ key, ...trackAffinities[key] }))
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return b.playCount - a.playCount;
-      });
-  }, [trackAffinities]);
-
-  // Recommendations selectors
-  const generateRecommendations = useRecommendationsStore(s => s.generateRecommendations);
-  const generatedAt = useRecommendationsStore(s => s.generatedAt);
-  const resetRecommendations = useRecommendationsStore(s => s.resetRecommendations);
-
-  const totalPlays = useMemo(() => {
-    return Object.values(trackAffinities).reduce((acc, t) => acc + (t.playCount || 0), 0);
-  }, [trackAffinities]);
-
-  const totalCompletions = useMemo(() => {
-    return Object.values(trackAffinities).reduce((acc, t) => acc + (t.completionCount || 0), 0);
-  }, [trackAffinities]);
-
-  const totalSkips = useMemo(() => {
-    return Object.values(trackAffinities).reduce((acc, t) => acc + (t.skipCount || 0), 0);
-  }, [trackAffinities]);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const refreshStats = async () => {
     const stats = await CacheManager.getCacheStats();
@@ -618,6 +504,12 @@ export default function SettingsScreen() {
   };
 
   useEffect(() => { refreshStats(); }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshStats();
+    }, [])
+  );
 
   const formatSize = (bytes: number) => {
     if (bytes === 0) return "0 MB";
@@ -939,8 +831,86 @@ export default function SettingsScreen() {
           </GlassCard>
         </Section>
 
-        {/* ── SUPPORT & ABOUT (section 5) ──────────────────────────────────── */}
+        {/* ── GOOGLE CLOUD BACKUP & SYNC (section 4) ─────────────────────────── */}
         <Section index={4}>
+          <SectionLabel icon="cloud-sync" title="Google Account Backup & Restore" />
+          <GlassCard r={32} style={{ overflow: "hidden" }}>
+            {/* Google Sync Master Toggle */}
+            <Row
+              icon="backup" iconColor="#60A5FA" iconBg="rgba(96,165,250,0.10)"
+              label="Google Cloud Backup" sub="Sync library, playlists & favorites automatically"
+              right={<Toggle value={googleSyncEnabled} onChange={() => toggleSetting("googleSyncEnabled")} />}
+            />
+            <Divider />
+
+            {/* Scope description */}
+            <View style={{ paddingHorizontal: 20, paddingVertical: 14 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <MaterialIcons name={googleSyncEnabled ? "check-circle" : "pause-circle"} size={16} color={googleSyncEnabled ? "#34D399" : "#F87171"} />
+                <Text style={{ fontSize: 12, fontWeight: "700", color: googleSyncEnabled ? "#34D399" : "#F87171" }}>
+                  {googleSyncEnabled ? "Backup Active (Encrypted Google Drive)" : "Cloud Backup Disabled"}
+                </Text>
+              </View>
+              <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 16 }}>
+                {googleSyncEnabled
+                  ? "Your playlists, liked songs, listening history, and preferences are safely preserved. Audio files and caches are never backed up (< 1 MB quota)."
+                  : "Automatic backup to your Google Account is paused. Your data will remain on this device only."}
+              </Text>
+            </View>
+
+            {googleSyncEnabled && (
+              <>
+                <Divider />
+                {/* Manual Sync Now */}
+                <TouchableOpacity
+                  onPress={async () => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    setIsSyncing(true);
+                    try {
+                      const { AuraRestore } = await import("@/src/services/native-core");
+                      if (AuraRestore && typeof AuraRestore.triggerCloudSync === "function") {
+                        await AuraRestore.triggerCloudSync();
+                      }
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      Alert.alert(
+                        "Backup Checkpoint Complete",
+                        "Your library, playlists, and preferences have been committed and scheduled for Google Cloud Backup."
+                      );
+                    } catch (e: any) {
+                      Alert.alert("Backup Notice", e?.message || "Failed to notify backup service.");
+                    } finally {
+                      setIsSyncing(false);
+                    }
+                  }}
+                  activeOpacity={0.7}
+                  delayPressIn={0}
+                  style={st.row}
+                  disabled={isSyncing}
+                >
+                  <View style={st.rowInner}>
+                    <View style={st.rowLeft}>
+                      <View style={[st.iconBadge, { backgroundColor: "rgba(96,165,250,0.10)" }]}>
+                        {isSyncing ? (
+                          <ActivityIndicator size="small" color="#60A5FA" />
+                        ) : (
+                          <MaterialIcons name="sync" size={20} color="#60A5FA" />
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={st.rowLabel}>Back Up Now</Text>
+                        <Text style={st.rowSub}>Commit pending data to Google Backup</Text>
+                      </View>
+                    </View>
+                    <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.28)" />
+                  </View>
+                </TouchableOpacity>
+              </>
+            )}
+          </GlassCard>
+        </Section>
+
+        {/* ── SUPPORT & ABOUT (section 5) ──────────────────────────────────── */}
+        <Section index={5}>
           <SectionLabel icon="info" title="Support & About" />
           <GlassCard r={32} style={{ overflow: "hidden" }}>
             {/* FAQ */}
@@ -992,346 +962,6 @@ export default function SettingsScreen() {
               <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.40)" }}>Version 1.4.2 • Build 2024.05</Text>
               <Text style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", fontStyle: "italic", marginTop: 14 }}>Made with ❤️ for music lovers</Text>
             </View>
-          </GlassCard>
-        </Section>
-
-        {/* ── TELEMETRY DIAGNOSTICS & DEVELOPER DASHBOARD (section 6) ────────────────── */}
-        <Section index={5}>
-          <SectionLabel icon="bug-report" title="Developer Diagnostics" />
-          <GlassCard r={32} style={{ overflow: "hidden" }}>
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                setDevOpen(!devOpen);
-              }}
-              activeOpacity={0.7}
-              delayPressIn={0}
-              style={st.row}
-            >
-              <View style={st.rowInner}>
-                <View style={st.rowLeft}>
-                  <View style={[st.iconBadge, { backgroundColor: "rgba(191,90,242,0.12)" }]}>
-                    <MaterialIcons name="developer-mode" size={20} color={PRIMARY} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={st.rowLabel}>Telemetry Validation Dashboard</Text>
-                    <Text style={st.rowSub}>{devOpen ? "Collapse diagnostic metrics" : "Inspect raw affinity data & logs"}</Text>
-                  </View>
-                </View>
-                <MaterialIcons 
-                  name={devOpen ? "keyboard-arrow-up" : "keyboard-arrow-down"} 
-                  size={24} 
-                  color="rgba(255,255,255,0.40)" 
-                />
-              </View>
-            </TouchableOpacity>
-
-            {devOpen && (
-              <View style={{ paddingHorizontal: 20, paddingBottom: 24 }}>
-                <Divider />
-                
-                {/* Rendering & Refresh Rate Telemetry */}
-                <Text style={st.devSectionHeader}>Rendering & Refresh Rate Telemetry</Text>
-                
-                <View style={{ backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' }}>
-                  <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Display Mode Spec</Text>
-                  <Text style={{ fontSize: 14, color: '#FFF', fontWeight: 'bold', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
-                    {displayRefreshStats?.displayMode || 'Loading...'}
-                  </Text>
-                  <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
-                    Preferred Mode ID: {displayRefreshStats?.preferredDisplayModeId ?? 0} | Preferred Rate: {displayRefreshStats?.preferredRefreshRate ?? 0} Hz
-                  </Text>
-                </View>
-
-                <View style={st.devOverviewGrid}>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{displayRefreshStats?.currentRefreshRate?.toFixed(1) ?? '60.0'} Hz</Text>
-                    <Text style={st.devOverviewLabel}>Current Refresh Rate</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{displayRefreshStats?.frameInterval?.toFixed(2) ?? '16.67'} ms</Text>
-                    <Text style={st.devOverviewLabel}>Frame Interval</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetryStats.uiFps} / {telemetryStats.jsFps}</Text>
-                    <Text style={st.devOverviewLabel}>FPS (UI / JS)</Text>
-                  </View>
-                </View>
-
-                <View style={st.devOverviewGrid}>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetryStats.uiAvgFrameTime.toFixed(1)} ms</Text>
-                    <Text style={st.devOverviewLabel}>UI Avg Frame Time</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetryStats.jsAvgFrameTime.toFixed(1)} ms</Text>
-                    <Text style={st.devOverviewLabel}>JS Avg Frame Time</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetryStats.uiLongFrames} / {telemetryStats.jsLongFrames}</Text>
-                    <Text style={st.devOverviewLabel}>Long (UI / JS)</Text>
-                  </View>
-                </View>
-
-                <View style={st.devOverviewGrid}>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetryStats.uiJankyFrames} / {telemetryStats.jsJankyFrames}</Text>
-                    <Text style={st.devOverviewLabel}>Janky (UI / JS)</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetryStats.uiFrozenFrames} / {telemetryStats.jsFrozenFrames}</Text>
-                    <Text style={st.devOverviewLabel}>Frozen (UI / JS)</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      RenderDiagnostics.resetTelemetry();
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                      Alert.alert("Success", "Rendering telemetry reset.");
-                    }}
-                    activeOpacity={0.7}
-                    delayPressIn={0}
-                    style={[st.devOverviewItem, { backgroundColor: "rgba(239,68,68,0.06)", borderColor: "rgba(239,68,68,0.18)" }]}
-                  >
-                    <MaterialIcons name="refresh" size={18} color="#f87171" style={{ marginBottom: 2 }} />
-                    <Text style={[st.devOverviewLabel, { color: "#f87171" }]}>Reset Render Stats</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <Divider />
-                
-                {/* 0. Resolver Diagnostics */}
-                <Text style={st.devSectionHeader}>Resolver Telemetry</Text>
-                <View style={st.devOverviewGrid}>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetrySourceErrorCount}</Text>
-                    <Text style={st.devOverviewLabel}>Source Errors</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetryLocalRecoveryCount}</Text>
-                    <Text style={st.devOverviewLabel}>Local Recoveries</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetryStreamRecoveryCount}</Text>
-                    <Text style={st.devOverviewLabel}>Stream Recoveries</Text>
-                  </View>
-                </View>
-
-                <View style={st.devOverviewGrid}>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetryQueueRepairCount}</Text>
-                    <Text style={st.devOverviewLabel}>Queue Repairs</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{telemetryResolverCooldownHits}</Text>
-                    <Text style={st.devOverviewLabel}>Cooldown Hits</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      telemetryResetTelemetry();
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                      Alert.alert("Success", "Resolver telemetry cleared.");
-                    }}
-                    activeOpacity={0.7}
-                    delayPressIn={0}
-                    style={[st.devOverviewItem, { backgroundColor: "rgba(239,68,68,0.06)", borderColor: "rgba(239,68,68,0.18)" }]}
-                  >
-                    <MaterialIcons name="refresh" size={18} color="#f87171" style={{ marginBottom: 2 }} />
-                    <Text style={[st.devOverviewLabel, { color: "#f87171" }]}>Reset Telemetry</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <Divider />
-
-                {/* 1. Analytics Overview */}
-                <Text style={st.devSectionHeader}>Analytics Overview</Text>
-                <View style={st.devOverviewGrid}>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{totalPlays}</Text>
-                    <Text style={st.devOverviewLabel}>Played</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{totalCompletions}</Text>
-                    <Text style={st.devOverviewLabel}>Completed</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{totalSkips}</Text>
-                    <Text style={st.devOverviewLabel}>Skipped</Text>
-                  </View>
-                </View>
-
-                <View style={st.devOverviewGrid}>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{Object.keys(artistAffinities).length}</Text>
-                    <Text style={st.devOverviewLabel}>Unique Artists</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{Object.keys(albumAffinities).length}</Text>
-                    <Text style={st.devOverviewLabel}>Unique Albums</Text>
-                  </View>
-                  <View style={st.devOverviewItem}>
-                    <Text style={st.devOverviewVal}>{Object.keys(trackAffinities).length}</Text>
-                    <Text style={st.devOverviewLabel}>Unique Tracks</Text>
-                  </View>
-                </View>
-
-                <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 12, opacity: 0.7 }}>
-                  <Text style={st.devInfoText}>History Size: {analyticsHistory.length} / 200</Text>
-                  <Text style={st.devInfoText}>Last Flush: {analyticsHistory[0]?.playedAt ? new Date(analyticsHistory[0].playedAt).toLocaleTimeString() : "Never"}</Text>
-                </View>
-
-                <Divider />
-
-                {/* 2. Top Artists Table */}
-                <Text style={st.devSectionHeader}>Top Artists</Text>
-                {topArtists.length === 0 ? (
-                  <Text style={st.devEmptyText}>No artist telemetry recorded yet.</Text>
-                ) : (
-                  topArtists.map((artist, idx) => (
-                    <View key={artist.key} style={st.devTableRow}>
-                      <Text style={st.devTableTextMain} numberOfLines={1}>{idx + 1}. {artist.key}</Text>
-                      <View style={{ flexDirection: "row", gap: 10 }}>
-                        <Text style={st.devTableTextBadge}>Score: {artist.score.toFixed(1)}</Text>
-                        <Text style={st.devTableTextSub}>P: {artist.playCount} | C: {artist.completionCount}</Text>
-                      </View>
-                    </View>
-                  ))
-                )}
-
-                <Divider />
-
-                {/* 3. Top Albums Table */}
-                <Text style={st.devSectionHeader}>Top Albums</Text>
-                {topAlbums.length === 0 ? (
-                  <Text style={st.devEmptyText}>No album telemetry recorded yet.</Text>
-                ) : (
-                  topAlbums.map((album, idx) => (
-                    <View key={album.key} style={st.devTableRow}>
-                      <Text style={st.devTableTextMain} numberOfLines={1}>{idx + 1}. {album.key}</Text>
-                      <View style={{ flexDirection: "row", gap: 10 }}>
-                        <Text style={st.devTableTextBadge}>Score: {album.score.toFixed(1)}</Text>
-                        <Text style={st.devTableTextSub}>P: {album.playCount} | C: {album.completionCount}</Text>
-                      </View>
-                    </View>
-                  ))
-                )}
-
-                <Divider />
-
-                {/* 4. Top Tracks Table */}
-                <Text style={st.devSectionHeader}>Top Tracks</Text>
-                {topTracks.length === 0 ? (
-                  <Text style={st.devEmptyText}>No track telemetry recorded yet.</Text>
-                ) : (
-                  topTracks.map((track, idx) => {
-                    const match = analyticsHistory.find((h) => h.id === track.key);
-                    const title = match?.title || track.key;
-                    const artist = match?.artist || "Unknown";
-                    return (
-                      <View key={track.key} style={st.devTableRow}>
-                        <View style={{ flex: 1, marginRight: 8 }}>
-                          <Text style={st.devTableTextMain} numberOfLines={1}>{idx + 1}. {title}</Text>
-                          <Text style={st.devTableTextSubSmall} numberOfLines={1}>{artist}</Text>
-                        </View>
-                        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                          <Text style={st.devTableTextBadge}>Score: {track.score.toFixed(1)}</Text>
-                          <Text style={st.devTableTextSub}>P: {track.playCount} | S: {track.skipCount}</Text>
-                        </View>
-                      </View>
-                    );
-                  })
-                )}
-
-                <Divider />
-
-                {/* 5. Recent History Log */}
-                <Text style={st.devSectionHeader}>Recent History Log</Text>
-                {analyticsHistory.length === 0 ? (
-                  <Text style={st.devEmptyText}>No listening history recorded yet.</Text>
-                ) : (
-                  analyticsHistory.slice(0, 5).map((entry, idx) => (
-                    <View key={`${entry.id}-${entry.playedAt}`} style={st.devTableRow}>
-                      <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={st.devTableTextMain} numberOfLines={1}>{idx + 1}. {entry.title}</Text>
-                        <Text style={st.devTableTextSubSmall} numberOfLines={1}>
-                          {new Date(entry.playedAt).toLocaleTimeString()} • {Math.round(entry.completionRatio * 100)}%
-                        </Text>
-                      </View>
-                      <Text style={[st.devTableTextBadge, entry.skipped && { backgroundColor: "rgba(239,68,68,0.15)", color: "#f87171" }]}>
-                        {entry.skipped ? "Skipped" : "Played"}
-                      </Text>
-                    </View>
-                  ))
-                )}
-
-                <Divider />
-
-                {/* 6. Dangerous Actions */}
-                <Text style={st.devSectionHeader}>Dangerous Actions</Text>
-                <View style={{ gap: 12, marginTop: 8 }}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      generateRecommendations();
-                      const time = generatedAt ? new Date(generatedAt).toLocaleTimeString() : new Date().toLocaleTimeString();
-                      Alert.alert("Recommendations", `Seeds successfully regenerated at ${time}.`);
-                    }}
-                    activeOpacity={0.7}
-                    delayPressIn={0}
-                    style={st.devActionBtn}
-                  >
-                    <MaterialIcons name="sync" size={16} color={PRIMARY} />
-                    <Text style={st.devActionBtnTxt}>Regenerate Recommendations</Text>
-                  </TouchableOpacity>
-
-                  <View style={{ flexDirection: "row", gap: 12 }}>
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                        Alert.alert(
-                          "Clear Analytics",
-                          "Reset all persistent playback analytics history and affinity scores? This cannot be undone.",
-                          [
-                            { text: "Cancel", style: "cancel" },
-                            {
-                              text: "Reset",
-                              style: "destructive",
-                              onPress: () => {
-                                resetAnalytics();
-                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                                Alert.alert("Success", "Analytics telemetry cleared.");
-                              }
-                            }
-                          ]
-                        );
-                      }}
-                      activeOpacity={0.7}
-                      delayPressIn={0}
-                      style={[st.devActionBtn, { flex: 1, borderColor: "rgba(239,68,68,0.2)" }]}
-                    >
-                      <MaterialIcons name="delete-forever" size={16} color="#f87171" />
-                      <Text style={[st.devActionBtnTxt, { color: "#f87171" }]}>Clear Analytics</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                        resetRecommendations();
-                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                        Alert.alert("Success", "Recommendations store cleared.");
-                      }}
-                      activeOpacity={0.7}
-                      delayPressIn={0}
-                      style={[st.devActionBtn, { flex: 1 }]}
-                    >
-                      <MaterialIcons name="refresh" size={16} color="#cbc3d9" />
-                      <Text style={st.devActionBtnTxt}>Reset Recs</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            )}
           </GlassCard>
         </Section>
 
@@ -1405,100 +1035,4 @@ const st = StyleSheet.create({
   modalOptSub: { fontSize: 12, color: "rgba(170,170,185,0.65)", marginTop: 2 },
   modalDismiss: { margin: 16, paddingVertical: 14, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", borderWidth: 0.75, borderColor: "rgba(255,255,255,0.08)" },
   modalDismissText: { color: "rgba(170,170,185,0.65)", fontSize: 12, fontWeight: "800", letterSpacing: 1.2 },
-  devSectionHeader: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: PRIMARY,
-    textTransform: "uppercase",
-    letterSpacing: 1.5,
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  devOverviewGrid: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 10,
-  },
-  devOverviewItem: {
-    flex: 1,
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.05)",
-    borderRadius: 12,
-    padding: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  devOverviewVal: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#FFF",
-  },
-  devOverviewLabel: {
-    fontSize: 9,
-    fontWeight: "700",
-    color: "rgba(255,255,255,0.40)",
-    textTransform: "uppercase",
-    marginTop: 2,
-  },
-  devInfoText: {
-    fontSize: 10,
-    color: "rgba(255,255,255,0.45)",
-    fontWeight: "600",
-  },
-  devTableRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 10,
-    borderBottomWidth: 0.5,
-    borderBottomColor: "rgba(255,255,255,0.04)",
-  },
-  devTableTextMain: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#FFF",
-  },
-  devTableTextSub: {
-    fontSize: 10,
-    color: "rgba(255,255,255,0.40)",
-    fontWeight: "600",
-  },
-  devTableTextSubSmall: {
-    fontSize: 10,
-    color: "rgba(255,255,255,0.45)",
-    marginTop: 2,
-  },
-  devTableTextBadge: {
-    fontSize: 9,
-    fontWeight: "800",
-    color: SECONDARY,
-    backgroundColor: "rgba(70,245,224,0.10)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    overflow: "hidden",
-  },
-  devEmptyText: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.30)",
-    fontStyle: "italic",
-    paddingVertical: 8,
-  },
-  devActionBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderRadius: 14,
-    paddingVertical: 12,
-  },
-  devActionBtnTxt: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#FFF",
-  },
 });

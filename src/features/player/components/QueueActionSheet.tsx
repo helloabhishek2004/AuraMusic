@@ -42,6 +42,7 @@ import { palette, radius, spacing } from '@/src/design/tokens';
 import { useDownloadStore } from '../../download/store/download.store';
 import { DownloadManager } from '../../download/services/download.manager';
 import AddToPlaylistSheet from '@/src/features/playlist/components/AddToPlaylistSheet';
+import { useBackHandler, BackPriority } from '@/src/navigation/back';
 
 const { width: SW } = Dimensions.get('window');
 const isTablet = SW >= 768;
@@ -199,6 +200,16 @@ export const QueueActionSheet = ({
   trackIndex,
 }: QueueActionSheetProps) => {
   const insets = useSafeAreaInsets();
+
+  useBackHandler({
+    id: 'queue-action-sheet',
+    enabled: visible,
+    priority: BackPriority.ACTION_SHEET,
+    onBack: () => {
+      onClose();
+      return true;
+    },
+  });
 
   if (!visible || !track) return null;
 

@@ -49,13 +49,16 @@ interface AuraPlayerModuleInterface {
   resume(): void;
   seekTo(positionMs: number): void;
   saveTrackMetadata(id: string, title: string, artist: string, album: string | null, duration: number, artworkUrl: string | null): void;
-  skipNext(): void;
-  skipPrevious(): void;
+  saveTracksMetadata(tracks: Array<{ id: string; title: string; artist: string; album?: string | null; duration?: number; artworkUrl?: string | null; art?: string | null }>): void;
   setQueue(trackIds: string[]): void;
   setRepeatMode(mode: string): void;
   setVolume(volume: number): void;
   stop(): void;
   getState(): Promise<NativePlaybackState>;
+  clearNativeCache(): Promise<{ success: boolean; deletedBytes: number }>;
+  setStreamingQuality(quality: string): Promise<boolean>;
+  setCacheLimit(bytes: number): Promise<boolean>;
+  getAudioSessionId(): Promise<number>;
 }
 
 interface AuraYouTubeModuleInterface {
@@ -202,6 +205,15 @@ export interface NativeDownloadedTrack {
   contentLength: number;
 }
 
+export interface NativeStorageStats {
+  downloadsBytes: number;
+  songCacheBytes: number;
+  databaseBytes: number;
+  artworkCacheBytes: number;
+  asyncStorageBytes: number;
+  totalBytes: number;
+}
+
 interface AuraDownloadModuleInterface {
   startDownload(track: {
     id: string;
@@ -219,10 +231,56 @@ interface AuraDownloadModuleInterface {
   getDownloadState(trackId: string): Promise<NativeDownloadState>;
   isTrackDownloaded(trackId: string): Promise<boolean>;
   getDownloadedTracks(): Promise<NativeDownloadedTrack[]>;
+  getNativeStorageStats(): Promise<NativeStorageStats>;
+  clearAllDownloads(): Promise<{ success: boolean; deletedBytes: number }>;
+  setWifiOnly(wifiOnly: boolean): Promise<boolean>;
+  setDownloadQuality(quality: string): Promise<boolean>;
+  reconcileDownloads(): Promise<{
+    checkedCount: number;
+    repairedCount: number;
+    orphanedDownloadCount: number;
+    missingTrackIds: string[];
+  }>;
 }
 
 export const AuraDownload: AuraDownloadModuleInterface | null = isAndroid
   ? NativeModules.AuraDownloadModule
+  : null;
+
+// ─── Restore Module Types & Access ──────────────────────────────────
+
+export interface AuraRestoreModuleInterface {
+  isRestoredInstall(): Promise<{
+    isRestored: boolean;
+    isFreshInstall: boolean;
+    markerExists: boolean;
+    hasDurableData: boolean;
+  }>;
+  markInstallInitialized(): Promise<boolean>;
+  checkpointWal(): Promise<{
+    success: boolean;
+    busy?: number;
+    logPages?: number;
+    checkpointedPages?: number;
+    error?: string;
+  }>;
+  getRestoreDiagnostics(): Promise<{
+    dbExists: boolean;
+    dbBytes: number;
+    rkStorageExists: boolean;
+    rkStorageBytes: number;
+    markerExists: boolean;
+  }>;
+  setGoogleSyncEnabled(enabled: boolean): Promise<boolean>;
+  isGoogleSyncEnabled(): Promise<boolean>;
+  triggerCloudSync(): Promise<{
+    success: boolean;
+    timestamp: number;
+  }>;
+}
+
+export const AuraRestore: AuraRestoreModuleInterface | null = isAndroid
+  ? NativeModules.AuraRestoreModule
   : null;
 
 let _downloadEmitter: NativeEventEmitter | null = null;
@@ -251,5 +309,6 @@ export function onDownloadStateChanged(callback: (state: NativeDownloadState) =>
 export function isNativeCoreAvailable(): boolean {
   return isAndroid && !!NativeModules.AuraPlayerModule;
 }
+
 
 

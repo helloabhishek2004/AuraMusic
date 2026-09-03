@@ -3,7 +3,7 @@
     "name": "AuraMusic",
     "slug": "AuraMusic",
     "version": "1.0.0",
-    "orientation": "default",
+    "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "auramusic",
     "userInterfaceStyle": "automatic",
@@ -16,7 +16,7 @@
       }
     },
     "android": {
-      "allowBackup": false,
+      "allowBackup": true,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

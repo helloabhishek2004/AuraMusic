@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { useDownloadStore } from '../store/download.store';
 import { CacheManager } from '../../cache/services/cache-manager.service';
+import { AuraDownload } from '../../../services/native-core';
 import { Alert } from 'react-native';
 
 class DownloadCleanupService {
@@ -8,27 +9,26 @@ class DownloadCleanupService {
    * Clears ALL downloaded local audio files but preserves metadata and store structure.
    * This ensures songs remain in 'Downloaded' lists but marked as not local if desired,
    * or completely removed from 'Downloaded' while staying in 'Likes'.
+   * The user goal says "songs remain playable online".
    */
   async clearAllDownloads() {
     try {
       const store = useDownloadStore.getState();
       const downloadedIds = Object.keys(store.downloadedTracks);
-      
-      if (downloadedIds.length === 0) return { success: true, count: 0 };
 
-      // 1. Physical Cleanup
+      // 1. Native Media3 & Physical Cleanup
+      try {
+        if (AuraDownload && typeof AuraDownload.clearAllDownloads === 'function') {
+          await AuraDownload.clearAllDownloads();
+        }
+      } catch (e) {
+        console.warn('[Cleanup] Failed native clearAllDownloads:', e);
+      }
+
+      // 2. JS Legacy Directory Cleanup
       await CacheManager.clearAllDownloads();
 
-      // 2. Store Cleanup
-      // We keep the entries in downloadedTracks but we must mark them as no longer local
-      // Or we remove them from the DownloadStore but they stay in the LikesStore.
-      // The user goal says "songs remain playable online".
-      
-      const newDownloadedTracks = { ...store.downloadedTracks };
-      for (const id of downloadedIds) {
-        delete newDownloadedTracks[id];
-      }
-      
+      // 3. Store Cleanup
       useDownloadStore.setState({ 
         downloadedTracks: {},
         activeTasks: {},

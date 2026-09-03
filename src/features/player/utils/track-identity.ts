@@ -74,13 +74,23 @@ export function extractRawArtworkUrl(track: any): string {
 
   if (typeof track === 'string') {
     const trimmed = track.trim();
-    if (trimmed && trimmed !== 'null' && trimmed !== 'undefined' && !trimmed.includes('placeholder')) {
+    if (trimmed && trimmed !== 'null' && trimmed !== 'undefined' && !trimmed.includes('placeholder') && !trimmed.startsWith('aura://')) {
       return trimmed;
     }
     return "";
   }
 
-  // 1. Direct property check
+  // 1. If entity has constituent tracks (e.g. playlist / mix seed), prioritize top track's real artwork
+  if (track.tracks && Array.isArray(track.tracks) && track.tracks.length > 0) {
+    for (const t of track.tracks) {
+      const sub = extractRawArtworkUrl(t);
+      if (sub && !sub.startsWith('aura://') && !sub.includes('placeholder')) {
+        return sub;
+      }
+    }
+  }
+
+  // 2. Direct property check
   let url =
     track.art ||
     track.artwork ||
@@ -97,7 +107,12 @@ export function extractRawArtworkUrl(track: any): string {
     url = url.uri;
   }
 
-  // 2. Nested album metadata
+  // Discard aura:// or placeholder strings from direct properties
+  if (typeof url === 'string' && (url.startsWith('aura://') || url.includes('placeholder'))) {
+    url = "";
+  }
+
+  // 3. Nested album metadata
   if (!url && track.album && typeof track.album === 'object') {
     url =
       track.album.thumbnail ||
@@ -109,20 +124,23 @@ export function extractRawArtworkUrl(track: any): string {
     if (url && typeof url === 'object' && typeof url.uri === 'string') {
       url = url.uri;
     }
+    if (typeof url === 'string' && (url.startsWith('aura://') || url.includes('placeholder'))) {
+      url = "";
+    }
   }
 
-  // 3. Nested trackSnapshot
+  // 4. Nested trackSnapshot
   if (!url && track.trackSnapshot) {
     url = extractRawArtworkUrl(track.trackSnapshot);
   }
 
-  // 4. Thumbnails array (e.g. YouTube API format)
+  // 5. Thumbnails array (e.g. YouTube API format)
   if (!url && Array.isArray(track.thumbnails) && track.thumbnails.length > 0) {
     const sorted = [...track.thumbnails].sort((a: any, b: any) => (b.width || 0) - (a.width || 0));
     url = sorted[0]?.url;
   }
 
-  // 5. Thumbnails inside trackSnapshot
+  // 6. Thumbnails inside trackSnapshot
   if (!url && track.trackSnapshot && Array.isArray(track.trackSnapshot.thumbnails) && track.trackSnapshot.thumbnails.length > 0) {
     const sorted = [...track.trackSnapshot.thumbnails].sort((a: any, b: any) => (b.width || 0) - (a.width || 0));
     url = sorted[0]?.url;
@@ -131,7 +149,7 @@ export function extractRawArtworkUrl(track: any): string {
   if (typeof url !== 'string') return "";
   url = url.trim();
 
-  if (!url || url === 'undefined' || url === 'null') return "";
+  if (!url || url === 'undefined' || url === 'null' || url.startsWith('aura://') || url.includes('placeholder')) return "";
 
   // Protocol-relative URLs: //lh3.googleusercontent.com/... -> https://lh3.googleusercontent.com/...
   if (url.startsWith('//')) {
