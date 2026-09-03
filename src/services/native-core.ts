@@ -241,6 +241,12 @@ interface AuraDownloadModuleInterface {
     orphanedDownloadCount: number;
     missingTrackIds: string[];
   }>;
+  hydrateDownloads(): Promise<{
+    totalChecked: number;
+    artworkHydrated: number;
+    metadataHydrated: number;
+    repairedTracks: number;
+  }>;
 }
 
 export const AuraDownload: AuraDownloadModuleInterface | null = isAndroid

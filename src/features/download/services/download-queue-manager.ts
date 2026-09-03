@@ -19,22 +19,19 @@ export class DownloadQueueManager {
     if (AuraDownload) {
       try {
         await AuraDownload.reconcileDownloads();
-        const nativeTracks = await AuraDownload.getDownloadedTracks();
-        const downloadedMap: Record<string, DownloadedTrack> = {};
-        nativeTracks.forEach((t) => {
-          downloadedMap[t.id] = {
-            id: t.id,
-            url: `auramusic://track/${t.id}`,
-            title: t.title,
-            artist: t.artist,
-            art: t.artworkUrl || "",
-            localAudioPath: `auramusic://track/${t.id}`,
-            localArtPath: t.artworkUrl || "",
-            fileSize: t.contentLength || 0,
-            downloadedAt: t.downloadedAt || Date.now(),
-          };
-        });
-        useDownloadStore.setState({ downloadedTracks: downloadedMap });
+        await this.syncFromNative();
+        // Trigger non-blocking background hydration to heal missing artwork/metadata
+        this.triggerHydration();
+
+        // Listen for network reconnection to auto-heal missing items
+        try {
+          const NetInfo = require("@react-native-community/netinfo");
+          NetInfo.addEventListener((netState: any) => {
+            if (netState.isConnected && netState.isInternetReachable !== false) {
+              this.triggerHydration();
+            }
+          });
+        } catch (_) {}
       } catch (e) {
         console.warn("[DownloadQueueManager] Failed to sync native downloaded tracks:", e);
       }
@@ -53,17 +50,25 @@ export class DownloadQueueManager {
         if (state.stateName === "COMPLETED" || state.isDownloaded) {
           const task = s.activeTasks[state.trackId];
           const track = task?.track || { id: state.trackId, title: "Unknown", artist: "Unknown" };
+          const trackAny = track as any;
+          // == FIX #3b: Preserve full metadata in COMPLETED handler ==
           s.setDownloaded({
             id: state.trackId,
-            url: (track as any).url || `auramusic://track/${state.trackId}`,
+            url: trackAny.url || `auramusic://track/${state.trackId}`,
             title: track.title,
             artist: track.artist,
-            art: (track as any).art || (track as any).artwork || "",
+            art: trackAny.art || trackAny.artwork || trackAny.artworkUrl || "",
             localAudioPath: `auramusic://track/${state.trackId}`,
-            localArtPath: (track as any).art || (track as any).artwork || "",
+            localArtPath: trackAny.art || trackAny.artwork || trackAny.artworkUrl || "",
             fileSize: state.contentLength || state.bytesDownloaded || 0,
             downloadedAt: Date.now(),
+            // Preserved from original track object
+            album: trackAny.album || undefined,
+            albumId: trackAny.albumId || undefined,
+            artistId: trackAny.artistId || undefined,
+            duration: typeof trackAny.duration === 'number' && trackAny.duration > 0 ? trackAny.duration : undefined,
           });
+          // == END FIX #3b ==
           s.updateStatus(state.trackId, "completed");
         } else if (state.stateName === "DOWNLOADING") {
           s.updateStatus(state.trackId, "downloading");
@@ -282,6 +287,51 @@ export class DownloadQueueManager {
       }, delay);
     } else {
       console.log(`[QueueManager] Track ${trackId} failed permanently after 3 attempts.`);
+    }
+  }
+
+  static async syncFromNative() {
+    const { AuraDownload } = await import("@/src/services/native-core");
+    if (!AuraDownload) return;
+    try {
+      const nativeTracks = await AuraDownload.getDownloadedTracks();
+      const downloadedMap: Record<string, DownloadedTrack> = {};
+      nativeTracks.forEach((t) => {
+        const nativeAny = t as any;
+        downloadedMap[t.id] = {
+          id: t.id,
+          url: `auramusic://track/${t.id}`,
+          title: t.title,
+          artist: t.artist,
+          art: t.artworkUrl || "",
+          localAudioPath: `auramusic://track/${t.id}`,
+          localArtPath: t.artworkUrl || "",
+          fileSize: t.contentLength || 0,
+          downloadedAt: t.downloadedAt || Date.now(),
+          album: t.album || undefined,
+          albumId: nativeAny.albumId || undefined,
+          artistId: nativeAny.artistId || undefined,
+          duration: typeof t.duration === 'number' && t.duration > 0 ? t.duration : undefined,
+          isLocal: true,
+        };
+      });
+      useDownloadStore.setState({ downloadedTracks: downloadedMap });
+    } catch (e) {
+      console.warn("[DownloadQueueManager] Failed to sync from native:", e);
+    }
+  }
+
+  static async triggerHydration() {
+    const { AuraDownload } = await import("@/src/services/native-core");
+    if (!AuraDownload) return;
+    try {
+      const report = await AuraDownload.hydrateDownloads();
+      console.log("[DownloadQueueManager] Hydration report:", report);
+      if (report && (report.artworkHydrated > 0 || report.metadataHydrated > 0 || report.repairedTracks > 0)) {
+        await this.syncFromNative();
+      }
+    } catch (e) {
+      console.warn("[DownloadQueueManager] Hydration trigger error:", e);
     }
   }
 }

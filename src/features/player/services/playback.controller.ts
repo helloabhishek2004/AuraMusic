@@ -21,14 +21,14 @@ export class PlaybackController {
     // Listen to our custom Native module
     onPlaybackStateChanged((state: NativePlaybackState) => {
       const store = usePlayerStore.getState();
-      
-      // Update store
+
+      // Update playback-state fields
       usePlayerStore.setState({
         isPlaying: state.isPlaying,
         isBuffering: state.isBuffering,
         status: state.isPlaying ? 'playing' : (state.isBuffering ? 'buffering' : 'paused')
       });
-      
+
       if (state.error) {
         console.error("[NativeCore] Playback Error:", state.error);
         usePlayerStore.setState({ error: state.error, status: "error" });
@@ -36,40 +36,140 @@ export class PlaybackController {
         usePlayerStore.setState({ error: null });
       }
 
-      // Update progress
+      // Update progress shared values (drives UI progress bar, no store write)
       playbackProgress.positionMs.value = state.positionMs;
       playbackProgress.durationMs.value = state.durationMs;
-      
+
       // Update session max position for analytics
       if (state.positionMs > this.maxPositionMs) {
         this.maxPositionMs = state.positionMs;
       }
+
+      // == FIX #1: Identity-Authoritative Native Reconciliation ==
+      // Native Media3 currentMediaItem.id (= currentTrackId) is the single source of
+      // truth for which track is currently playing.
+      //
+      // We reconcile JS state to native HERE -- in onPlaybackStateChanged -- rather
+      // than waiting exclusively for PLAY_STARTED, because:
+      //   * Cache hits do not reliably fire PLAY_STARTED
+      //   * Seamless transitions may skip PLAY_STARTED
+      //   * Downloaded-track playback may not emit PLAY_STARTED on every transition
+      //
+      // STALE-EVENT PROTECTION: we only reconcile when nativeTrackId != jsTrackId.
+      // A late state event for the old track will have the old trackId, which is
+      // already === jsTrackId (since we just updated to B), so it will be ignored.
+      const nativeTrackId = state.currentTrackId;
+      const jsTrackId = store.currentTrack?.id ?? null;
+
+      if (nativeTrackId && nativeTrackId !== jsTrackId) {
+        console.log(
+          `[JS_TRACK_RECONCILE] NATIVE_CURRENT_TRACK=${nativeTrackId} JS_CURRENT=${jsTrackId ?? 'null'} -- reconciling JS state to native`
+        );
+
+        const queue = store.queue;
+        const currentIdx = store.currentIndex;
+
+        // Duplicate-queue-aware index resolution
+        // Native only exposes trackId (not queue index) in state events.
+        // If the same track appears multiple times (A B A C), we must not blindly
+        // use findIndex(id) as it returns the FIRST occurrence.
+        //
+        // Strategy:
+        //   1. If queue[currentIndex] === nativeTrackId, currentIndex is still valid.
+        //   2. Scan FORWARD from currentIndex+1 (natural advance / next).
+        //   3. Scan from 0 to currentIndex (wrap-around, shuffle, user jump backward).
+        let resolvedIdx = -1;
+
+        if (queue[currentIdx]?.id === nativeTrackId) {
+          resolvedIdx = currentIdx; // current index still valid
+        } else {
+          // Forward scan -- most likely next track
+          for (let i = currentIdx + 1; i < queue.length; i++) {
+            if (queue[i]?.id === nativeTrackId) { resolvedIdx = i; break; }
+          }
+          // Backward / full scan -- shuffle, jump, or wrap
+          if (resolvedIdx === -1) {
+            for (let i = 0; i < currentIdx; i++) {
+              if (queue[i]?.id === nativeTrackId) { resolvedIdx = i; break; }
+            }
+          }
+        }
+
+        if (resolvedIdx !== -1) {
+          const resolvedTrack = queue[resolvedIdx];
+          console.log(
+            `[JS_TRACK_RECONCILE] RESOLVED idx=${resolvedIdx} title="${resolvedTrack.title}" id=${nativeTrackId}`
+          );
+          usePlayerStore.setState({
+            currentTrack: resolvedTrack,
+            currentIndex: resolvedIdx,
+          });
+        } else {
+          // Track not in JS queue (e.g. downloaded song clicked while online queue was active,
+          // or external media button event).
+          // NEVER leave currentTrack stuck on the old track!
+          console.warn(
+            `[JS_TRACK_RECONCILE] QUEUE_MISMATCH nativeTrackId=${nativeTrackId} not found in JS queue (size=${queue.length}). Recovering track identity.`
+          );
+          const recovered = this.recoverTrack(nativeTrackId);
+          console.log(
+            `[JS_TRACK_RECONCILE] RECOVERED track="${recovered.title}" (${nativeTrackId})`
+          );
+          usePlayerStore.setState({
+            currentTrack: recovered,
+            queue: [recovered],
+            currentIndex: 0,
+          });
+        }
+      }
+      // == END FIX #1 ==
     });
 
     onTrackChanged((data: { event: string; trackId: string }) => {
       const store = usePlayerStore.getState();
-      console.log(`[NativeCore] Track Event: ${data.event} for ${data.trackId}`);
+      console.log(
+        `[NATIVE_TRACK_TRANSITION] event=${data.event} trackId=${data.trackId} jsCurrentTrack=${store.currentTrack?.id ?? 'null'}`
+      );
 
       switch (data.event) {
         case 'PLAY_STARTED':
           this.startSession(data.trackId, playbackProgress.positionMs.value);
-          // Sync store queue with duplicate-awareness
-          if (store.currentIndex >= 0 && store.currentIndex < store.queue.length && store.queue[store.currentIndex]?.id === data.trackId) {
+          // Secondary reconciliation guard:
+          if (
+            store.currentIndex >= 0 &&
+            store.currentIndex < store.queue.length &&
+            store.queue[store.currentIndex]?.id === data.trackId
+          ) {
             if (store.currentTrack?.id !== data.trackId) {
               usePlayerStore.setState({ currentTrack: store.queue[store.currentIndex] });
             }
-          } else {
-            const idx = store.queue.findIndex((t: any) => t.id === data.trackId);
-            if (idx !== -1) {
-              usePlayerStore.setState({ currentIndex: idx, currentTrack: store.queue[idx] });
+          } else if (store.currentTrack?.id !== data.trackId) {
+            const queue = store.queue;
+            const currentIdx = store.currentIndex;
+            let resolvedIdx = -1;
+            for (let i = currentIdx + 1; i < queue.length; i++) {
+              if (queue[i]?.id === data.trackId) { resolvedIdx = i; break; }
+            }
+            if (resolvedIdx === -1) {
+              for (let i = 0; i < queue.length; i++) {
+                if (queue[i]?.id === data.trackId) { resolvedIdx = i; break; }
+              }
+            }
+            if (resolvedIdx !== -1) {
+              usePlayerStore.setState({ currentIndex: resolvedIdx, currentTrack: queue[resolvedIdx] });
+            } else {
+              const recovered = this.recoverTrack(data.trackId);
+              usePlayerStore.setState({
+                currentTrack: recovered,
+                queue: [recovered],
+                currentIndex: 0,
+              });
             }
           }
           break;
-          
+
         case 'PLAY_COMPLETED':
           this.flushCurrentSession(true);
-          // Auto-advance is handled natively by AuraPlayer (ExoPlayer).
-          // Check for autoplay queue continuation if at the end of the queue
           try {
             const { useSettingsStore } = require('../../settings/store/settings.store');
             const autoplayEnabled = useSettingsStore.getState().autoplayEnabled;
@@ -161,9 +261,31 @@ export class PlaybackController {
       console.warn("Failed to flush session", e);
     }
   }
+
+  private static recoverTrack(trackId: string): any {
+    try {
+      const { useDownloadStore } = require("../../download/store/download.store");
+      const downloaded = useDownloadStore.getState().downloadedTracks[trackId];
+      if (downloaded) return downloaded;
+    } catch (_) {}
+
+    try {
+      const { useLikesStore } = require("../../likes/store/likes.store");
+      const liked = useLikesStore.getState().likedTracks?.find((t: any) => t.id === trackId);
+      if (liked) return liked;
+    } catch (_) {}
+
+    return {
+      id: trackId,
+      title: "Playing Track",
+      artist: "AuraMusic",
+      art: "",
+      url: `auramusic://track/${trackId}`,
+      duration: 0,
+      isLocal: true,
+    };
+  }
 }
 
 // Auto-initialize on import
 PlaybackController.initialize();
-
-

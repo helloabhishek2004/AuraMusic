@@ -114,10 +114,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     () => ({
       play: async (track?: Track) => { 
         if (track) {
-
-            await PlaybackService.loadTrack(track, [track], 0);
+            await usePlayerStore.getState().setQueue([track as any], 0);
         } else {
-
             await PlaybackService.play();
         }
       },

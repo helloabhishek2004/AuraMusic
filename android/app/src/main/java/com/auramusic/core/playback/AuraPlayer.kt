@@ -13,6 +13,7 @@ import androidx.media3.common.ForwardingPlayer
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import com.auramusic.core.stream.UnifiedStreamResolver
+import com.auramusic.core.db.TrackEntity
 import kotlinx.coroutines.*
 import okhttp3.Dns
 import java.net.Inet4Address
@@ -203,18 +204,92 @@ class AuraPlayer(
 
     private fun updateMediaMetadataForCurrentTrack() {
         val trackId = currentState.currentTrackId ?: return
-        val meta = metadataCache[trackId] ?: return
-        val artUri = if (isValidArtworkUri(meta.artworkUrl)) Uri.parse(meta.artworkUrl) else null
+
+        // == FIX #2: MediaSession Fallback Hierarchy ==
+        // NEVER return early just because metadataCache has no entry.
+        // Missing cache entry must NOT leave MediaSession stuck on the previous track.
+        //
+        // Fallback priority:
+        //   1. metadataCache (populated by JS via saveTrackMetadata / saveTracksMetadata)
+        //   2. currentMediaItem.mediaMetadata (already set in playTrackInternal, contains
+        //      Room or partial data at minimum)
+        //   3. Minimal identity (trackId + "Unknown Artist") — always show correct track
+        //      identity, never the wrong track.
+
+        val cachedMeta = metadataCache[trackId]
+
+        val title: String
+        val artist: String
+        val album: String?
+        var artworkUri: Uri? = null
+
+        // Check local artwork file first (works 100% offline)
+        val localArtwork = com.auramusic.core.download.DownloadUtil.getInstance(context).getLocalArtworkFile(trackId)
+        if (localArtwork != null) {
+            artworkUri = Uri.fromFile(localArtwork)
+        }
+
+        if (cachedMeta != null) {
+            // Level 1: in-memory metadata cache (populated by JS bridge)
+            Log.i(SESSION_TAG, "[METADATA_CACHE_HIT] trackId=$trackId title=${cachedMeta.title}")
+            title = cachedMeta.title
+            artist = cachedMeta.artist
+            album = cachedMeta.album
+            if (artworkUri == null && isValidArtworkUri(cachedMeta.artworkUrl)) {
+                artworkUri = Uri.parse(cachedMeta.artworkUrl)
+            }
+        } else {
+            // Level 1.5: Room Database check (works on cold-start offline)
+            val roomEntity = try {
+                runBlocking(Dispatchers.IO) {
+                    com.auramusic.core.db.AuraDatabase.getInstance(context).trackDao().getById(trackId)
+                }
+            } catch (_: Exception) { null }
+
+            if (roomEntity != null) {
+                Log.i(SESSION_TAG, "[METADATA_FALLBACK] Level 1.5 Room DB trackId=$trackId title=${roomEntity.title}")
+                title = roomEntity.title
+                artist = if (roomEntity.artist.isNotBlank()) roomEntity.artist else "Unknown Artist"
+                album = roomEntity.album
+                if (artworkUri == null && isValidArtworkUri(roomEntity.artworkUrl)) {
+                    artworkUri = Uri.parse(roomEntity.artworkUrl)
+                }
+            } else {
+                // Level 2: MediaItem.mediaMetadata set during playTrackInternal
+                val itemMeta = exoPlayer?.currentMediaItem?.mediaMetadata
+                val itemTitle = itemMeta?.title?.toString()
+                val itemArtist = itemMeta?.artist?.toString()
+                val itemArtUri = itemMeta?.artworkUri
+
+                if (!itemTitle.isNullOrBlank() && itemTitle != trackId) {
+                    Log.i(SESSION_TAG, "[METADATA_FALLBACK] Level2 currentMediaItem.mediaMetadata trackId=$trackId title=$itemTitle")
+                    title = itemTitle
+                    artist = if (!itemArtist.isNullOrBlank()) itemArtist else "Unknown Artist"
+                    album = itemMeta?.albumTitle?.toString()
+                    if (artworkUri == null && isValidArtworkUri(itemArtUri?.toString())) {
+                        artworkUri = itemArtUri
+                    }
+                } else {
+                    // Level 3: Minimal identity — correct track, partial metadata
+                    Log.w(SESSION_TAG, "[METADATA_FALLBACK] Level3 minimal-identity trackId=$trackId (cache miss, no MediaItem meta)")
+                    title = trackId
+                    artist = "Unknown Artist"
+                    album = null
+                }
+            }
+        }
+
         val mediaMetadata = MediaMetadata.Builder()
-            .setTitle(meta.title)
-            .setArtist(meta.artist)
-            .setAlbumTitle(meta.album)
-            .setArtworkUri(artUri)
+            .setTitle(title)
+            .setArtist(artist)
+            .setAlbumTitle(album)
+            .setArtworkUri(artworkUri)
             .setIsPlayable(true)
             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
             .build()
         exoPlayer?.playlistMetadata = mediaMetadata
-        Log.i(SESSION_TAG, "[MediaSessionTrace] METADATA_UPDATED trackId=$trackId title=${meta.title} artist=${meta.artist} artUri=$artUri")
+        Log.i(SESSION_TAG, "[MEDIASESSION_METADATA_UPDATED] trackId=$trackId title=$title artist=$artist artUri=$artworkUri")
+        // == END FIX #2 ==
     }
 
     fun initialize() {
@@ -545,15 +620,53 @@ class AuraPlayer(
                     error = null
                 ))
 
-                // Build initial MediaMetadata from metadataCache or Room database
+                val downloadUtil = com.auramusic.core.download.DownloadUtil.getInstance(context)
+
+                // Build initial MediaMetadata from metadataCache, Room database, or Media3 download
                 val meta = metadataCache[videoId] ?: withContext(Dispatchers.IO) {
                     try {
-                        val entity = com.auramusic.core.db.AuraDatabase.getInstance(context).trackDao().getById(videoId)
+                        val db = com.auramusic.core.db.AuraDatabase.getInstance(context)
+                        val entity = db.trackDao().getById(videoId)
                         if (entity != null) {
                             TrackMetadata(entity.id, entity.title, entity.artist, entity.album, entity.duration, entity.artworkUrl).also {
                                 metadataCache[videoId] = it
                             }
-                        } else null
+                        } else {
+                            // Check Media3 downloadIndex data!
+                            val dl = downloadUtil.getDownload(videoId)
+                            if (dl != null && dl.request.data.isNotEmpty()) {
+                                val raw = String(dl.request.data, Charsets.UTF_8)
+                                var t = "Unknown Title"
+                                var a = "Unknown Artist"
+                                var alb: String? = null
+                                var d = 0
+                                var art: String? = null
+                                if (raw.startsWith("{")) {
+                                    val j = org.json.JSONObject(raw)
+                                    t = j.optString("title", t)
+                                    a = j.optString("artist", a)
+                                    alb = j.optString("album").takeIf { it.isNotEmpty() }
+                                    d = j.optInt("duration", 0)
+                                    art = j.optString("artworkUrl").takeIf { it.isNotEmpty() }
+                                } else {
+                                    t = raw
+                                }
+                                val entityFromDl = TrackEntity(
+                                    id = videoId,
+                                    title = t,
+                                    artist = a,
+                                    album = alb,
+                                    duration = d,
+                                    artworkUrl = art ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
+                                    isDownloaded = true,
+                                    downloadedAt = System.currentTimeMillis()
+                                )
+                                db.trackDao().upsert(entityFromDl)
+                                TrackMetadata(videoId, t, a, alb, d, art).also {
+                                    metadataCache[videoId] = it
+                                }
+                            } else null
+                        }
                     } catch (_: Exception) { null }
                 }
 
@@ -562,16 +675,23 @@ class AuraPlayer(
                     return@launch
                 }
 
+                // Check local artwork file first (works 100% offline)
+                val localArtworkFile = downloadUtil.getLocalArtworkFile(videoId)
+                val effectiveArtworkUri = if (localArtworkFile != null) {
+                    Uri.fromFile(localArtworkFile)
+                } else if (isValidArtworkUri(meta?.artworkUrl)) {
+                    Uri.parse(meta?.artworkUrl)
+                } else null
+
                 val mediaMetadata = MediaMetadata.Builder()
                     .setTitle(meta?.title ?: videoId)
                     .setArtist(meta?.artist ?: "Unknown Artist")
                     .setAlbumTitle(meta?.album)
-                    .setArtworkUri(if (isValidArtworkUri(meta?.artworkUrl)) Uri.parse(meta?.artworkUrl) else null)
+                    .setArtworkUri(effectiveArtworkUri)
                     .setIsPlayable(true)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                     .build()
 
-                val downloadUtil = com.auramusic.core.download.DownloadUtil.getInstance(context)
                 val isDownloaded = downloadUtil.isTrackDownloaded(videoId) || downloadUtil.downloadCache.isCached(videoId, 0, 1024)
 
                 if (isDownloaded && localUrl == null) {

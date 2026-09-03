@@ -45,7 +45,9 @@ export class PlaybackService {
               title: t.title,
               artist: t.artist || 'Unknown Artist',
               album: t.album || null,
-              duration: t.duration ? Number(t.duration) : 240,
+              // FIX #6: Use 0 (unknown) instead of invented 240s. Native ExoPlayer
+              // will report the real duration via durationMs in onPlaybackStateChanged.
+              duration: t.duration ? Number(t.duration) : 0,
               art: extractRawArtworkUrl(t) || null,
             }))
           );
@@ -132,7 +134,8 @@ export class PlaybackService {
             title: t.title,
             artist: t.artist || 'Unknown Artist',
             album: t.album || null,
-            duration: t.duration ? Number(t.duration) : 240,
+            // FIX #6: Use 0 (unknown) instead of invented 240s.
+            duration: t.duration ? Number(t.duration) : 0,
             art: extractRawArtworkUrl(t) || null,
           }))
         );

@@ -223,6 +223,7 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
       <>
         <Reanimated.View style={[styles.artWrap, miniArtStyle]}>
           <AuraArtwork 
+            key={track?.id ? `mini-${track.id}` : 'mini-empty'}
             source={resolveArtwork(track, 'card')} 
             entityName={track.title}
             entityType="song"

@@ -745,7 +745,7 @@ const TrackRow = memo(({
         artist: track.artist,
         art: getTrackArtwork(track),
         url: track.url || "",
-        duration: track.duration || 240,
+        duration: track.duration || 0,
         dominantColors: [C.primary, C.primaryMid],
       });
     } catch (e) {
@@ -1009,7 +1009,8 @@ const DownloadedTrackRow = memo(({
   track, delay, index,
 }: { track: DownloadedTrack; delay: number; index: number }) => {
   const p = usePress(0.96);
-  const { play } = useMusic();
+  const { setQueue } = useMusic();
+  const recentDownloads = useRecentDownloads();
   const { goNowPlaying } = useMusicNavigation("library-download");
   const currentTrackId = usePlayerStore(s => s.currentTrack?.id);
   const isActive = currentTrackId === track.id;
@@ -1026,21 +1027,18 @@ const DownloadedTrackRow = memo(({
   const handlePlay = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      await play({
-        id: track.id,
-        title: track.title,
-        artist: track.artist,
-        art: getTrackArtwork(track),
-        url: track.url,
-        duration: track.duration || 0,
-        isLocal: true,
-        dominantColors: [C.primary, C.primaryMid],
+      const queueToPlay = (recentDownloads && recentDownloads.length > 0) ? recentDownloads : [track];
+      const startIdx = (recentDownloads && recentDownloads.length > 0) ? index : 0;
+      await setQueue(queueToPlay as any, startIdx, {
+        sourceId: "recent_downloads",
+        sourceType: "manual",
+        generatedAt: Date.now()
       });
     } catch (e) {
       console.error("[Player]", e);
     }
     goNowPlaying(track.id);
-  }, [track]);
+  }, [track, recentDownloads, index, setQueue, goNowPlaying]);
 
   return (
     <Animated.View style={{ transform: [{ scale: p.sc }] }}>

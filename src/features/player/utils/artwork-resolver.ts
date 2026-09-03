@@ -110,6 +110,16 @@ export function resolveArtwork(entity: any, size: ArtworkSize = 'album'): string
   // 4. Rehydrate from local cache / catalog if entity has an ID
   const candidateId = entity.id;
   if (candidateId) {
+    // A0. Check Downloaded Tracks (local artwork file:// URI works 100% offline)
+    try {
+      const { useDownloadStore } = require("../../download/store/download.store");
+      const downloaded = useDownloadStore.getState().downloadedTracks?.[candidateId];
+      const downloadedArt = downloaded?.localArtPath || downloaded?.art || downloaded?.artwork;
+      if (downloadedArt && typeof downloadedArt === 'string' && !downloadedArt.startsWith('aura://') && !downloadedArt.includes('placeholder')) {
+        return getArtworkUrl(downloadedArt, size);
+      }
+    } catch (e) {}
+
     // A. Check Media Cache Store
     try {
       const { useMediaCacheStore } = require("../../cache/store/media-cache.store");

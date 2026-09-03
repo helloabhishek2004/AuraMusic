@@ -862,10 +862,9 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
 
   const bgFadeProgress = useSharedValue(1);
   const metaFadeProgress = useSharedValue(1);
-  const [currentArtwork, setCurrentArtwork] = useState<string | null>(null);
+  const bgArtwork = currentTrack ? resolveArtwork(currentTrack, 'card') : null;
 
   useEffect(() => {
-    setCurrentArtwork(currentTrack?.art || null);
     bgFadeProgress.value = 0;
     bgFadeProgress.value = withTiming(1, { duration: 150, easing: REasing.out(REasing.quad) });
     metaFadeProgress.value = 0;
@@ -1444,10 +1443,11 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
       <Animated.View style={[StyleSheet.absoluteFill, overlayStyle, { backgroundColor: 'transparent' }]} pointerEvents={isExpanded ? "auto" : "none"}>
         
         <Animated.View style={[StyleSheet.absoluteFill, currentBgStyle, { backgroundColor: '#0C0C14' }]} pointerEvents="none">
-          {currentArtwork ? (
+          {bgArtwork ? (
             <View style={StyleSheet.absoluteFill}>
               <AuraArtwork 
-                source={resolveArtwork({ art: currentArtwork }, 'card')} 
+                key={currentTrack?.id ? `bg-${currentTrack.id}` : 'bg-empty'}
+                source={bgArtwork} 
                 entityName="Background"
                 style={StyleSheet.absoluteFill} 
                 contentFit="cover" 
@@ -1470,6 +1470,7 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
         <GestureDetector gesture={artworkSwipe}>
           <Animated.View style={[st.artShadow, { position: "absolute", left: (SW - ART_BOX) / 2, top: insets.top + 60, width: ART_BOX, height: ART_BOX, overflow: "hidden" }, expArtStyle]}>
             <AuraArtwork
+              key={currentTrack?.id ? `player-${currentTrack.id}` : 'player-empty'}
               source={resolveArtwork(currentTrack, 'player')}
               entityName={currentTrack?.title}
               entityType="song"
@@ -1483,6 +1484,7 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
 
         <Animated.View style={[st.artShadow, { position: "absolute", left: (SW - ART_BOX) / 2, top: insets.top + 60, width: ART_BOX, height: ART_BOX, overflow: "hidden" }, transitionArtStyle]} pointerEvents="none">
           <AuraArtwork
+            key={transitionArtwork ? `trans-${transitionArtwork}` : 'trans-empty'}
             source={resolveArtwork({ art: transitionArtwork }, 'player')}
             entityName="Upcoming"
             entityType="song"

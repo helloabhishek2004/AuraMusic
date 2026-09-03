@@ -33,6 +33,7 @@ class MainApplication : Application(), ReactApplication {
     DefaultNewArchitectureEntryPoint.releaseLevel = ReleaseLevel.STABLE
     loadReactNative(this)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
+    com.auramusic.core.download.DownloadHydrationManager.getInstance(this).start()
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {
