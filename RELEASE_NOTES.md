@@ -1,4 +1,4 @@
-﻿# AuraMusic v0.1.0-beta.1 — Public Beta Release Notes
+# AuraMusic v0.1.0-beta.1 — Public Beta Release Notes
 
 Welcome to the first public beta release of **AuraMusic**! 🎵
 
@@ -11,7 +11,7 @@ AuraMusic is a modern, standalone Android music player engineered for pure audio
 
 ### ✨ Highlights
 
-* **100% Serverless On-Device Playback**: Stream resolution and audio streaming are executed directly in Kotlin via AndroidX Media3 (ExoPlayer).
+* **On-Device Playback (No External Backend Middleman)**: Stream resolution and audio streaming are executed directly in Kotlin via AndroidX Media3 (ExoPlayer).
 * **Atmospheric Liquid Glass UI**: Refractive translucent blur materials, responsive fluid physics, and real-time album cover gradient adaptations.
 * **Intelligent Music Search**: Multi-signal relevance ranking that surfaces studio tracks and verified artists while suppressing reaction clips, podcasts, and non-music noise.
 * **Vibe-Aware Autoplay Queue**: Mathematical continuation algorithm that preserves musical mood without fatigue when your playlist finishes.
@@ -21,10 +21,13 @@ AuraMusic is a modern, standalone Android music player engineered for pure audio
 
 ---
 
-### 📦 What's Included
+### 📦 Release Artifacts & Verification
 
-* `AuraMusic-v0.1.0-beta.1.apk` (Universal release APK for ARM64, ARMv7, x86, and x86_64 Android devices)
-* Full source code tag `v0.1.0-beta.1`
+* **File**: `AuraMusic-v0.1.0-beta.1.apk`
+* **Size**: `115,509,475 bytes` (~110.16 MB)
+* **Architecture**: Universal (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`)
+* **SHA-256**: `407FFE49A0D5662A78B9C8CBBF05498A02EED481CA04C3B879CB4E748036DA3D`
+* **Git Release Tag**: `v0.1.0-beta.1`
 
 ---
 

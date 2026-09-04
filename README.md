@@ -20,9 +20,10 @@
 
   <!-- AI Engineering Badge Banner -->
   <p align="center">
-    <img src="https://img.shields.io/badge/AI%20Engineered%20With-Claude%20Code-D97706?style=flat-square&logo=anthropic&logoColor=white" alt="Claude Code" />
+    <img src="https://img.shields.io/badge/Lead%20AI%20Engineer%20%26%20PM-ChatGPT-10A37F?style=flat-square&logo=openai&logoColor=white" alt="ChatGPT - Lead Engineer & PM" />
     <img src="https://img.shields.io/badge/Crafted%20With-Google%20Antigravity-4285F4?style=flat-square&logo=google&logoColor=white" alt="Google Antigravity" />
-    <img src="https://img.shields.io/badge/Assisted%20By-ChatGPT-10A37F?style=flat-square&logo=openai&logoColor=white" alt="ChatGPT" />
+    <img src="https://img.shields.io/badge/UI%20Design%20With-Google%20Stitch-EA4335?style=flat-square&logo=google&logoColor=white" alt="Google Stitch" />
+    <img src="https://img.shields.io/badge/Assisted%20By-Claude-D97706?style=flat-square&logo=anthropic&logoColor=white" alt="Claude" />
     <img src="https://img.shields.io/badge/Prototyped%20With-OpenCode-7C3AED?style=flat-square&logo=codeforces&logoColor=white" alt="OpenCode" />
   </p>
 
@@ -242,9 +243,10 @@ AuraMusic was engineered using an advanced multi-agent AI pair programming workf
 
 | Agent / Tool | Role in AuraMusic Development | Core Contributions |
 | :--- | :--- | :--- |
-| <img src="https://img.shields.io/badge/Anthropic-Claude%20Code-D97706?style=for-the-badge&logo=anthropic&logoColor=white" height="28" /> | **Lead Architecture & Governance** | Authored the Native Core migration plan, implemented the Media3 playback pipeline, created Room database schemas, and formulated architecture rules. |
+| <img src="https://img.shields.io/badge/OpenAI-ChatGPT-10A37F?style=for-the-badge&logo=openai&logoColor=white" height="28" /> | **Lead AI Engineer & Project Manager** | Directed end-to-end engineering strategy, project roadmap management, query normalization algorithms, fuzzy search scoring heuristics, and mathematical taste clustering formulas. |
 | <img src="https://img.shields.io/badge/Google-Antigravity-4285F4?style=for-the-badge&logo=google&logoColor=white" height="28" /> | **Autonomous Systems & Polish** | Spearheaded Liquid Glass UI design implementation, Reanimated gesture physics, full-codebase auditing, download queue reconciliation, and technical documentation. |
-| <img src="https://img.shields.io/badge/OpenAI-ChatGPT-10A37F?style=for-the-badge&logo=openai&logoColor=white" height="28" /> | **Algorithmic Strategy** | Devised query normalization algorithms, fuzzy search scoring heuristics, and mathematical taste clustering formulas. |
+| <img src="https://img.shields.io/badge/Google-Stitch-EA4335?style=for-the-badge&logo=google&logoColor=white" height="28" /> | **UI Making & Visual Design System** | Orchestrated UI screen layouts, Liquid Glass component styling, visual design systems, and cohesive interface aesthetics. |
+| <img src="https://img.shields.io/badge/Anthropic-Claude-D97706?style=for-the-badge&logo=anthropic&logoColor=white" height="28" /> | **Lead Architecture & Governance** | Authored the Native Core migration plan, implemented the Media3 playback pipeline, created Room database schemas, and formulated architecture rules. |
 | <img src="https://img.shields.io/badge/Community-OpenCode-7C3AED?style=for-the-badge&logo=codeforces&logoColor=white" height="28" /> | **Rapid Prototyping & Utilities** | Automated test script generation, command line workflows, and prototype validation across early phases. |
 
 </div>
@@ -512,4 +514,4 @@ AuraMusic is made possible thanks to the following open-source projects and comm
 * [Shopify FlashList](https://shopify.github.io/flash-list/) for virtualized list performance.
 * [LRCLIB](https://lrclib.net/) for providing community-driven synchronized lyrics.
 * [Zustand](https://github.com/pmndrs/zustand) for predictable, minimal state management.
-* [Anthropic](https://anthropic.com/), [Google DeepMind](https://deepmind.google/), and [OpenAI](https://openai.com/) for empowering developer workflows through intelligent coding agents.
+* [Anthropic](https://anthropic.com/), [Google DeepMind](https://deepmind.google/), [Google Stitch](https://stitch.google/), and [OpenAI](https://openai.com/) for empowering developer workflows through intelligent coding agents and design generation.
