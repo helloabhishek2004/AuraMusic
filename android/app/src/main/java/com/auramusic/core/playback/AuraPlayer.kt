@@ -2,6 +2,7 @@ package com.auramusic.core.playback
 
 import android.content.Context
 import android.content.Intent
+import android.media.audiofx.AudioEffect
 import android.net.Uri
 import android.os.Build
 import android.util.Log
@@ -34,7 +35,8 @@ data class TrackMetadata(
     val artist: String,
     val album: String?,
     val duration: Int,
-    val artworkUrl: String?
+    val artworkUrl: String?,
+    val loudnessDb: Double? = null
 )
 
 /**
@@ -153,6 +155,8 @@ class AuraPlayer(
 
     // Forensic: prevent duplicate PLAY_STARTED for the same playback session
     private var playStartedEmittedForTrack: String? = null
+    // Proactive replenishment: debounce QUEUE_NEARING_END per track session
+    private var queueNearingEndEmittedForTrack: String? = null
     // Forensic: timestamp of playTrackInternal call for elapsed measurement
     private var trackLoadStartTime: Long = 0L
 
@@ -160,9 +164,22 @@ class AuraPlayer(
     @Volatile
     private var currentResolutionJob: Job? = null
     @Volatile
+    private var aotJob: Job? = null
+    @Volatile
     private var resolutionRequestId: Long = 0L
 
     private var currentStreamingQuality: String = "high"
+
+    // --- Audio Intelligence: Loudness Normalization ---
+    @Volatile
+    private var isNormalizationEnabled: Boolean = true
+    @Volatile
+    private var userMasterVolume: Float = 1.0f
+    @Volatile
+    private var currentTrackLoudnessDb: Double? = null
+
+    // Audio Session tracking for system/OEM DSP (Dolby, Dirac, etc.)
+    private var currentAudioSessionId: Int = 0
 
     fun setStreamingQuality(quality: String) {
         currentStreamingQuality = quality
@@ -170,7 +187,8 @@ class AuraPlayer(
     }
 
     fun getAudioSessionId(): Int {
-        return exoPlayer?.audioSessionId ?: 0
+        val id = exoPlayer?.audioSessionId ?: currentAudioSessionId
+        return if (id > 0) id else currentAudioSessionId
     }
 
     fun getMediaSession(): MediaSession? {
@@ -369,7 +387,52 @@ class AuraPlayer(
         exoPlayer = rawPlayer
 
         // ForwardingPlayer maps next/prev/seeking system commands directly into AuraPlayer queue
-        val forwardingPlayer = object : ForwardingPlayer(rawPlayer) {
+        val forwardingPlayer = createForwardingPlayer(rawPlayer)
+
+        val sessionActivityIntent = Intent(context, com.anonymous.AuraMusic.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            context,
+            0,
+            sessionActivityIntent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val sessionCallback = object : MediaSession.Callback {
+            override fun onConnect(
+                session: MediaSession,
+                controller: MediaSession.ControllerInfo
+            ): MediaSession.ConnectionResult {
+                Log.i(SESSION_TAG, "[MediaSessionTrace] CONTROLLER_CONNECTED pkg=${controller.packageName}")
+                val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon().build()
+                val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                    .add(Player.COMMAND_SEEK_TO_NEXT)
+                    .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                    .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                    .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                    .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+                    .add(Player.COMMAND_PLAY_PAUSE)
+                    .build()
+                return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                    .setAvailableSessionCommands(sessionCommands)
+                    .setAvailablePlayerCommands(playerCommands)
+                    .build()
+            }
+        }
+
+        mediaSession = MediaSession.Builder(context, forwardingPlayer)
+            .setSessionActivity(pendingIntent)
+            .setCallback(sessionCallback)
+            .build()
+
+        Log.i(SESSION_TAG, "[MediaSessionTrace] CREATED")
+
+        attachPlayerListeners(rawPlayer)
+    }
+
+    private fun createForwardingPlayer(player: ExoPlayer): ForwardingPlayer {
+        return object : ForwardingPlayer(player) {
             override fun seekToNext() {
                 Log.i(SESSION_TAG, "[MediaSessionTrace] COMMAND_NEXT")
                 this@AuraPlayer.skipNext()
@@ -411,170 +474,199 @@ class AuraPlayer(
                     .build()
             }
         }
+    }
 
-        val sessionActivityIntent = Intent(context, com.anonymous.AuraMusic.MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pendingIntent = android.app.PendingIntent.getActivity(
-            context,
-            0,
-            sessionActivityIntent,
-            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val sessionCallback = object : MediaSession.Callback {
-            override fun onConnect(
-                session: MediaSession,
-                controller: MediaSession.ControllerInfo
-            ): MediaSession.ConnectionResult {
-                Log.i(SESSION_TAG, "[MediaSessionTrace] CONTROLLER_CONNECTED pkg=${controller.packageName}")
-                val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon().build()
-                val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
-                    .add(Player.COMMAND_SEEK_TO_NEXT)
-                    .add(Player.COMMAND_SEEK_TO_PREVIOUS)
-                    .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
-                    .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
-                    .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
-                    .add(Player.COMMAND_PLAY_PAUSE)
-                    .build()
-                return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                    .setAvailableSessionCommands(sessionCommands)
-                    .setAvailablePlayerCommands(playerCommands)
-                    .build()
-            }
-        }
-
-        mediaSession = MediaSession.Builder(context, forwardingPlayer)
-            .setSessionActivity(pendingIntent)
-            .setCallback(sessionCallback)
-            .build()
-
-        Log.i(SESSION_TAG, "[MediaSessionTrace] CREATED")
-
-        rawPlayer.addListener(object : Player.Listener {
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                val trackId = mediaItem?.mediaId ?: currentState.currentTrackId
-                Log.i(TAG, "[PlaybackTrace][Lifecycle] onMediaItemTransition trackId=$trackId reason=$reason")
-                Log.i(SESSION_TAG, "[MediaSessionTrace] onMediaItemTransition trackId=$trackId reason=$reason")
-                if (trackId != null) {
-                    val meta = metadataCache[trackId]
-                    val durMs = if ((meta?.duration ?: 0) > 0) meta!!.duration.toLong() * 1000L else currentState.durationMs
-                    updateState(currentState.copy(
-                        currentTrackId = trackId,
-                        durationMs = durMs
-                    ))
-                    updateMediaMetadataForCurrentTrack()
+    private fun attachPlayerListeners(player: ExoPlayer) {
+        player.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+            override fun onAudioSessionIdChanged(
+                eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
+                audioSessionId: Int
+            ) {
+                if (audioSessionId > 0 && audioSessionId != currentAudioSessionId) {
+                    updateAudioSession(audioSessionId)
                 }
             }
+        })
+        if (player.audioSessionId > 0) {
+            updateAudioSession(player.audioSessionId)
+        }
+        player.addListener(playerListener)
+    }
 
-            override fun onPlaybackStateChanged(state: Int) {
-                val trackId = currentState.currentTrackId
-                val elapsed = if (trackLoadStartTime > 0) System.currentTimeMillis() - trackLoadStartTime else 0
-                when (state) {
-                    Player.STATE_IDLE -> {
-                        Log.i(TAG, "[PlaybackTrace][Lifecycle] STATE_IDLE track=$trackId elapsed=${elapsed}ms")
-                    }
-                    Player.STATE_BUFFERING -> {
-                        Log.i(TAG, "[PlaybackTrace][Lifecycle] STATE_BUFFERING track=$trackId elapsed=${elapsed}ms")
-                        updateState(currentState.copy(isBuffering = true))
-                    }
-                    Player.STATE_READY -> {
-                        Log.i(TAG, "[PlaybackTrace][Lifecycle] STATE_READY track=$trackId elapsed=${elapsed}ms")
-                        updateState(currentState.copy(isBuffering = false))
-                    }
-                    Player.STATE_ENDED -> {
-                        Log.i(TAG, "[PlaybackTrace][Lifecycle] STATE_ENDED track=$trackId elapsed=${elapsed}ms repeatMode=$repeatMode")
-                        notifyEvent(PlaybackEvent.PLAY_COMPLETED, currentState.currentTrackId)
-                        when (repeatMode) {
-                            "track" -> {
-                                Log.i(TAG, "[RepeatTrace][AutoAdvanceTrace] REPEAT_ONE: replaying $trackId requestId=$resolutionRequestId")
-                                seekTo(0)
-                                exoPlayer?.play()
-                                // Re-emit PLAY_STARTED for repeat one session accounting
-                                playStartedEmittedForTrack = null
-                                notifyEvent(PlaybackEvent.PLAY_STARTED, trackId)
-                            }
-                            "queue" -> {
-                                if (queue.isNotEmpty()) {
-                                    val nextIdx = (currentIndex + 1) % queue.size
-                                    Log.i(TAG, "[RepeatTrace][AutoAdvanceTrace] REPEAT_ALL: natural advance $currentIndex -> $nextIdx (size=${queue.size})")
-                                    currentIndex = nextIdx
-                                    playTrack(queue[currentIndex])
+    private val playerListener = object : Player.Listener {
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val trackId = mediaItem?.mediaId ?: currentState.currentTrackId
+            Log.i(TAG, "[PlaybackTrace][Lifecycle] onMediaItemTransition trackId=$trackId reason=$reason")
+            Log.i(SESSION_TAG, "[MediaSessionTrace] onMediaItemTransition trackId=$trackId reason=$reason")
+            if (trackId != null) {
+                val qIdx = queue.indexOf(trackId)
+                if (qIdx != -1) {
+                    currentIndex = qIdx
+                }
+
+                val meta = metadataCache[trackId]
+                val durMs = if ((meta?.duration ?: 0) > 0) meta!!.duration.toLong() * 1000L else exoPlayer?.duration?.coerceAtLeast(0) ?: 0L
+
+                // Audio Intelligence: Update loudness normalization for transitioned track
+                currentTrackLoudnessDb = meta?.loudnessDb
+                updateEffectiveVolume()
+                if (currentTrackLoudnessDb == null) {
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            val db = com.auramusic.core.db.AuraDatabase.getInstance(context)
+                            val entity = db.trackDao().getById(trackId)
+                            if (entity?.loudnessDb != null) {
+                                withContext(Dispatchers.Main) {
+                                    if (currentState.currentTrackId == trackId) {
+                                        currentTrackLoudnessDb = entity.loudnessDb
+                                        updateEffectiveVolume()
+                                    }
                                 }
                             }
-                            else -> { // "off"
-                                if (queue.isNotEmpty() && currentIndex < queue.size - 1) {
-                                    currentIndex++
-                                    Log.i(TAG, "[AutoAdvanceTrace] REPEAT_OFF: natural advance to $currentIndex (size=${queue.size})")
-                                    playTrack(queue[currentIndex])
-                                } else {
-                                    Log.i(TAG, "[AutoAdvanceTrace] REPEAT_OFF: reached queue end (index=$currentIndex size=${queue.size}) -> STOP")
-                                    stop()
-                                }
+                        } catch (_: Exception) {}
+                    }
+                }
+
+                updateState(currentState.copy(
+                    currentTrackId = trackId,
+                    currentMediaIndex = currentIndex,
+                    durationMs = durMs
+                ))
+                updateMediaMetadataForCurrentTrack()
+
+                // Single source of truth for play started
+                if (playStartedEmittedForTrack != trackId) {
+                    playStartedEmittedForTrack = trackId
+                    Log.i(TAG, "[PlaybackTrace][Lifecycle] PLAY_STARTED track=$trackId")
+                    notifyEvent(PlaybackEvent.PLAY_STARTED, trackId)
+                }
+
+                // Proactive queue replenishment trigger:
+                // When remaining tracks <= 2, emit QUEUE_NEARING_END once per track transition
+                val remaining = queue.size - 1 - currentIndex
+                if (remaining in 0..2 && queueNearingEndEmittedForTrack != trackId) {
+                    queueNearingEndEmittedForTrack = trackId
+                    Log.i(TAG, "[PlaybackTrace][Queue] QUEUE_NEARING_END emitted track=$trackId remaining=$remaining queueSize=${queue.size}")
+                    notifyEvent(PlaybackEvent.QUEUE_NEARING_END, trackId)
+                }
+
+                // Controlled timeline reconciliation and AOT resolution for next track
+                val gen = resolutionRequestId
+                scope.launch(Dispatchers.Main) {
+                    reconcileTimeline(trackId, gen)
+                }
+            }
+        }
+
+        override fun onPlaybackStateChanged(state: Int) {
+            val trackId = currentState.currentTrackId
+            val elapsed = if (trackLoadStartTime > 0) System.currentTimeMillis() - trackLoadStartTime else 0
+            when (state) {
+                Player.STATE_IDLE -> {
+                    Log.i(TAG, "[PlaybackTrace][Lifecycle] STATE_IDLE track=$trackId elapsed=${elapsed}ms")
+                }
+                Player.STATE_BUFFERING -> {
+                    Log.i(TAG, "[PlaybackTrace][Lifecycle] STATE_BUFFERING track=$trackId elapsed=${elapsed}ms")
+                    updateState(currentState.copy(isBuffering = true))
+                }
+                Player.STATE_READY -> {
+                    Log.i(TAG, "[PlaybackTrace][Lifecycle] STATE_READY track=$trackId elapsed=${elapsed}ms")
+                    updateState(currentState.copy(isBuffering = false))
+                }
+                Player.STATE_ENDED -> {
+                    Log.i(TAG, "[PlaybackTrace][Lifecycle] STATE_ENDED track=$trackId elapsed=${elapsed}ms repeatMode=$repeatMode")
+                    notifyEvent(PlaybackEvent.PLAY_COMPLETED, currentState.currentTrackId)
+
+                    // In Media3 timeline architecture, STATE_ENDED fires only when the timeline
+                    // has no more media items to transition to (queue exhausted or AOT pending).
+                    when (repeatMode) {
+                        "track" -> {
+                            seekTo(0)
+                            exoPlayer?.play()
+                        }
+                        "queue" -> {
+                            if (queue.isNotEmpty()) {
+                                val nextIdx = (currentIndex + 1) % queue.size
+                                Log.i(TAG, "[AOT] STATE_ENDED fallback wrap-around: $currentIndex -> $nextIdx (size=${queue.size})")
+                                currentIndex = nextIdx
+                                playTrack(queue[currentIndex])
+                            }
+                        }
+                        else -> { // "off"
+                            if (queue.isNotEmpty() && currentIndex < queue.size - 1) {
+                                currentIndex++
+                                Log.i(TAG, "[AOT] STATE_ENDED fallback on-demand resolution for index $currentIndex (size=${queue.size})")
+                                playTrack(queue[currentIndex])
+                            } else {
+                                Log.i(TAG, "[AutoAdvanceTrace] REPEAT_OFF: reached true queue end (index=$currentIndex size=${queue.size}) -> STOP")
+                                updateState(currentState.copy(isPlaying = false, isBuffering = false))
+                                stop()
                             }
                         }
                     }
                 }
             }
+        }
 
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                val trackId = currentState.currentTrackId
-                Log.i(TAG, "[PlaybackTrace][Lifecycle] onIsPlayingChanged isPlaying=$isPlaying track=$trackId")
-                Log.i(SESSION_TAG, "[MediaSessionTrace] onIsPlayingChanged isPlaying=$isPlaying trackId=$trackId")
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            val trackId = currentState.currentTrackId
+            Log.i(TAG, "[PlaybackTrace][Lifecycle] onIsPlayingChanged isPlaying=$isPlaying track=$trackId")
+            Log.i(SESSION_TAG, "[MediaSessionTrace] onIsPlayingChanged isPlaying=$isPlaying trackId=$trackId")
 
-                updateState(currentState.copy(isPlaying = isPlaying))
+            updateState(currentState.copy(isPlaying = isPlaying))
 
-                if (isPlaying) {
-                    startProgressUpdates()
-                    ensureServiceRunning()
-                    // P0-C: Emit PLAY_STARTED here — this is the only correct semantic location.
-                    // It means "audio is actually playing" not "play command was sent".
-                    if (trackId != null && playStartedEmittedForTrack != trackId) {
-                        playStartedEmittedForTrack = trackId
-                        Log.i(TAG, "[PlaybackTrace][Lifecycle] PLAY_STARTED track=$trackId")
-                        notifyEvent(PlaybackEvent.PLAY_STARTED, trackId)
-                    }
-                } else {
-                    stopProgressUpdates()
+            if (isPlaying) {
+                startProgressUpdates()
+                ensureServiceRunning()
+                if (trackId != null && playStartedEmittedForTrack != trackId) {
+                    playStartedEmittedForTrack = trackId
+                    Log.i(TAG, "[PlaybackTrace][Lifecycle] PLAY_STARTED track=$trackId")
+                    notifyEvent(PlaybackEvent.PLAY_STARTED, trackId)
                 }
+            } else {
+                stopProgressUpdates()
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            val trackId = currentState.currentTrackId
+            val elapsed = if (trackLoadStartTime > 0) System.currentTimeMillis() - trackLoadStartTime else 0
+
+            Log.e(TAG, "[PlaybackTrace][Error] ExoPlayer error track=$trackId elapsed=${elapsed}ms retryCount=$retryCount/$MAX_RETRIES")
+            Log.e(TAG, "[PlaybackTrace][Error] errorCode=${error.errorCode} errorCodeName=${error.errorCodeName}")
+            Log.e(TAG, "[PlaybackTrace][Error] message=${error.message}")
+
+            // Unwrap cause chain for HTTP/CDN errors
+            var is403 = false
+            var cause: Throwable? = error.cause
+            var depth = 0
+            while (cause != null && depth < 5) {
+                Log.e(TAG, "[PlaybackTrace][Error] cause[$depth]: ${cause.javaClass.simpleName}: ${cause.message}")
+                if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException &&
+                    (cause.responseCode == 403 || cause.responseCode == 410 || cause.responseCode == 416)
+                ) {
+                    is403 = true
+                    Log.w(TAG, "[PlaybackTrace][Error] Detected expired/forbidden stream URL (HTTP ${cause.responseCode}) for $trackId")
+                }
+                cause = cause.cause
+                depth++
             }
 
-            override fun onPlayerError(error: PlaybackException) {
-                val trackId = currentState.currentTrackId
-                val elapsed = if (trackLoadStartTime > 0) System.currentTimeMillis() - trackLoadStartTime else 0
-
-                // P0-A: Comprehensive error logging
-                Log.e(TAG, "[PlaybackTrace][Error] ExoPlayer error track=$trackId elapsed=${elapsed}ms retryCount=$retryCount/$MAX_RETRIES")
-                Log.e(TAG, "[PlaybackTrace][Error] errorCode=${error.errorCode} errorCodeName=${error.errorCodeName}")
-                Log.e(TAG, "[PlaybackTrace][Error] message=${error.message}")
-
-                // Unwrap cause chain for HTTP/CDN errors
-                var cause: Throwable? = error.cause
-                var depth = 0
-                while (cause != null && depth < 5) {
-                    Log.e(TAG, "[PlaybackTrace][Error] cause[$depth]: ${cause.javaClass.simpleName}: ${cause.message}")
-                    if (cause is androidx.media3.datasource.HttpDataSource.HttpDataSourceException) {
-                        Log.e(TAG, "[PlaybackTrace][Error] dataSource=${cause.dataSpec.uri}")
-                    }
-                    if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
-                        Log.e(TAG, "[PlaybackTrace][Error] httpResponseCode=${cause.responseCode}")
-                    }
-                    cause = cause.cause
-                    depth++
-                }
-
-                if (retryCount < MAX_RETRIES && trackId != null) {
-                    retryCount++
-                    Log.w(TAG, "[PlaybackTrace][Error] Retrying playback for $trackId (attempt $retryCount/$MAX_RETRIES)")
-                    playTrackInternal(trackId, isRetry = true)
-                } else {
-                    Log.e(TAG, "[PlaybackTrace][Error] Playback permanently failed for $trackId after $retryCount retries")
-                    updateState(currentState.copy(isBuffering = false, error = error.message))
-                    notifyEvent(PlaybackEvent.ERROR, trackId)
-                    retryCount = 0
-                }
+            if (is403 && trackId != null) {
+                com.auramusic.core.download.DownloadUtil.getInstance(context).invalidateStreamUrl(trackId)
             }
-        })
+
+            if (retryCount < MAX_RETRIES && trackId != null) {
+                retryCount++
+                Log.w(TAG, "[PlaybackTrace][Error] Retrying playback for $trackId (attempt $retryCount/$MAX_RETRIES)")
+                playTrackInternal(trackId, isRetry = true)
+            } else {
+                Log.e(TAG, "[PlaybackTrace][Error] Playback permanently failed for $trackId after $retryCount retries")
+                updateState(currentState.copy(isBuffering = false, error = error.message))
+                notifyEvent(PlaybackEvent.ERROR, trackId)
+                retryCount = 0
+            }
+        }
     }
 
     private fun ensureServiceRunning() {
@@ -584,6 +676,223 @@ class AuraPlayer(
         } catch (e: Exception) {
             Log.w(TAG, "[PlaybackTrace] Service start exception: ${e.message}")
         }
+    }
+
+    private suspend fun resolveTrackMetadata(videoId: String): TrackMetadata {
+        // Level 1: In-memory cache
+        metadataCache[videoId]?.let { return it }
+
+        // Level 2: Room database
+        try {
+            val db = com.auramusic.core.db.AuraDatabase.getInstance(context)
+            val entity = withContext(Dispatchers.IO) { db.trackDao().getById(videoId) }
+            if (entity != null) {
+                val meta = TrackMetadata(entity.id, entity.title, entity.artist, entity.album, entity.duration, entity.artworkUrl, entity.loudnessDb)
+                metadataCache[videoId] = meta
+                return meta
+            }
+        } catch (_: Exception) {}
+
+        // Level 3: Media3 download request data
+        try {
+            val downloadUtil = com.auramusic.core.download.DownloadUtil.getInstance(context)
+            val dl = downloadUtil.getDownload(videoId)
+            if (dl != null && dl.request.data.isNotEmpty()) {
+                val raw = String(dl.request.data, Charsets.UTF_8)
+                var t = "Unknown Title"
+                var a = "Unknown Artist"
+                var alb: String? = null
+                var d = 0
+                var art: String? = null
+                var loudness: Double? = null
+                if (raw.startsWith("{")) {
+                    val j = org.json.JSONObject(raw)
+                    t = j.optString("title", t)
+                    a = j.optString("artist", a)
+                    alb = j.optString("album").takeIf { it.isNotEmpty() }
+                    d = j.optInt("duration", 0)
+                    art = j.optString("artworkUrl").takeIf { it.isNotEmpty() }
+                    if (j.has("loudnessDb") && !j.isNull("loudnessDb")) {
+                        loudness = j.optDouble("loudnessDb")
+                    }
+                } else {
+                    t = raw
+                }
+                val meta = TrackMetadata(videoId, t, a, alb, d, art, loudness)
+                metadataCache[videoId] = meta
+                return meta
+            }
+        } catch (_: Exception) {}
+
+        // Level 4: Minimal identity
+        return TrackMetadata(videoId, videoId, "Unknown Artist", null, 0, null, null)
+    }
+
+    private suspend fun resolveMediaItem(videoId: String, localUrl: String? = null): MediaItem {
+        val downloadUtil = com.auramusic.core.download.DownloadUtil.getInstance(context)
+        val meta = resolveTrackMetadata(videoId)
+
+        // Check local artwork file first (100% offline support)
+        val localArtworkFile = downloadUtil.getLocalArtworkFile(videoId)
+        val effectiveArtworkUri = if (localArtworkFile != null) {
+            Uri.fromFile(localArtworkFile)
+        } else if (isValidArtworkUri(meta.artworkUrl)) {
+            Uri.parse(meta.artworkUrl)
+        } else null
+
+        val mediaMetadata = MediaMetadata.Builder()
+            .setTitle(meta.title)
+            .setArtist(meta.artist)
+            .setAlbumTitle(meta.album)
+            .setArtworkUri(effectiveArtworkUri)
+            .setIsPlayable(true)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .build()
+
+        // Verify physical download asset exists on disk (do not rely on Room alone)
+        val isPhysicallyDownloaded = downloadUtil.isTrackDownloaded(videoId) && downloadUtil.downloadCache.isCached(videoId, 0, 1024)
+
+        val uri = if (isPhysicallyDownloaded && localUrl == null) {
+            Log.i(TAG, "[AOT][Stream] track=$videoId source=downloaded_cache uri=auramusic://track/$videoId")
+            Uri.parse("auramusic://track/$videoId")
+        } else if (localUrl != null) {
+            Log.i(TAG, "[AOT][Stream] track=$videoId source=local_url uri=$localUrl")
+            Uri.parse(localUrl)
+        } else {
+            // Check in-memory stream URL cache first
+            val cachedUrl = downloadUtil.getCachedStreamUrl(videoId)
+            if (cachedUrl != null) {
+                Log.i(TAG, "[AOT][Stream] track=$videoId source=cached_stream_url")
+                Uri.parse(cachedUrl)
+            } else {
+                // Online resolution via UnifiedStreamResolver (InnerTube -> AndroidVR)
+                val resolveStart = System.currentTimeMillis()
+                val result = withContext(Dispatchers.IO) {
+                    streamResolver.resolve(videoId, currentStreamingQuality)
+                }
+                val resolveElapsed = System.currentTimeMillis() - resolveStart
+                downloadUtil.cacheStreamUrl(videoId, result.url, result.format)
+                Log.i(TAG, "[AOT][Stream] track=$videoId source=online_resolved elapsed=${resolveElapsed}ms format=${result.format} bitrate=${result.bitrate} loudnessDb=${result.loudnessDb}")
+                if (result.loudnessDb != null) {
+                    val updatedMeta = meta.copy(loudnessDb = result.loudnessDb)
+                    metadataCache[videoId] = updatedMeta
+                    if (currentState.currentTrackId == videoId) {
+                        currentTrackLoudnessDb = result.loudnessDb
+                        withContext(Dispatchers.Main) {
+                            updateEffectiveVolume()
+                        }
+                    }
+                    try {
+                        val db = com.auramusic.core.db.AuraDatabase.getInstance(context)
+                        withContext(Dispatchers.IO) {
+                            db.trackDao().updateLoudness(videoId, result.loudnessDb)
+                        }
+                    } catch (_: Exception) {}
+                }
+                Uri.parse(result.url)
+            }
+        }
+
+        return MediaItem.Builder()
+            .setMediaId(videoId)
+            .setUri(uri)
+            .setCustomCacheKey(videoId)
+            .setMediaMetadata(mediaMetadata)
+            .build()
+    }
+
+    private fun scheduleAotResolution(currentTrackId: String, currentRequestId: Long) {
+        aotJob?.cancel()
+        if (repeatMode == "track") {
+            Log.i(TAG, "[AOT] Repeat mode is 'track', skipping AOT resolution (ExoPlayer loops natively)")
+            return
+        }
+        if (queue.isEmpty()) return
+
+        val currentQueueIdx = queue.indexOf(currentTrackId)
+        if (currentQueueIdx == -1) {
+            Log.w(TAG, "[AOT] currentTrackId=$currentTrackId not in queue, skipping AOT")
+            return
+        }
+
+        val nextIdx = when (repeatMode) {
+            "queue" -> (currentQueueIdx + 1) % queue.size
+            else -> if (currentQueueIdx < queue.size - 1) currentQueueIdx + 1 else -1
+        }
+
+        if (nextIdx == -1) {
+            Log.i(TAG, "[AOT] Queue reaches end at index $currentQueueIdx, no next track to resolve ahead of time")
+            return
+        }
+
+        val nextTrackId = queue[nextIdx]
+
+        // Check if next track is already attached in ExoPlayer timeline as the next item
+        val player = exoPlayer ?: return
+        val curTimelineIdx = player.currentMediaItemIndex
+        if (curTimelineIdx >= 0 && curTimelineIdx < player.mediaItemCount - 1) {
+            val existingNext = player.getMediaItemAt(curTimelineIdx + 1)
+            if (existingNext.mediaId == nextTrackId) {
+                Log.i(TAG, "[AOT] Next track $nextTrackId is already attached in timeline at index ${curTimelineIdx + 1}")
+                return
+            }
+        }
+
+        Log.i(TAG, "[AOT] Scheduling AOT resolution for next track=$nextTrackId (generation=$currentRequestId currentTrack=$currentTrackId)")
+
+        aotJob = scope.launch(Dispatchers.IO) {
+            try {
+                if (currentRequestId != resolutionRequestId || !isActive) {
+                    Log.w(TAG, "[AOT] Stale before resolve for track=$nextTrackId (gen=$currentRequestId current=$resolutionRequestId)")
+                    return@launch
+                }
+
+                val nextMediaItem = resolveMediaItem(nextTrackId)
+
+                withContext(Dispatchers.Main) {
+                    if (currentRequestId != resolutionRequestId || !isActive) {
+                        Log.w(TAG, "[AOT] Stale after resolve for track=$nextTrackId (gen=$currentRequestId current=$resolutionRequestId)")
+                        return@withContext
+                    }
+                    if (currentState.currentTrackId != currentTrackId) {
+                        Log.w(TAG, "[AOT] Active track changed from $currentTrackId to ${currentState.currentTrackId}, discarding AOT for $nextTrackId")
+                        return@withContext
+                    }
+
+                    val p = exoPlayer ?: return@withContext
+                    val currentIdxInPlayer = p.currentMediaItemIndex
+                    if (currentIdxInPlayer < 0) return@withContext
+
+                    // Remove any obsolete forward items beyond the current playing item
+                    if (p.mediaItemCount > currentIdxInPlayer + 1) {
+                        Log.i(TAG, "[AOT] Removing obsolete forward items (${currentIdxInPlayer + 1} to ${p.mediaItemCount})")
+                        p.removeMediaItems(currentIdxInPlayer + 1, p.mediaItemCount)
+                    }
+
+                    // Attach the pre-resolved next media item into the ExoPlayer timeline
+                    p.addMediaItem(nextMediaItem)
+                    Log.i(TAG, "[AOT] Successfully attached nextMediaItem to ExoPlayer timeline: trackId=$nextTrackId timelineCount=${p.mediaItemCount}")
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) {
+                    Log.i(TAG, "[AOT] AOT resolution cancelled for track=$nextTrackId")
+                } else {
+                    Log.w(TAG, "[AOT] AOT resolution failed for track=$nextTrackId: ${e.message} (playback of $currentTrackId continues)")
+                }
+            }
+        }
+    }
+
+    private fun reconcileTimeline(currentTrackId: String, currentRequestId: Long) {
+        val player = exoPlayer ?: return
+        val curTimelineIdx = player.currentMediaItemIndex
+        if (curTimelineIdx > 1) {
+            // Keep at most 1 item behind the current item to keep memory bounded
+            val itemsToRemove = curTimelineIdx - 1
+            Log.i(TAG, "[Timeline] Bounded timeline: pruning $itemsToRemove played items before index ${curTimelineIdx - 1}")
+            player.removeMediaItems(0, itemsToRemove)
+        }
+        scheduleAotResolution(currentTrackId, currentRequestId)
     }
 
     fun playTrack(videoId: String, localUrl: String? = null) {
@@ -596,11 +905,13 @@ class AuraPlayer(
         if (!isRetry) {
             retryCount = 0
             playStartedEmittedForTrack = null
+            queueNearingEndEmittedForTrack = null
         }
         trackLoadStartTime = System.currentTimeMillis()
 
         // P0: Cancel any previous resolution in-flight and increment monotonic request ID
         currentResolutionJob?.cancel()
+        aotJob?.cancel()
         val requestId = ++resolutionRequestId
 
         Log.i(TAG, "[AutoAdvanceTrace] RESOLUTION_START requestId=$requestId track=$videoId currentIndex=$currentIndex isRetry=$isRetry hasLocalUrl=${localUrl != null}")
@@ -617,151 +928,31 @@ class AuraPlayer(
                 updateState(currentState.copy(
                     isBuffering = true,
                     currentTrackId = videoId,
+                    currentMediaIndex = currentIndex,
                     error = null
                 ))
 
-                val downloadUtil = com.auramusic.core.download.DownloadUtil.getInstance(context)
-
-                // Build initial MediaMetadata from metadataCache, Room database, or Media3 download
-                val meta = metadataCache[videoId] ?: withContext(Dispatchers.IO) {
-                    try {
-                        val db = com.auramusic.core.db.AuraDatabase.getInstance(context)
-                        val entity = db.trackDao().getById(videoId)
-                        if (entity != null) {
-                            TrackMetadata(entity.id, entity.title, entity.artist, entity.album, entity.duration, entity.artworkUrl).also {
-                                metadataCache[videoId] = it
-                            }
-                        } else {
-                            // Check Media3 downloadIndex data!
-                            val dl = downloadUtil.getDownload(videoId)
-                            if (dl != null && dl.request.data.isNotEmpty()) {
-                                val raw = String(dl.request.data, Charsets.UTF_8)
-                                var t = "Unknown Title"
-                                var a = "Unknown Artist"
-                                var alb: String? = null
-                                var d = 0
-                                var art: String? = null
-                                if (raw.startsWith("{")) {
-                                    val j = org.json.JSONObject(raw)
-                                    t = j.optString("title", t)
-                                    a = j.optString("artist", a)
-                                    alb = j.optString("album").takeIf { it.isNotEmpty() }
-                                    d = j.optInt("duration", 0)
-                                    art = j.optString("artworkUrl").takeIf { it.isNotEmpty() }
-                                } else {
-                                    t = raw
-                                }
-                                val entityFromDl = TrackEntity(
-                                    id = videoId,
-                                    title = t,
-                                    artist = a,
-                                    album = alb,
-                                    duration = d,
-                                    artworkUrl = art ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
-                                    isDownloaded = true,
-                                    downloadedAt = System.currentTimeMillis()
-                                )
-                                db.trackDao().upsert(entityFromDl)
-                                TrackMetadata(videoId, t, a, alb, d, art).also {
-                                    metadataCache[videoId] = it
-                                }
-                            } else null
-                        }
-                    } catch (_: Exception) { null }
+                val mediaItem = withContext(Dispatchers.IO) {
+                    resolveMediaItem(videoId, localUrl)
                 }
 
                 if (requestId != resolutionRequestId || !isActive) {
-                    Log.w(TAG, "[AutoAdvanceTrace] requestId=$requestId track=$videoId STALE_AFTER_META (current=$resolutionRequestId) -> IGNORED")
+                    Log.w(TAG, "[AutoAdvanceTrace] requestId=$requestId track=$videoId STALE_AFTER_RESOLVE (current=$resolutionRequestId) -> IGNORED")
                     return@launch
                 }
 
-                // Check local artwork file first (works 100% offline)
-                val localArtworkFile = downloadUtil.getLocalArtworkFile(videoId)
-                val effectiveArtworkUri = if (localArtworkFile != null) {
-                    Uri.fromFile(localArtworkFile)
-                } else if (isValidArtworkUri(meta?.artworkUrl)) {
-                    Uri.parse(meta?.artworkUrl)
-                } else null
+                val player = exoPlayer ?: return@launch
+                Log.i(TAG, "[PlaybackTrace][Lifecycle] SET_MEDIA_ITEM requestId=$requestId track=$videoId")
+                Log.i(SESSION_TAG, "[MediaSessionTrace] SET_MEDIA_ITEM requestId=$requestId trackId=$videoId")
 
-                val mediaMetadata = MediaMetadata.Builder()
-                    .setTitle(meta?.title ?: videoId)
-                    .setArtist(meta?.artist ?: "Unknown Artist")
-                    .setAlbumTitle(meta?.album)
-                    .setArtworkUri(effectiveArtworkUri)
-                    .setIsPlayable(true)
-                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                    .build()
+                player.setMediaItem(mediaItem)
+                player.prepare()
+                player.play()
 
-                val isDownloaded = downloadUtil.isTrackDownloaded(videoId) || downloadUtil.downloadCache.isCached(videoId, 0, 1024)
-
-                if (isDownloaded && localUrl == null) {
-                    if (requestId != resolutionRequestId || !isActive) {
-                        Log.w(TAG, "[AutoAdvanceTrace] requestId=$requestId track=$videoId STALE_OFFLINE (current=$resolutionRequestId) -> IGNORED")
-                        return@launch
-                    }
-                    Log.i(TAG, "[PlaybackTrace][OfflinePlayback] OFFLINE_CACHE_HIT requestId=$requestId track=$videoId playing directly from DownloadCache")
-                    Log.i(SESSION_TAG, "[MediaSessionTrace] MEDIA_ITEM_SET trackId=$videoId (offline)")
-                    val mediaItem = MediaItem.Builder()
-                        .setMediaId(videoId)
-                        .setUri(Uri.parse("auramusic://track/$videoId"))
-                        .setCustomCacheKey(videoId)
-                        .setMediaMetadata(mediaMetadata)
-                        .build()
-                    exoPlayer?.apply {
-                        setMediaItem(mediaItem)
-                        Log.i(TAG, "[PlaybackTrace][Lifecycle] PREPARE_CALLED requestId=$requestId track=$videoId (offline)")
-                        prepare()
-                        Log.i(TAG, "[PlaybackTrace][Lifecycle] PLAY_CALLED requestId=$requestId track=$videoId (offline)")
-                        play()
-                    }
-                    ensureServiceRunning()
-                    return@launch
-                }
-
-                val finalUrl = if (localUrl != null) {
-                    Log.i(TAG, "[PlaybackTrace][Lifecycle] Using localUrl for requestId=$requestId track=$videoId")
-                    localUrl
-                } else {
-                    val resolveStart = System.currentTimeMillis()
-                    val result = withContext(Dispatchers.IO) {
-                        streamResolver.resolve(videoId, currentStreamingQuality)
-                    }
-                    val resolveElapsed = System.currentTimeMillis() - resolveStart
-
-                    if (requestId != resolutionRequestId || !isActive) {
-                        Log.w(TAG, "[AutoAdvanceTrace] requestId=$requestId track=$videoId STALE_AFTER_RESOLVE (current=$resolutionRequestId) -> IGNORED")
-                        return@launch
-                    }
-
-                    downloadUtil.cacheStreamUrl(videoId, result.url, result.format)
-                    val host = try { Uri.parse(result.url).host ?: "unknown" } catch (_: Exception) { "parse_error" }
-                    val isHttps = result.url.startsWith("https://")
-                    Log.i(TAG, "[PlaybackTrace][Lifecycle] RESOLUTION_SUCCESS requestId=$requestId track=$videoId elapsed=${resolveElapsed}ms host=$host isHttps=$isHttps format=${result.format} codec=${result.codec} bitrate=${result.bitrate}")
-                    result.url
-                }
-
-                if (requestId != resolutionRequestId || !isActive) {
-                    Log.w(TAG, "[AutoAdvanceTrace] requestId=$requestId track=$videoId STALE_BEFORE_SET_ITEM (current=$resolutionRequestId) -> IGNORED")
-                    return@launch
-                }
-
-                val host = try { Uri.parse(finalUrl).host ?: "unknown" } catch (_: Exception) { "parse_error" }
-                Log.i(TAG, "[PlaybackTrace][Lifecycle] MEDIA_ITEM_SET requestId=$requestId track=$videoId host=$host")
-                Log.i(SESSION_TAG, "[MediaSessionTrace] MEDIA_ITEM_SET requestId=$requestId trackId=$videoId host=$host")
-                val mediaItem = MediaItem.Builder()
-                    .setMediaId(videoId)
-                    .setUri(finalUrl)
-                    .setCustomCacheKey(videoId)
-                    .setMediaMetadata(mediaMetadata)
-                    .build()
-                exoPlayer?.apply {
-                    setMediaItem(mediaItem)
-                    Log.i(TAG, "[PlaybackTrace][Lifecycle] PREPARE_CALLED requestId=$requestId track=$videoId")
-                    prepare()
-                    Log.i(TAG, "[PlaybackTrace][Lifecycle] PLAY_CALLED requestId=$requestId track=$videoId")
-                    play()
-                }
                 ensureServiceRunning()
+
+                // Immediately schedule AOT resolution for the next track
+                scheduleAotResolution(videoId, requestId)
             } catch (e: Exception) {
                 if (e is CancellationException) {
                     Log.i(TAG, "[AutoAdvanceTrace] requestId=$requestId track=$videoId CANCELLED gracefully")
@@ -770,8 +961,15 @@ class AuraPlayer(
                 val elapsed = System.currentTimeMillis() - trackLoadStartTime
                 Log.e(TAG, "[PlaybackTrace][Lifecycle] playTrack error requestId=$requestId track=$videoId elapsed=${elapsed}ms: ${e.message}", e)
                 if (requestId == resolutionRequestId) {
-                    updateState(currentState.copy(isBuffering = false, error = e.message))
-                    notifyEvent(PlaybackEvent.ERROR, videoId)
+                    if (retryCount < MAX_RETRIES) {
+                        retryCount++
+                        Log.w(TAG, "[PlaybackTrace] Retrying playTrackInternal for $videoId (attempt $retryCount/$MAX_RETRIES)")
+                        playTrackInternal(videoId, localUrl, isRetry = true)
+                    } else {
+                        updateState(currentState.copy(isBuffering = false, error = e.message))
+                        notifyEvent(PlaybackEvent.ERROR, videoId)
+                        retryCount = 0
+                    }
                 }
             }
         }
@@ -800,6 +998,7 @@ class AuraPlayer(
     fun stop() {
         Log.i(SESSION_TAG, "[MediaSessionTrace] STOP")
         currentResolutionJob?.cancel()
+        aotJob?.cancel()
         exoPlayer?.stop()
         stopProgressUpdates()
         updateState(AuraPlaybackState())
@@ -808,6 +1007,7 @@ class AuraPlayer(
     fun setQueue(videoIds: List<String>) {
         queue.clear()
         queue.addAll(videoIds)
+        queueNearingEndEmittedForTrack = null
         val curTrack = currentState.currentTrackId
         if (curTrack != null) {
             val idx = queue.indexOf(curTrack)
@@ -815,6 +1015,31 @@ class AuraPlayer(
         }
         Log.i(TAG, "[ShuffleTrace] setQueue nativeSync size=${videoIds.size} currentIndex=$currentIndex currentTrack=${currentState.currentTrackId}")
         Log.i(SESSION_TAG, "[MediaSessionTrace] SET_QUEUE size=${videoIds.size} currentIndex=$currentIndex")
+
+        // Reconcile AOT next item with updated queue
+        if (curTrack != null) {
+            val gen = resolutionRequestId
+            scope.launch(Dispatchers.Main) {
+                scheduleAotResolution(curTrack, gen)
+            }
+        }
+    }
+
+    fun appendQueue(videoIds: List<String>) {
+        val newItems = videoIds.filter { !queue.contains(it) }
+        if (newItems.isEmpty()) return
+        queue.addAll(newItems)
+        Log.i(TAG, "[QueueReplenish] appendQueue added ${newItems.size} items, new queueSize=${queue.size}")
+        Log.i(SESSION_TAG, "[MediaSessionTrace] APPEND_QUEUE newSize=${queue.size}")
+
+        // Reconcile AOT next item with updated queue
+        val curTrack = currentState.currentTrackId
+        if (curTrack != null) {
+            val gen = resolutionRequestId
+            scope.launch(Dispatchers.Main) {
+                scheduleAotResolution(curTrack, gen)
+            }
+        }
     }
 
     fun setRepeatMode(mode: String) {
@@ -827,57 +1052,185 @@ class AuraPlayer(
         repeatMode = normalized
         Log.i(TAG, "[RepeatTrace] mode changed $oldMode -> $repeatMode (currentIndex=$currentIndex queueSize=${queue.size})")
         Log.i(SESSION_TAG, "[MediaSessionTrace] SET_REPEAT_MODE mode=$repeatMode")
+
+        if (normalized == "track") {
+            exoPlayer?.repeatMode = Player.REPEAT_MODE_ONE
+            val p = exoPlayer
+            val curIdx = p?.currentMediaItemIndex ?: -1
+            if (p != null && curIdx >= 0 && p.mediaItemCount > curIdx + 1) {
+                p.removeMediaItems(curIdx + 1, p.mediaItemCount)
+            }
+        } else {
+            exoPlayer?.repeatMode = Player.REPEAT_MODE_OFF
+            val curTrack = currentState.currentTrackId
+            if (curTrack != null) {
+                val gen = resolutionRequestId
+                scope.launch(Dispatchers.Main) {
+                    scheduleAotResolution(curTrack, gen)
+                }
+            }
+        }
+    }
+
+    // --- Audio Intelligence: Loudness Normalization Implementation ---
+    fun calculateNormalizationGain(loudnessDb: Double?): Float {
+        if (!isNormalizationEnabled || loudnessDb == null || loudnessDb.isNaN() || loudnessDb.isInfinite()) {
+            return 1.0f
+        }
+        // YouTube audio target reference is -14 LUFS.
+        // audioConfig.loudnessDb represents content loudness relative to reference (dB).
+        // Negative loudnessDb means track is quiet -> boost (capped at +3 dB headroom to prevent clipping).
+        // Positive loudnessDb means track is loud -> attenuate (clamped down to -15 dB).
+        val clampedGainDb = (-loudnessDb).coerceIn(-15.0, 3.0)
+        return Math.pow(10.0, clampedGainDb / 20.0).toFloat()
+    }
+
+    private fun updateEffectiveVolume() {
+        val normGain = calculateNormalizationGain(currentTrackLoudnessDb)
+        val effectiveVolume = (userMasterVolume * normGain).coerceIn(0f, 1f)
+        Log.i(TAG, "[Normalization] effectiveVolume=$effectiveVolume (userMasterVolume=$userMasterVolume normGain=$normGain loudnessDb=$currentTrackLoudnessDb enabled=$isNormalizationEnabled)")
+        exoPlayer?.volume = effectiveVolume
+    }
+
+    fun setNormalizeVolume(enabled: Boolean) {
+        if (isNormalizationEnabled != enabled) {
+            isNormalizationEnabled = enabled
+            updateEffectiveVolume()
+            Log.i(TAG, "[Normalization] setNormalizeVolume: enabled=$enabled")
+        }
+    }
+
+    // --- System / OEM Audio Effect Session Management ---
+    @Synchronized
+    private fun updateAudioSession(sessionId: Int) {
+        if (sessionId <= 0 || sessionId == currentAudioSessionId) return
+        closeAudioEffectSession()
+        currentAudioSessionId = sessionId
+        openAudioEffectSession(sessionId)
+        Log.i(TAG, "[AudioEffectSession] Broadcasted open session for sessionId=$sessionId")
+    }
+
+    private fun openAudioEffectSession(sessionId: Int) {
+        try {
+            val intent = Intent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION).apply {
+                putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+                putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
+            }
+            context.sendBroadcast(intent)
+        } catch (_: Exception) {}
+    }
+
+    private fun closeAudioEffectSession() {
+        val sessionId = currentAudioSessionId
+        if (sessionId > 0) {
+            try {
+                val intent = Intent(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION).apply {
+                    putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                    putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+                }
+                context.sendBroadcast(intent)
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun openSystemEqualizer(): Boolean {
+        return try {
+            val sessionId = getAudioSessionId()
+            val intent = Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL).apply {
+                if (sessionId > 0) {
+                    putExtra(AudioEffect.EXTRA_AUDIO_SESSION, sessionId)
+                }
+                putExtra(AudioEffect.EXTRA_PACKAGE_NAME, context.packageName)
+                putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            if (intent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(intent)
+                Log.i(TAG, "[Equalizer] Launched system equalizer panel (session=$sessionId)")
+                true
+            } else {
+                Log.w(TAG, "[Equalizer] No system equalizer activity found on device")
+                false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "[Equalizer] Failed to open system equalizer: ${e.message}")
+            false
+        }
     }
 
     fun setVolume(volume: Float) {
         val clamped = volume.coerceIn(0f, 1f)
-        exoPlayer?.volume = clamped
-        Log.i(TAG, "[PlaybackTrace] setVolume volume=$clamped")
+        userMasterVolume = clamped
+        updateEffectiveVolume()
+        Log.i(TAG, "[PlaybackTrace] setVolume masterVolume=$clamped")
     }
 
     fun skipNext() {
         Log.i(SESSION_TAG, "[MediaSessionTrace] NEXT queueSize=${queue.size} currentIndex=$currentIndex repeatMode=$repeatMode")
         if (queue.isEmpty()) return
-        if (repeatMode == "queue") {
-            val nextIdx = (currentIndex + 1) % queue.size
-            Log.i(TAG, "[AutoAdvanceTrace] skipNext REPEAT_ALL: $currentIndex -> $nextIdx")
-            currentIndex = nextIdx
-            notifyEvent(PlaybackEvent.PLAY_SKIPPED, currentState.currentTrackId)
-            playTrack(queue[currentIndex])
+
+        val targetIdx = if (repeatMode == "queue") {
+            (currentIndex + 1) % queue.size
         } else {
-            if (currentIndex < queue.size - 1) {
-                currentIndex++
-                Log.i(TAG, "[AutoAdvanceTrace] skipNext: $currentIndex (target=${queue[currentIndex]})")
-                notifyEvent(PlaybackEvent.PLAY_SKIPPED, currentState.currentTrackId)
-                playTrack(queue[currentIndex])
-            } else {
-                Log.i(TAG, "[AutoAdvanceTrace] skipNext: already at end of queue (index=$currentIndex size=${queue.size}) -> no-op")
-            }
+            if (currentIndex < queue.size - 1) currentIndex + 1 else -1
+        }
+
+        if (targetIdx == -1) {
+            Log.i(TAG, "[AutoAdvanceTrace] skipNext: already at end of queue -> no-op")
+            return
+        }
+
+        val targetTrackId = queue[targetIdx]
+        val player = exoPlayer
+        val curIdx = player?.currentMediaItemIndex ?: -1
+        val hasNextInTimeline = player != null && curIdx >= 0 && curIdx < player.mediaItemCount - 1
+        val nextItem = if (hasNextInTimeline) player.getMediaItemAt(curIdx + 1) else null
+
+        if (player != null && nextItem != null && nextItem.mediaId == targetTrackId) {
+            Log.i(TAG, "[AOT] skipNext: target $targetTrackId already in timeline at ${curIdx + 1}, executing seekToNextMediaItem()")
+            notifyEvent(PlaybackEvent.PLAY_SKIPPED, currentState.currentTrackId)
+            player.seekToNextMediaItem()
+        } else {
+            Log.i(TAG, "[AOT] skipNext: target $targetTrackId not in timeline, falling back to direct playTrack")
+            currentIndex = targetIdx
+            notifyEvent(PlaybackEvent.PLAY_SKIPPED, currentState.currentTrackId)
+            playTrack(targetTrackId)
         }
     }
 
     fun skipPrevious() {
         Log.i(SESSION_TAG, "[MediaSessionTrace] PREVIOUS queueSize=${queue.size} currentIndex=$currentIndex repeatMode=$repeatMode")
         if (queue.isEmpty()) return
-        // Standard 3-second threshold: if playback position > 3 seconds, restart current track
+
         val pos = exoPlayer?.currentPosition ?: 0
         if (pos > 3000) {
             Log.i(TAG, "[AutoAdvanceTrace] skipPrevious: position=${pos}ms > 3000ms -> restart current track at 0:00")
             seekTo(0)
             return
         }
-        if (repeatMode == "queue") {
-            val prevIdx = if (currentIndex <= 0) queue.size - 1 else currentIndex - 1
-            Log.i(TAG, "[AutoAdvanceTrace] skipPrevious REPEAT_ALL: $currentIndex -> $prevIdx")
-            currentIndex = prevIdx
-            notifyEvent(PlaybackEvent.PLAY_SKIPPED, currentState.currentTrackId)
-            playTrack(queue[currentIndex])
+
+        val targetIdx = if (repeatMode == "queue") {
+            if (currentIndex <= 0) queue.size - 1 else currentIndex - 1
         } else {
-            val prevIdx = (currentIndex - 1).coerceAtLeast(0)
-            Log.i(TAG, "[AutoAdvanceTrace] skipPrevious: $currentIndex -> $prevIdx")
-            currentIndex = prevIdx
+            (currentIndex - 1).coerceAtLeast(0)
+        }
+
+        val targetTrackId = queue[targetIdx]
+        val player = exoPlayer
+        val curIdx = player?.currentMediaItemIndex ?: -1
+        val hasPrevInTimeline = player != null && curIdx > 0
+        val prevItem = if (hasPrevInTimeline) player?.getMediaItemAt(curIdx - 1) else null
+
+        if (player != null && prevItem != null && prevItem.mediaId == targetTrackId) {
+            Log.i(TAG, "[AOT] skipPrevious: target $targetTrackId is in timeline at ${curIdx - 1}, executing seekToPreviousMediaItem()")
             notifyEvent(PlaybackEvent.PLAY_SKIPPED, currentState.currentTrackId)
-            playTrack(queue[currentIndex])
+            player.seekToPreviousMediaItem()
+        } else {
+            Log.i(TAG, "[AOT] skipPrevious: target $targetTrackId not in timeline, calling playTrack")
+            currentIndex = targetIdx
+            notifyEvent(PlaybackEvent.PLAY_SKIPPED, currentState.currentTrackId)
+            playTrack(targetTrackId)
         }
     }
 
@@ -891,7 +1244,10 @@ class AuraPlayer(
     fun release() {
         Log.i(SESSION_TAG, "[MediaSessionTrace] SESSION_RELEASED")
         stopProgressUpdates()
+        aotJob?.cancel()
+        currentResolutionJob?.cancel()
         scope.cancel()
+        closeAudioEffectSession()
         mediaSession?.release()
         mediaSession = null
         exoPlayer?.release()

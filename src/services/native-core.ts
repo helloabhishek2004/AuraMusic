@@ -28,6 +28,7 @@ export interface NativePlaybackState {
   durationMs: number;
   isBuffering: boolean;
   error: string | null;
+  currentMediaIndex?: number;
 }
 
 export interface NativeHistoryEntry {
@@ -51,6 +52,7 @@ interface AuraPlayerModuleInterface {
   saveTrackMetadata(id: string, title: string, artist: string, album: string | null, duration: number, artworkUrl: string | null): void;
   saveTracksMetadata(tracks: Array<{ id: string; title: string; artist: string; album?: string | null; duration?: number; artworkUrl?: string | null; art?: string | null }>): void;
   setQueue(trackIds: string[]): void;
+  appendQueue(trackIds: string[]): void;
   setRepeatMode(mode: string): void;
   setVolume(volume: number): void;
   stop(): void;
@@ -59,6 +61,8 @@ interface AuraPlayerModuleInterface {
   setStreamingQuality(quality: string): Promise<boolean>;
   setCacheLimit(bytes: number): Promise<boolean>;
   getAudioSessionId(): Promise<number>;
+  setNormalizeVolume(enabled: boolean): Promise<boolean>;
+  openSystemEqualizer(): Promise<boolean>;
 }
 
 interface AuraYouTubeModuleInterface {
@@ -70,6 +74,7 @@ interface AuraYouTubeModuleInterface {
   getAlbumDetails(browseId: string): Promise<any>;
   searchArtists(query: string): Promise<any[]>;
   searchAlbums(query: string): Promise<any[]>;
+  getRadioAutomix(videoId: string): Promise<any[]>;
 }
 
 interface AuraHistoryModuleInterface {

@@ -17,6 +17,7 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+*.keystore
 
 # Metro
 .metro-health-check*
@@ -31,6 +32,8 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
+.env.*
 .env*.local
 
 # typescript
@@ -41,3 +44,25 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Android build artifacts
+*.apk
+*.aab
+
+# Google/Firebase
+google-services.json
+
+# Android local config
+local.properties
+key.properties
+
+# Python & Bytecode
+__pycache__/
+*.py[cod]
+venv/
+
+# Temporary logs & scratch
+scratch/
+*.log
+log*.txt
+

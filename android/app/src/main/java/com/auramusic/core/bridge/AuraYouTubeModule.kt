@@ -96,6 +96,18 @@ class AuraYouTubeModule(reactContext: ReactApplicationContext) : ReactContextBas
         }
     }
 
+    @ReactMethod
+    fun getRadioAutomix(videoId: String, promise: Promise) {
+        scope.launch {
+            try {
+                val result = engine.getRadioAutomix(videoId)
+                promise.resolve(convertJsonToArray(result))
+            } catch (e: Exception) {
+                promise.resolve(Arguments.createArray())
+            }
+        }
+    }
+
     private fun convertJsonToArray(jsonArray: JSONArray): WritableArray {
         val array = Arguments.createArray()
         for (i in 0 until jsonArray.length()) {

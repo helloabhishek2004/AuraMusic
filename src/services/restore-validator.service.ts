@@ -97,8 +97,9 @@ export class RestoreValidatorService {
     }
 
     // 4. Download State Reconciliation (Physical vs Logical)
+    // ONLY executed on actual cloud restore to recover from missing physical media
     let repairedCount = 0;
-    if (AuraDownload) {
+    if (isRestored && AuraDownload) {
       try {
         const reconcileResult = await AuraDownload.reconcileDownloads();
         repairedCount = reconcileResult.repairedCount;
@@ -127,26 +128,28 @@ export class RestoreValidatorService {
       this.notifyListeners();
     }
 
-    // 6. Analytics & Recommendation Signal Regeneration
-    try {
-      await useAnalyticsStore.getState().initialize();
-      console.info('[AuraRestore] Analytics affinities rebuilt from Room history.');
-    } catch (e) {
-      console.warn('[AuraRestore] Analytics affinity rebuild error:', e);
-    }
-
-    try {
-      const recStore = useRecommendationsStore.getState();
-      if (typeof recStore.generateRecommendations === 'function') {
-        await recStore.generateRecommendations();
-        console.info('[AuraRestore] Fresh recommendations generated from restored signals.');
+    // 6. Analytics & Recommendation Signal Regeneration (Only on restored install; normal launches defer this to idle)
+    if (isRestored) {
+      try {
+        await useAnalyticsStore.getState().initialize();
+        console.info('[AuraRestore] Analytics affinities rebuilt from Room history.');
+      } catch (e) {
+        console.warn('[AuraRestore] Analytics affinity rebuild error:', e);
       }
-    } catch (e) {
-      console.warn('[AuraRestore] Recommendation generation error:', e);
+
+      try {
+        const recStore = useRecommendationsStore.getState();
+        if (typeof recStore.generateRecommendations === 'function') {
+          await recStore.generateRecommendations();
+          console.info('[AuraRestore] Fresh recommendations generated from restored signals.');
+        }
+      } catch (e) {
+        console.warn('[AuraRestore] Recommendation generation error:', e);
+      }
     }
 
-    // 7. Checkpoint SQLite WAL safely to guarantee durable persistence
-    if (AuraRestore) {
+    // 7. Checkpoint SQLite WAL safely to guarantee durable persistence (Only on restored install)
+    if (isRestored && AuraRestore) {
       try {
         await AuraRestore.checkpointWal();
       } catch (e) {
@@ -155,7 +158,7 @@ export class RestoreValidatorService {
     }
 
     // 8. Mark installation initialized in context.noBackupFilesDir
-    if (AuraRestore) {
+    if (AuraRestore && (isFresh || isRestored)) {
       try {
         await AuraRestore.markInstallInitialized();
         console.info('[AuraRestore] Installation marker confirmed.');

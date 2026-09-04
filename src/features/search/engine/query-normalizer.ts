@@ -5,7 +5,8 @@
 
 const NOISE_WORDS = new Set([
   'official', 'video', 'audio', 'music', 'hd', 'hq', '4k', 'lyrics', 'lyric', 'full',
-  'song', 'tracks', 'track', 'album', 'visualizer', 'topic', 'vevo'
+  'song', 'tracks', 'track', 'album', 'visualizer', 'topic', 'vevo',
+  'feat', 'ft', 'featuring', 'remaster', 'remastered', 'deluxe'
 ]);
 
 export interface NormalizedResult {
@@ -41,11 +42,13 @@ export function normalizeQuery(text: string): NormalizedResult {
     }
   });
 
-  // Strip punctuation & brackets but keep words
+  // Strip punctuation & brackets but keep words, and strip noise words
   let clean = raw
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '') // remove diacritics
+    .replace(/\b(feat\.|featuring|ft\.)\b/gi, ' ')
+    .replace(/\b(remaster(ed)?|deluxe(\s+edition)?)\b/gi, ' ')
     .replace(/[()[\]{}]/g, ' ')
     .replace(/[-_–—]/g, ' ')
     .replace(/['"’`]/g, '')
@@ -83,4 +86,48 @@ export function detectVersionType(title: string, subtitle?: string): 'canonical'
   if (/\b(official\s*video|music\s*video)\b/i.test(combined)) return 'video';
   
   return 'canonical';
+}
+
+export function calculateJaroWinkler(s1: string, s2: string): number {
+  if (s1 === s2) return 1.0;
+  if (!s1 || !s2) return 0.0;
+
+  const maxDist = Math.floor(Math.max(s1.length, s2.length) / 2) - 1;
+  const match1 = new Array(s1.length).fill(false);
+  const match2 = new Array(s2.length).fill(false);
+
+  let matches = 0;
+  for (let i = 0; i < s1.length; i++) {
+    const start = Math.max(0, i - maxDist);
+    const end = Math.min(i + maxDist + 1, s2.length);
+    for (let j = start; j < end; j++) {
+      if (match2[j] || s1[i] !== s2[j]) continue;
+      match1[i] = true;
+      match2[j] = true;
+      matches++;
+      break;
+    }
+  }
+
+  if (matches === 0) return 0.0;
+
+  let transpositions = 0;
+  let k = 0;
+  for (let i = 0; i < s1.length; i++) {
+    if (!match1[i]) continue;
+    while (!match2[k]) k++;
+    if (s1[i] !== s2[k]) transpositions++;
+    k++;
+  }
+
+  const sim = (matches / s1.length + matches / s2.length + (matches - transpositions / 2) / matches) / 3.0;
+  
+  // Winkler prefix boost (up to 4 chars)
+  let prefix = 0;
+  for (let i = 0; i < Math.min(4, Math.min(s1.length, s2.length)); i++) {
+    if (s1[i] === s2[i]) prefix++;
+    else break;
+  }
+
+  return sim + prefix * 0.1 * (1.0 - sim);
 }

@@ -393,48 +393,6 @@ const QualityModal = React.memo(({ visible, onClose, title, selectedOption, onSe
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CROSSFADE SLIDER
-// ─────────────────────────────────────────────────────────────────────────────
-const CrossfadeSlider = React.memo(({ value, panHandlers }: { value: number; panHandlers: any }) => {
-  const animWidth = useSharedValue(value);
-
-  useEffect(() => {
-    animWidth.value = withSpring(value, { damping: 20, stiffness: 150 });
-  }, [value]);
-
-  const fillStyle = useAnimatedStyle(() => {
-    return {
-      width: `${(animWidth.value / 12) * 100}%`,
-    };
-  });
-
-  const thumbStyle = useAnimatedStyle(() => {
-    return {
-      left: `${(animWidth.value / 12) * 100}%`,
-    };
-  });
-
-  return (
-    <View style={{ paddingHorizontal: 24, paddingBottom: 20 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-        <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", width: 24, textAlign: "center" }}>0s</Text>
-        <View style={{ flex: 1, height: 5, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.08)", position: "relative" }}>
-          <Animated.View style={[StyleSheet.absoluteFill, { borderRadius: 3, overflow: "hidden" }, fillStyle]}>
-            <LinearGradient colors={[PRIMARY, `${PRIMARY}99`]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-          </Animated.View>
-          <Animated.View style={[st.sliderThumb, { borderColor: PRIMARY, shadowColor: PRIMARY }, thumbStyle]} />
-          <View style={[StyleSheet.absoluteFill, { marginVertical: -14 }]} {...panHandlers} />
-        </View>
-        <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", width: 28, textAlign: "center" }}>12s</Text>
-      </View>
-      <View style={{ alignItems: "center", marginTop: 8 }}>
-        <Text style={{ fontSize: 12, color: PRIMARY, fontWeight: "700" }}>{value === 0 ? "Off" : `${value}s crossfade`}</Text>
-      </View>
-    </View>
-  );
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
 // CACHE LIMIT PILLS  (2 GB / 5 GB / 10 GB / ∞)
 // ─────────────────────────────────────────────────────────────────────────────
 const CachePills = React.memo(({ current, onSelect }: { current: number | "unlimited"; onSelect: (v: number | "unlimited") => void }) => (
@@ -467,10 +425,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   
   // Settings selectors
-  const crossfadeDuration = useSettingsStore(s => s.crossfadeDuration);
-  const crossfadeEnabled = useSettingsStore(s => s.crossfadeEnabled);
   const toggleSetting = useSettingsStore(s => s.toggleSetting);
-  const gaplessPlayback = useSettingsStore(s => s.gaplessPlayback);
   const normalizeVolume = useSettingsStore(s => s.normalizeVolume);
   const autoplayEnabled = useSettingsStore(s => s.autoplayEnabled);
   const smartShuffleEnabled = useSettingsStore(s => s.smartShuffleEnabled);
@@ -484,7 +439,6 @@ export default function SettingsScreen() {
   const setMaxSongCache = useSettingsStore(s => s.setMaxSongCache);
   const setStreamingQuality = useSettingsStore(s => s.setStreamingQuality);
   const setDownloadQuality = useSettingsStore(s => s.setDownloadQuality);
-  const setCrossfadeDuration = useSettingsStore(s => s.setCrossfadeDuration);
 
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTopOnTabPress(scrollRef);
@@ -557,25 +511,26 @@ export default function SettingsScreen() {
   };
 
   const handleOpenEQ = async () => {
-    const res = await AudioSessionController.openEqualizer();
-    if (!res.success) Alert.alert("Equalizer", "No compatible equalizer found on this device.");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      const { AuraPlayer } = require("../../src/services/native-core");
+      let launched = false;
+      if (AuraPlayer && typeof AuraPlayer.openSystemEqualizer === "function") {
+        launched = await AuraPlayer.openSystemEqualizer();
+      }
+      if (!launched) {
+        Alert.alert(
+          "Equalizer Unavailable",
+          "No system equalizer or audio effects panel was found on this device."
+        );
+      }
+    } catch {
+      Alert.alert(
+        "Equalizer Unavailable",
+        "Could not launch the system equalizer on this device."
+      );
+    }
   };
-
-  const crossfadePan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => {
-        const v = Math.round((e.nativeEvent.locationX / (SW - 96)) * 12);
-        setCrossfadeDuration(Math.max(0, Math.min(12, v)));
-        Haptics.selectionAsync();
-      },
-      onPanResponderMove: (e) => {
-        const v = Math.round((e.nativeEvent.locationX / (SW - 96)) * 12);
-        setCrossfadeDuration(Math.max(0, Math.min(12, v)));
-      },
-    })
-  ).current;
 
   // Quality label helpers
   const getQualityLabel = (type: string, val: AudioQuality) => {
@@ -717,37 +672,18 @@ export default function SettingsScreen() {
         <Section index={1}>
           <SectionLabel icon="music-note" title="Playback" />
           <GlassCard r={32} style={{ overflow: "hidden" }}>
-            {/* Crossfade */}
-            <Row
-              icon="compare-arrows" iconColor="#D8B4FE" iconBg="rgba(168,85,247,0.10)"
-              label="Crossfade" sub="Seamlessly blend tracks"
-              right={
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                  {crossfadeEnabled && <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", fontWeight: "600" }}>{crossfadeDuration}s</Text>}
-                  <Toggle value={crossfadeEnabled} onChange={() => toggleSetting("crossfadeEnabled")} />
-                </View>
-              }
-            />
-            {crossfadeEnabled && <CrossfadeSlider value={crossfadeDuration} panHandlers={crossfadePan.panHandlers} />}
-            <Divider />
-            {/* Gapless */}
-            <Row
-              icon="linear-scale" iconColor="#67E8F9" iconBg="rgba(6,182,212,0.10)"
-              label="Gapless Playback" sub="No silence between tracks"
-              right={<Toggle value={gaplessPlayback} onChange={() => toggleSetting("gaplessPlayback")} />}
-            />
-            <Divider />
             {/* Normalize */}
             <Row
               icon="volume-up" iconColor="#F9A8D4" iconBg="rgba(236,72,153,0.10)"
-              label="Normalize Volume" sub="Consistent level for all songs"
+              label="Normalize Volume" sub="Keeps tracks at a consistent perceived volume"
               right={<Toggle value={normalizeVolume} onChange={() => toggleSetting("normalizeVolume")} />}
             />
             <Divider />
             {/* Equalizer */}
             <Row
               icon="equalizer" iconColor="#FDE047" iconBg="rgba(234,179,8,0.10)"
-              label="Equalizer" sub="Custom frequency adjustment"
+              label="Equalizer"
+              sub="Open device equalizer"
               onPress={handleOpenEQ} chevron
             />
             <Divider />

@@ -1525,30 +1525,56 @@ export default function SearchScreen() {
       if (!track?.id) return;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-      // 1. Contextual Queue Creation
-      const currentSongs = results?.songs || [];
-      const contextualQueue =
-        (contextList || currentSongs).length > 0
-          ? contextList || currentSongs
-          : [track];
+      const initialPlayerTrack = createPlayerTrack(track);
 
-      const playerTracks = contextualQueue.map((t) => createPlayerTrack(t));
-      const startIndex = playerTracks.findIndex((t) => t.id === track.id);
+      // 1. If explicit contextList is provided (e.g. restoring saved search history queue)
+      if (contextList && contextList.length > 0) {
+        const playerTracks = contextList.map((t) => createPlayerTrack(t));
+        const startIndex = playerTracks.findIndex((t) => t.id === track.id);
+        goNowPlaying(track.id);
+        setActiveContext({ type: "search", id: query });
+        await setQueue(playerTracks, startIndex !== -1 ? startIndex : 0, {
+          sourceId: query,
+          sourceType: "search",
+          generatedAt: Date.now()
+        });
+        return contextList;
+      }
 
-      // 2. NAVIGATE instantly
+      // 2. Direct Search Play: Start the selected song immediately!
+      // Do NOT dump the raw search results list into the queue.
       goNowPlaying(track.id);
-
-      // 3. SYNC QUEUE and Resolve
       setActiveContext({ type: "search", id: query });
-      await setQueue(playerTracks, startIndex !== -1 ? startIndex : 0, {
+      await setQueue([initialPlayerTrack], 0, {
         sourceId: query,
         sourceType: "search",
+        seedTrackId: track.id,
         generatedAt: Date.now()
       });
-      
-      return contextualQueue;
+
+      // 3. Asynchronously generate the Vibe Continuation Queue in the background
+      InteractionManager.runAfterInteractions(() => {
+        const { AutoplayRadio } = require('@/src/features/player/services/autoplay-radio');
+        AutoplayRadio.generateContinuationQueue(initialPlayerTrack)
+          .then((continuationTracks: PlayerTrack[]) => {
+            const currentStore = usePlayerStore.getState();
+            if (currentStore.currentTrack?.id !== initialPlayerTrack.id) {
+              console.log(`[SearchPlay] Discarding stale vibe queue for "${track.title}" because current track is now "${currentStore.currentTrack?.title}"`);
+              return;
+            }
+            if (continuationTracks && continuationTracks.length > 0) {
+              console.log(`[SearchPlay] Appended ${continuationTracks.length} vibe tracks for seed "${track.title}"`);
+              currentStore.appendQueue(continuationTracks);
+            }
+          })
+          .catch((err: any) => {
+            console.warn('[SearchPlay] Vibe queue generation error:', err);
+          });
+      });
+
+      return [track];
     },
-    [goNowPlaying, setQueue, results, createPlayerTrack, setActiveContext, query],
+    [goNowPlaying, setQueue, createPlayerTrack, setActiveContext, query],
   );
 
   const handlePlaySong = useCallback(

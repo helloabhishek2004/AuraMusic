@@ -3,6 +3,7 @@ package com.auramusic.core.youtube
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -143,15 +144,31 @@ class AuraYouTubeEngine(private val context: Context) {
                                         var watchId = nav?.optJSONObject("watchEndpoint")?.optString("videoId") ?: ""
                                         val browseId = nav?.optJSONObject("browseEndpoint")?.optString("browseId") ?: ""
 
-                                        if (watchId.isEmpty()) {
+                                        var topMusicVideoType = nav?.optJSONObject("watchEndpoint")
+                                            ?.optJSONObject("watchEndpointMusicSupportedConfigs")
+                                            ?.optJSONObject("watchEndpointMusicConfig")
+                                            ?.optString("musicVideoType", "") ?: ""
+
+                                        if (watchId.isEmpty() || topMusicVideoType.isEmpty()) {
                                             val buttons = card.optJSONArray("buttons")
                                             if (buttons != null) {
                                                 for (bIdx in 0 until buttons.length()) {
                                                     val btn = buttons.optJSONObject(bIdx)?.optJSONObject("buttonRenderer")
                                                     val bNav = btn?.optJSONObject("command") ?: btn?.optJSONObject("navigationEndpoint")
                                                     val wId = bNav?.optJSONObject("watchEndpoint")?.optString("videoId")
-                                                    if (!wId.isNullOrEmpty()) {
+                                                    if (watchId.isEmpty() && !wId.isNullOrEmpty()) {
                                                         watchId = wId
+                                                    }
+                                                    if (topMusicVideoType.isEmpty()) {
+                                                        val mvt = bNav?.optJSONObject("watchEndpoint")
+                                                            ?.optJSONObject("watchEndpointMusicSupportedConfigs")
+                                                            ?.optJSONObject("watchEndpointMusicConfig")
+                                                            ?.optString("musicVideoType", "") ?: ""
+                                                        if (mvt.isNotEmpty()) {
+                                                            topMusicVideoType = mvt
+                                                        }
+                                                    }
+                                                    if (watchId.isNotEmpty() && topMusicVideoType.isNotEmpty()) {
                                                         break
                                                     }
                                                 }
@@ -186,6 +203,11 @@ class AuraYouTubeEngine(private val context: Context) {
                                             }
                                         }
 
+                                        val isTopAtv = topMusicVideoType == "MUSIC_VIDEO_TYPE_ATV"
+                                        val isTopOmv = topMusicVideoType == "MUSIC_VIDEO_TYPE_OMV" || topMusicVideoType == "MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC_VIDEO"
+                                        val isTopTopic = artistName.trim().endsWith("- Topic") || subtitle.contains("- Topic")
+                                        val isTopOfficial = isTopAtv || isTopOmv || isTopTopic || (cardType == "ARTIST" || cardType == "ALBUM" || cardType == "PLAYLIST") || (cardType == "SONG" && topMusicVideoType.isNotEmpty() && topMusicVideoType != "MUSIC_VIDEO_TYPE_UGC" && topMusicVideoType != "MUSIC_VIDEO_TYPE_PODCAST_EPISODE")
+
                                         val topObj = JSONObject()
                                         topObj.put("id", if (watchId.isNotEmpty()) watchId else browseId)
                                         topObj.put("type", cardType)
@@ -198,7 +220,8 @@ class AuraYouTubeEngine(private val context: Context) {
                                         topObj.put("videoId", watchId)
                                         topObj.put("browseId", browseId)
                                         topObj.put("thumbnail", art)
-                                        topObj.put("isOfficial", true)
+                                        topObj.put("musicVideoType", topMusicVideoType)
+                                        topObj.put("isOfficial", isTopOfficial)
                                         topObj.put("sourceRank", 0)
 
                                         responseJson.put("topResult", topObj)
@@ -305,9 +328,25 @@ class AuraYouTubeEngine(private val context: Context) {
             ?: root.optJSONObject("playlistItemData")?.optString("videoId") ?: ""
         val browseId = nav?.optJSONObject("browseEndpoint")?.optString("browseId") ?: ""
 
-        if (watchId.isEmpty()) {
+        var musicVideoType = nav?.optJSONObject("watchEndpoint")
+            ?.optJSONObject("watchEndpointMusicSupportedConfigs")
+            ?.optJSONObject("watchEndpointMusicConfig")
+            ?.optString("musicVideoType", "") ?: ""
+
+        if (watchId.isEmpty() || musicVideoType.isEmpty()) {
             val overlay = root.optJSONObject("overlay")?.optJSONObject("musicItemThumbnailOverlayRenderer")?.optJSONObject("content")?.optJSONObject("musicPlayButtonRenderer")
-            watchId = overlay?.optJSONObject("playNavigationEndpoint")?.optJSONObject("watchEndpoint")?.optString("videoId") ?: ""
+            val playNav = overlay?.optJSONObject("playNavigationEndpoint")
+            if (watchId.isEmpty()) {
+                watchId = playNav?.optJSONObject("watchEndpoint")?.optString("videoId") ?: ""
+            }
+            if (musicVideoType.isEmpty()) {
+                val overlayConfig = playNav?.optJSONObject("watchEndpoint")
+                    ?.optJSONObject("watchEndpointMusicSupportedConfigs")
+                    ?.optJSONObject("watchEndpointMusicConfig")
+                if (overlayConfig != null) {
+                    musicVideoType = overlayConfig.optString("musicVideoType", "")
+                }
+            }
         }
 
         val art = extractThumbnail(root)
@@ -435,6 +474,11 @@ class AuraYouTubeEngine(private val context: Context) {
         val durationSec = parseDurationSeconds(durationStr)
         val durationMs = durationSec * 1000
 
+        val isAtv = musicVideoType == "MUSIC_VIDEO_TYPE_ATV"
+        val isOmv = musicVideoType == "MUSIC_VIDEO_TYPE_OMV" || musicVideoType == "MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC_VIDEO"
+        val isTopic = artistName.trim().endsWith("- Topic") || col2Text.contains("- Topic")
+        val isOfficial = isAtv || isOmv || isTopic || (itemType == "ARTIST" || itemType == "ALBUM" || itemType == "PLAYLIST") || (itemType == "SONG" && musicVideoType.isNotEmpty() && musicVideoType != "MUSIC_VIDEO_TYPE_UGC" && musicVideoType != "MUSIC_VIDEO_TYPE_PODCAST_EPISODE")
+
         val itemObj = JSONObject()
         itemObj.put("id", if (watchId.isNotEmpty()) watchId else browseId)
         itemObj.put("type", itemType)
@@ -453,7 +497,8 @@ class AuraYouTubeEngine(private val context: Context) {
         itemObj.put("subscribers", subscribers)
         itemObj.put("trackCount", trackCount)
         itemObj.put("isExplicit", isExplicit)
-        itemObj.put("isOfficial", itemType != "VIDEO")
+        itemObj.put("musicVideoType", musicVideoType)
+        itemObj.put("isOfficial", isOfficial)
         itemObj.put("sourceRank", rankIndex)
 
         return itemObj
@@ -963,4 +1008,151 @@ class AuraYouTubeEngine(private val context: Context) {
             })
         }
     }
+
+    /**
+     * Fetch radio automix recommendations for a videoId via InnerTube /v1/next.
+     * Guaranteed bounded execution with timeout and safe fallback.
+     */
+    suspend fun getRadioAutomix(videoId: String): JSONArray = withTimeoutOrNull(3500L) {
+        suspendCancellableCoroutine { continuation ->
+            val json = JSONObject()
+            json.put("context", getBaseContext())
+            json.put("videoId", videoId)
+            json.put("playlistId", "RDAMVM$videoId")
+            json.put("isAudioOnly", true)
+
+            val request = Request.Builder()
+                .url("https://music.youtube.com/youtubei/v1/next?prettyPrint=false")
+                .post(json.toString().toRequestBody("application/json".toMediaType()))
+                .header("User-Agent", "Mozilla/5.0")
+                .build()
+
+            val call = client.newCall(request)
+            continuation.invokeOnCancellation {
+                try {
+                    call.cancel()
+                } catch (_: Throwable) {}
+            }
+
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isActive) {
+                        continuation.resume(JSONArray())
+                    }
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        val body = response.body?.string() ?: ""
+                        val root = JSONObject(body)
+                        val results = JSONArray()
+
+                        val tabs = root.optJSONObject("contents")
+                            ?.optJSONObject("singleColumnMusicWatchNextResultsRenderer")
+                            ?.optJSONObject("tabbedRenderer")
+                            ?.optJSONObject("watchNextTabbedResultsRenderer")
+                            ?.optJSONArray("tabs")
+
+                        val tab0 = tabs?.optJSONObject(0)?.optJSONObject("tabRenderer")?.optJSONObject("content")
+                        val playlistPanel = tab0?.optJSONObject("musicQueueRenderer")?.optJSONObject("content")?.optJSONObject("playlistPanelRenderer")
+                            ?: root.optJSONObject("continuationContents")?.optJSONObject("playlistPanelContinuation")
+
+                        val items = playlistPanel?.optJSONArray("contents")
+                        if (items != null) {
+                            for (i in 0 until items.length()) {
+                                val item = items.optJSONObject(i)?.optJSONObject("playlistPanelVideoRenderer") ?: continue
+                                val vId = item.optString("videoId")
+                                if (vId.isEmpty() || vId == videoId) continue
+
+                                val titleRuns = item.optJSONObject("title")?.optJSONArray("runs")
+                                val title = titleRuns?.optJSONObject(0)?.optString("text") ?: ""
+                                if (title.isEmpty()) continue
+
+                                val longBylineRuns = item.optJSONObject("longBylineText")?.optJSONArray("runs")
+                                    ?: item.optJSONObject("shortBylineText")?.optJSONArray("runs")
+                                var artistName = ""
+                                var artistId = ""
+                                var albumName = ""
+                                var albumId = ""
+
+                                if (longBylineRuns != null) {
+                                    for (r in 0 until longBylineRuns.length()) {
+                                        val run = longBylineRuns.optJSONObject(r) ?: continue
+                                        val text = run.optString("text").trim()
+                                        if (text.isEmpty() || text == "•") continue
+                                        val navEnd = run.optJSONObject("navigationEndpoint")
+                                        val bId = navEnd?.optJSONObject("browseEndpoint")?.optString("browseId") ?: ""
+                                        if (bId.startsWith("UC")) {
+                                            if (artistName.isEmpty()) {
+                                                artistName = text
+                                                artistId = bId
+                                            }
+                                        } else if (bId.startsWith("MPREb_")) {
+                                            if (albumName.isEmpty()) {
+                                                albumName = text
+                                                albumId = bId
+                                            }
+                                        } else if (artistName.isEmpty()) {
+                                            artistName = text
+                                        }
+                                    }
+                                }
+
+                                val lengthText = item.optJSONObject("lengthText")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text")
+                                    ?: item.optJSONObject("lengthText")?.optString("simpleText") ?: ""
+                                val durSec = parseDurationSeconds(lengthText)
+
+                                val thumbs = item.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
+                                var artwork = ""
+                                if (thumbs != null && thumbs.length() > 0) {
+                                    artwork = thumbs.optJSONObject(thumbs.length() - 1)?.optString("url") ?: ""
+                                }
+
+                                val navEnd = item.optJSONObject("navigationEndpoint")
+                                val musicVideoType = navEnd?.optJSONObject("watchEndpoint")
+                                    ?.optJSONObject("watchEndpointMusicSupportedConfigs")
+                                    ?.optJSONObject("watchEndpointMusicConfig")
+                                    ?.optString("musicVideoType", "") ?: ""
+
+                                val isAtv = musicVideoType == "MUSIC_VIDEO_TYPE_ATV"
+                                val isOmv = musicVideoType == "MUSIC_VIDEO_TYPE_OMV" || musicVideoType == "MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC_VIDEO"
+                                val isTopic = artistName.trim().endsWith("- Topic")
+                                val isOfficial = isAtv || isOmv || isTopic || (musicVideoType.isNotEmpty() && musicVideoType != "MUSIC_VIDEO_TYPE_UGC" && musicVideoType != "MUSIC_VIDEO_TYPE_PODCAST_EPISODE")
+
+                                if (musicVideoType == "MUSIC_VIDEO_TYPE_PODCAST_EPISODE") continue
+
+                                val trackObj = JSONObject()
+                                trackObj.put("id", vId)
+                                trackObj.put("videoId", vId)
+                                trackObj.put("title", title)
+                                trackObj.put("artist", if (artistName.isNotEmpty()) artistName else "Unknown Artist")
+                                trackObj.put("artistName", if (artistName.isNotEmpty()) artistName else "Unknown Artist")
+                                trackObj.put("artistId", artistId)
+                                trackObj.put("album", albumName)
+                                trackObj.put("albumName", albumName)
+                                trackObj.put("albumId", albumId)
+                                trackObj.put("duration", durSec)
+                                trackObj.put("durationMs", durSec * 1000)
+                                trackObj.put("artworkUrl", artwork)
+                                trackObj.put("thumbnail", artwork)
+                                trackObj.put("musicVideoType", musicVideoType)
+                                trackObj.put("isOfficial", isOfficial)
+
+                                results.put(trackObj)
+                            }
+                        }
+
+                        if (continuation.isActive) {
+                            continuation.resume(results)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "[Automix] Exception parsing radio: ${e.message}", e)
+                        if (continuation.isActive) {
+                            continuation.resume(JSONArray())
+                        }
+                    }
+                }
+            })
+        }
+    } ?: JSONArray()
 }

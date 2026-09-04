@@ -7,7 +7,8 @@ enum class PlaybackEvent {
     PLAY_COMPLETED,
     PLAY_SKIPPED,
     SEEKED,
-    ERROR
+    ERROR,
+    QUEUE_NEARING_END
 }
 
 data class AuraPlaybackState(
@@ -16,5 +17,6 @@ data class AuraPlaybackState(
     val positionMs: Long = 0,
     val durationMs: Long = 0,
     val isBuffering: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val currentMediaIndex: Int = -1
 )

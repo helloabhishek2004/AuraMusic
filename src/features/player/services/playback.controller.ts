@@ -12,6 +12,7 @@ export class PlaybackController {
   private static sessionStartedAt: number = 0;
   private static sessionStartPositionMs: number = 0;
   private static maxPositionMs: number = 0;
+  private static isReplenishingQueue: boolean = false;
 
   static initialize() {
     if (this.isInitialized || _controllerInitialized) return;
@@ -79,8 +80,12 @@ export class PlaybackController {
         //   2. Scan FORWARD from currentIndex+1 (natural advance / next).
         //   3. Scan from 0 to currentIndex (wrap-around, shuffle, user jump backward).
         let resolvedIdx = -1;
+        const nativeIdx = state.currentMediaIndex ?? -1;
 
-        if (queue[currentIdx]?.id === nativeTrackId) {
+        // 1. If native provided a valid currentMediaIndex and it matches nativeTrackId in JS queue
+        if (nativeIdx >= 0 && nativeIdx < queue.length && queue[nativeIdx]?.id === nativeTrackId) {
+          resolvedIdx = nativeIdx;
+        } else if (queue[currentIdx]?.id === nativeTrackId) {
           resolvedIdx = currentIdx; // current index still valid
         } else {
           // Forward scan -- most likely next track
@@ -165,6 +170,44 @@ export class PlaybackController {
                 currentIndex: 0,
               });
             }
+          }
+          break;
+
+        case 'QUEUE_NEARING_END':
+          try {
+            const { useSettingsStore } = require('../../settings/store/settings.store');
+            const autoplayEnabled = useSettingsStore.getState().autoplayEnabled;
+            const isRepeatOff = store.repeatMode === 'off';
+
+            if (autoplayEnabled && isRepeatOff && store.currentTrack && !this.isReplenishingQueue) {
+              this.isReplenishingQueue = true;
+              const requestedTrackId = store.currentTrack.id;
+              console.log(`[PlaybackController] QUEUE_NEARING_END received for ${data.trackId}; generating proactive continuation`);
+              const { AutoplayRadio } = require('./autoplay-radio');
+              AutoplayRadio.generateContinuationQueue(store.currentTrack)
+                .then((continuationTracks: any[]) => {
+                  const currentStore = usePlayerStore.getState();
+                  if (currentStore.currentTrack?.id !== requestedTrackId) {
+                    console.log(`[PlaybackController] Discarding stale continuation for ${requestedTrackId} (user moved to ${currentStore.currentTrack?.id})`);
+                    return;
+                  }
+                  if (continuationTracks && continuationTracks.length > 0) {
+                    console.log(`[PlaybackController] Proactively appended ${continuationTracks.length} tracks to queue`);
+                    currentStore.appendQueue(continuationTracks);
+                  }
+                })
+                .catch((err: any) => {
+                  console.warn('[PlaybackController] Error proactively generating continuation queue:', err);
+                })
+                .finally(() => {
+                  setTimeout(() => {
+                    this.isReplenishingQueue = false;
+                  }, 5000);
+                });
+            }
+          } catch (e) {
+            console.warn('[PlaybackController] Proactive replenishment error:', e);
+            this.isReplenishingQueue = false;
           }
           break;
 

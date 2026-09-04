@@ -33,16 +33,6 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
 
     private val moduleScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    init {
-        // Prewarm BotGuard VM in the background as soon as module is created (app launch)
-        moduleScope.launch {
-            try {
-                poTokenManager.prewarm()
-            } catch (e: Exception) {
-                // Silent
-            }
-        }
-    }
 
     private var isListening = false
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -55,6 +45,7 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
             sendEvent("onPlaybackStateChanged", Arguments.createMap().apply {
                 putBoolean("isPlaying", state.isPlaying)
                 putString("currentTrackId", state.currentTrackId)
+                putInt("currentMediaIndex", state.currentMediaIndex)
                 putDouble("positionMs", state.positionMs.toDouble())
                 putDouble("durationMs", state.durationMs.toDouble())
                 putBoolean("isBuffering", state.isBuffering)
@@ -145,6 +136,15 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
     }
 
     @ReactMethod
+    fun appendQueue(trackIds: ReadableArray) {
+        val ids = mutableListOf<String>()
+        for (i in 0 until trackIds.size()) {
+            trackIds.getString(i)?.let { ids.add(it) }
+        }
+        mainHandler.post { player.appendQueue(ids) }
+    }
+
+    @ReactMethod
     fun setRepeatMode(mode: String) {
         mainHandler.post { player.setRepeatMode(mode) }
     }
@@ -225,6 +225,30 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
                 promise.resolve(sessionId)
             } catch (e: Exception) {
                 promise.reject("GET_SESSION_ERROR", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun setNormalizeVolume(enabled: Boolean, promise: Promise) {
+        mainHandler.post {
+            try {
+                player.setNormalizeVolume(enabled)
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.reject("ERR_NORMALIZE_VOLUME", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun openSystemEqualizer(promise: Promise) {
+        mainHandler.post {
+            try {
+                val opened = player.openSystemEqualizer()
+                promise.resolve(opened)
+            } catch (e: Exception) {
+                promise.reject("ERR_SYS_EQ", e.message, e)
             }
         }
     }

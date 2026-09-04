@@ -13,7 +13,7 @@
 
 import { AuraYouTube, AuraHistory, AuraDownload, isNativeCoreAvailable } from '../../../services/native-core';
 import { UnifiedSearchResponse, SearchEntity } from '../types/search-engine.types';
-import { classifySearchIntent } from './search-intent';
+import { classifySearchIntent, refineIntentWithCandidates } from './search-intent';
 import { deduplicateSearchResults } from './search-deduplicator';
 import { rankSearchResults, formatSearchSections, PersonalizationContext } from './search-ranker';
 import { useNetworkStore } from '../../network/store/network.store';
@@ -315,14 +315,17 @@ export class SearchRepository {
     // 6. Deduplicate
     const deduplicated = deduplicateSearchResults(combinedEntities);
 
+    // 6b. Candidate-Assisted Intent Upgrade (for 1- and 2-word artist/album queries)
+    const refinedIntent = refineIntentWithCandidates(intent, deduplicated, trimmed);
+
     // 7. Rank with Multi-Signal Scoring
     if (options?.likedIds) {
       this.personalizationContext.likedTrackIds = new Set(options.likedIds);
     }
-    const ranked = rankSearchResults(deduplicated, trimmed, intent, this.personalizationContext);
+    const ranked = rankSearchResults(deduplicated, trimmed, refinedIntent, this.personalizationContext);
 
     // 8. Format Dynamic Sections
-    const formatted = formatSearchSections(ranked, intent);
+    const formatted = formatSearchSections(ranked, refinedIntent);
 
     const isEmpty = !formatted.topResult &&
       formatted.songs.length === 0 &&
@@ -333,7 +336,7 @@ export class SearchRepository {
 
     const response: UnifiedSearchResponse = {
       query: trimmed,
-      intent,
+      intent: refinedIntent,
       ...formatted,
       isEmpty,
       isOffline,

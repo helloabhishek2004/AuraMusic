@@ -389,9 +389,7 @@ function StartupPermissionGuard({ children }: { children: React.ReactNode }) {
 export default function RootLayout() {
   const rootRenderCount = React.useRef(0);
   rootRenderCount.current += 1;
-  if (typeof __DEV__ !== "undefined" && __DEV__) {
-    console.info(`[RootLayout] Rendered: count = ${rootRenderCount.current}`);
-  }
+  console.info(`[RootLayout] Rendered: count = ${rootRenderCount.current}`);
 
   useEffect(() => {
     // Initialize audio engine and bridge
@@ -465,11 +463,9 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (fontsLoaded || error) {
-      SplashScreen.hideAsync().catch(() => undefined);
-    }
-  }, [fontsLoaded, error]);
-
+    console.info('[RootLayout] Dismissing native splash screen');
+    SplashScreen.hideAsync().catch(() => undefined);
+  }, []);
 
   const navigationTheme = useMemo(
     () => ({
@@ -499,14 +495,10 @@ export default function RootLayout() {
       opacity,
       borderRadius,
       overflow: borderRadius > 0.1 ? 'hidden' : 'visible',
-      backgroundColor: palette.background, // Preserve base application color on screen cards
+      backgroundColor: palette.background,
       flex: 1,
     };
   });
-
-  if (!fontsLoaded && !error) {
-    return null;
-  }
 
   return (
     <ThemeProvider>

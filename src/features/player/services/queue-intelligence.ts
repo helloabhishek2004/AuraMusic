@@ -12,6 +12,7 @@ export interface QueueContext {
     | "manual";
 
   seedArtists?: string[];
+  seedTrackId?: string;
 
   recommendationReason?: string;
 

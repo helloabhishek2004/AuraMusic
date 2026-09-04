@@ -182,10 +182,6 @@ export interface RecommendationsState {
   tasteDriftDetected: boolean;
   fatigueTracker: Record<string, FatigueRecord>;
   listeningEventsCountSinceBuild: number;
-  
-  // Playback Intelligence Prep Config & Schema
-  crossfadeEnabled: boolean;
-  crossfadeDuration: number; // in seconds
 
   generatedAt: number | null;
   lastRecommendationBuild: number | null;
@@ -264,9 +260,6 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
       tasteDriftDetected: false,
       fatigueTracker: {},
       listeningEventsCountSinceBuild: 0,
-      
-      crossfadeEnabled: false,
-      crossfadeDuration: 3,
 
       generatedAt: null,
       lastRecommendationBuild: null,

@@ -15,6 +15,11 @@ export class PermissionPromptService {
     if (Platform.OS !== 'android') return;
 
     try {
+      const alreadyRequested = await AsyncStorage.getItem(FIRST_INSTALL_PERMISSIONS_KEY);
+      if (alreadyRequested === 'true') {
+        return;
+      }
+
       const permissionsToRequest: Permission[] = [];
 
       // 1. Notification Permission (Android 13+ / API 33+)

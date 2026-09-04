@@ -9,57 +9,13 @@
  */
 
 import { SearchEntity, SearchIntent, RankedSearchResult, SectionOrdering } from '../types/search-engine.types';
-import { normalizeQuery } from './query-normalizer';
+import { normalizeQuery, calculateJaroWinkler } from './query-normalizer';
 
 export interface PersonalizationContext {
   likedTrackIds: Set<string>;
   downloadedTrackIds: Set<string>;
   playedTrackCounts: Map<string, number>; // trackId -> playCount
   topArtists: Set<string>; // normalized artist names with frequent plays
-}
-
-function calculateJaroWinkler(s1: string, s2: string): number {
-  if (s1 === s2) return 1.0;
-  if (!s1 || !s2) return 0.0;
-
-  const maxDist = Math.floor(Math.max(s1.length, s2.length) / 2) - 1;
-  const match1 = new Array(s1.length).fill(false);
-  const match2 = new Array(s2.length).fill(false);
-
-  let matches = 0;
-  for (let i = 0; i < s1.length; i++) {
-    const start = Math.max(0, i - maxDist);
-    const end = Math.min(i + maxDist + 1, s2.length);
-    for (let j = start; j < end; j++) {
-      if (match2[j] || s1[i] !== s2[j]) continue;
-      match1[i] = true;
-      match2[j] = true;
-      matches++;
-      break;
-    }
-  }
-
-  if (matches === 0) return 0.0;
-
-  let transpositions = 0;
-  let k = 0;
-  for (let i = 0; i < s1.length; i++) {
-    if (!match1[i]) continue;
-    while (!match2[k]) k++;
-    if (s1[i] !== s2[k]) transpositions++;
-    k++;
-  }
-
-  const sim = (matches / s1.length + matches / s2.length + (matches - transpositions / 2) / matches) / 3.0;
-  
-  // Winkler prefix boost (up to 4 chars)
-  let prefix = 0;
-  for (let i = 0; i < Math.min(4, Math.min(s1.length, s2.length)); i++) {
-    if (s1[i] === s2[i]) prefix++;
-    else break;
-  }
-
-  return sim + prefix * 0.1 * (1.0 - sim);
 }
 
 export function rankSearchResults(
@@ -160,10 +116,35 @@ export function rankSearchResults(
       }
     }
 
-    // ── 4. Quality Signals ──────────────────────────────────
-    if (item.isOfficial) quality += 10;
-    if (item.durationMs && item.durationMs > 30000 && item.durationMs < 900000) quality += 5; // Sanity duration 30s-15m
+    // ── 4. Quality Signals & Non-Music Suppression ─────────
+    const isAtv = item.musicVideoType === 'MUSIC_VIDEO_TYPE_ATV';
+    const isOmv = item.musicVideoType === 'MUSIC_VIDEO_TYPE_OMV' || item.musicVideoType === 'MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC_VIDEO';
+    const isUgc = item.musicVideoType === 'MUSIC_VIDEO_TYPE_UGC';
+    const isPodcast = item.musicVideoType === 'MUSIC_VIDEO_TYPE_PODCAST_EPISODE';
+    const isTopic = (item.artistName || '').trim().endsWith('- Topic') || (item.subtitle || '').includes('- Topic');
+
+    if (isAtv) quality += 35; // Studio Audio (Gold standard)
+    if (isTopic) quality += 25; // Official Artist Channel Topic
+    if (isOmv) quality += 15; // Official Music Video
+    if (item.isOfficial && !isAtv && !isOmv && !isTopic) quality += 10;
     if (item.subscribers && item.subscribers.includes('M')) quality += 8;
+
+    // Sanity duration 45s - 10m
+    if (item.durationMs && item.durationMs >= 45000 && item.durationMs <= 600000) {
+      quality += 5;
+    } else if (item.durationMs && item.durationMs > 1200000 && item.type === 'SONG') {
+      // > 20 mins for a song is usually an unseparated podcast, livestream, or full album upload
+      penalties += 40;
+    }
+
+    // UGC penalty
+    if (isUgc) penalties += 30;
+
+    // Hard non-music suppression
+    if (isPodcast) penalties += 100;
+    if (/\b(podcast|gameplay|playthrough|reaction|vlog|highlights|news broadcast|unboxing)\b/i.test(`${item.title} ${item.subtitle || ''}`)) {
+      penalties += 80;
+    }
 
     // ── 5. Personalization Boost (Max +20, Secondary) ───────
     if (personalization) {
@@ -205,7 +186,14 @@ export function formatSearchSections(rankedItems: RankedSearchResult[], intent: 
   const playlists: RankedSearchResult[] = [];
   const videos: RankedSearchResult[] = [];
 
-  for (const item of rankedItems) {
+  // Filter out heavily penalized items (non-music, podcast episodes, gaming)
+  const validRanked = rankedItems.filter(item => {
+    if (item.musicVideoType === 'MUSIC_VIDEO_TYPE_PODCAST_EPISODE') return false;
+    if (item.score < -20) return false;
+    return true;
+  });
+
+  for (const item of validRanked) {
     switch (item.type) {
       case 'SONG': songs.push(item); break;
       case 'ARTIST': artists.push(item); break;
@@ -215,8 +203,8 @@ export function formatSearchSections(rankedItems: RankedSearchResult[], intent: 
     }
   }
 
-  // Determine top result dynamically!
-  const topResult = rankedItems.length > 0 ? rankedItems[0] : null;
+  // Determine top result dynamically from valid ranked items
+  const topResult = validRanked.length > 0 ? validRanked[0] : null;
 
   // Determine dynamic section ordering based on intent
   let sectionOrder: Array<'topResult' | 'songs' | 'artists' | 'albums' | 'playlists' | 'videos'> = [

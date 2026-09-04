@@ -505,6 +505,23 @@ export const usePlayerStore = create<any>()(
         PlaybackService.syncQueue(newQueue, newIdx);
       },
 
+      appendQueue: async (continuationTracks: PlayerTrack[]) => {
+        const { queue, originalQueue } = get();
+        if (!continuationTracks || continuationTracks.length === 0) return;
+
+        // Filter out tracks already present in the queue
+        const existingIds = new Set(queue.map((t: PlayerTrack) => t.id));
+        const uniqueNewTracks = continuationTracks.filter((t: PlayerTrack) => !existingIds.has(t.id));
+        if (uniqueNewTracks.length === 0) return;
+
+        const newQueue = [...queue, ...uniqueNewTracks];
+        const newOriginal = [...originalQueue, ...uniqueNewTracks];
+
+        set({ queue: newQueue, originalQueue: newOriginal });
+        await PlaybackService.appendQueue(uniqueNewTracks);
+        console.log(`[PlayerStore] appendQueue added ${uniqueNewTracks.length} tracks, new queue size: ${newQueue.length}`);
+      },
+
       injectAutoplayQueue: async (continuationTracks: PlayerTrack[]) => {
         const { queue, originalQueue, currentIndex } = get();
         if (!continuationTracks || continuationTracks.length === 0) return;
@@ -619,36 +636,6 @@ export const usePlayerStore = create<any>()(
         const s = get();
         if (Math.abs(s.position - position) > 100 || Math.abs(s.duration - duration) > 100) {
           set({ position, duration, bufferedPosition: buffered });
-        }
-
-        // Handle Crossfade / Fade logic
-        const { useSettingsStore } = require("../../settings/store/settings.store");
-        const settings = useSettingsStore.getState();
-
-        if (settings.crossfadeEnabled && duration > 0) {
-          const remainingSeconds = (duration - position) / 1000;
-          const currentSeconds = position / 1000;
-          
-          // FADE OUT
-          if (remainingSeconds <= settings.crossfadeDuration && remainingSeconds > 0) {
-             const targetVol = s.volume * (remainingSeconds / settings.crossfadeDuration);
-             PlaybackService.setVolume(targetVol);
-             
-             if (remainingSeconds < 0.5 && !s.isTransitioning) {
-                 if (typeof __DEV__ !== "undefined" && __DEV__) {
-                     console.info(`[CROSSFADE] Fading out: ${s.currentTrack?.title}. Remaining: ${remainingSeconds.toFixed(1)}s`);
-                 }
-             }
-          } 
-          // FADE IN
-          else if (currentSeconds <= 1.0) {
-             const targetVol = s.volume * currentSeconds;
-             PlaybackService.setVolume(targetVol);
-          }
-          // SUSTAIN
-          else if (s.status === 'playing') {
-             PlaybackService.setVolume(s.volume);
-          }
         }
 
         if (s.isPlaying && !s.isTransitioning && !s.isPreloading && transitionManager.shouldPreload(position, duration)) {

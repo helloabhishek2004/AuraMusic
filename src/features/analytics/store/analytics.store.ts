@@ -162,6 +162,8 @@ export interface AnalyticsActions {
   trackShared: (trackId: string) => void;
 }
 
+let isAnalyticsInitializing = false;
+
 export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
   persist(
     (set, get) => ({
@@ -956,6 +958,8 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
         set({ currentSession });
       },
       initialize: async () => {
+        if (get().isHydrated || isAnalyticsInitializing) return;
+        isAnalyticsInitializing = true;
         try {
           const { isNativeCoreAvailable, AuraHistory } = require('../../../services/native-core');
           if (isNativeCoreAvailable() && AuraHistory && typeof AuraHistory.getHistory === 'function') {
@@ -1051,6 +1055,8 @@ export const useAnalyticsStore = create<AnalyticsState & AnalyticsActions>()(
           }
         } catch (e) {
           console.warn('[AnalyticsStore] Failed to synchronize history from native Room DB:', e);
+        } finally {
+          isAnalyticsInitializing = false;
         }
 
         // Deferred heavy re-computations

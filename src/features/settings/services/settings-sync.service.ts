@@ -51,12 +51,18 @@ export class SettingsSyncService {
         await AuraRestore.setGoogleSyncEnabled(settings.googleSyncEnabled ?? true);
       }
 
+      // 6. Loudness Normalization
+      if (AuraPlayer && typeof AuraPlayer.setNormalizeVolume === 'function') {
+        await AuraPlayer.setNormalizeVolume(settings.normalizeVolume ?? true);
+      }
+
       console.log('[SettingsSync] Synced all settings to native successfully:', {
         streamingQuality,
         downloadQuality,
         wifiOnly: settings.downloadOnlyOnWifi,
         cacheBytes,
         googleSyncEnabled: settings.googleSyncEnabled ?? true,
+        normalizeVolume: settings.normalizeVolume ?? true,
       });
     } catch (error) {
       console.warn('[SettingsSync] Error syncing settings to native:', error);

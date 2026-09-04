@@ -1363,6 +1363,10 @@ export default function HomeScreen() {
   const trendingSeeds = useRecommendationsStore(s => s.trendingSeeds ?? EMPTY_ARRAY);
   const recsReadiness = useRecommendationsStore(s => s.readiness);
 
+  useEffect(() => {
+    console.info('[HomeScreen] Mounted and interactive');
+  }, []);
+
   const handlePlayTrack = useCallback((track: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setActiveContext({ type: 'home' as any, id: 'home_generic' });

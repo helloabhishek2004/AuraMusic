@@ -20,6 +20,7 @@ export interface SearchEntity {
   badges?: string[];
   isOfficial?: boolean;
   isExplicit?: boolean;
+  musicVideoType?: string;
   sourceRank?: number;
   rawText?: string;
   versionType?: 'canonical' | 'live' | 'remix' | 'acoustic' | 'instrumental' | 'cover' | 'slowed' | 'sped_up' | 'video';

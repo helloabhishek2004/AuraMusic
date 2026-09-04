@@ -38,6 +38,9 @@ interface TrackDao {
     @Query("UPDATE tracks SET isDownloaded = 0, downloadedAt = NULL, contentLength = NULL")
     suspend fun clearAllDownloads()
 
+    @Query("UPDATE tracks SET loudnessDb = :loudnessDb WHERE id = :id")
+    suspend fun updateLoudness(id: String, loudnessDb: Double?)
+
     @Query("SELECT SUM(contentLength) FROM tracks WHERE isDownloaded = 1")
     suspend fun getTotalDownloadedBytes(): Long?
 }
@@ -60,7 +63,7 @@ interface HistoryDao {
 
 @Database(
     entities = [TrackEntity::class, HistoryEntity::class, LyricsEntity::class, PlaylistEntity::class, PlaylistTrackCrossRef::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -142,6 +145,12 @@ abstract class AuraDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `tracks` ADD COLUMN `loudnessDb` REAL DEFAULT NULL")
+            }
+        }
+
         fun getInstance(context: Context): AuraDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: run {
@@ -156,10 +165,10 @@ abstract class AuraDatabase : RoomDatabase() {
                                 android.database.sqlite.SQLiteDatabase.OPEN_READONLY
                             ).use { sqliteDb ->
                                 val userVersion = sqliteDb.version
-                                if (userVersion > 4) {
+                                if (userVersion > 5) {
                                     android.util.Log.w(
                                         "AuraRestore",
-                                        "[AuraRestore] Newer database version detected (user_version = $userVersion, app version = 4). Preserving backup copy before proceeding."
+                                        "[AuraRestore] Newer database version detected (user_version = $userVersion, app version = 5). Preserving backup copy before proceeding."
                                     )
                                     val backupCopy = java.io.File(dbFile.parentFile, "aura_music_v${userVersion}_backup.db")
                                     if (!backupCopy.exists()) {
@@ -178,7 +187,7 @@ abstract class AuraDatabase : RoomDatabase() {
                         AuraDatabase::class.java,
                         "aura_music.db"
                     )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build().also { INSTANCE = it }
                 }

@@ -16,6 +16,8 @@ export interface PlayerTrack {
   albumId?: string;
   mimeType?: string;
   sourceFetchedAt?: number;
+  isOfficial?: boolean;
+  musicVideoType?: string;
 }
 
 export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'error';

@@ -19,7 +19,9 @@ data class StreamResolutionResult(
     val format: String,
     val codec: String,
     val bitrate: Int,
-    val userAgent: String = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+    val userAgent: String = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+    val loudnessDb: Double? = null,
+    val perceptualLoudnessDb: Double? = null
 )
 
 private data class ClientCandidate(
@@ -188,6 +190,10 @@ class AndroidVrStreamResolver(
                     continue
                 }
 
+                val audioConfig = root.optJSONObject("playerConfig")?.optJSONObject("audioConfig")
+                val parsedLoudnessDb = if (audioConfig != null && audioConfig.has("loudnessDb")) audioConfig.optDouble("loudnessDb") else null
+                val parsedPerceptualLoudnessDb = if (audioConfig != null && audioConfig.has("perceptualLoudnessDb")) audioConfig.optDouble("perceptualLoudnessDb") else null
+
                 val streamingData = root.optJSONObject("streamingData") ?: continue
                 val adaptiveFormats = streamingData.optJSONArray("adaptiveFormats") ?: continue
 
@@ -251,13 +257,15 @@ class AndroidVrStreamResolver(
                         // If probe succeeded or if fallback to ANDROID_VR
                         if (isChunkable || candidate.clientName == "ANDROID_VR") {
                             val chosenBitrate = if (bestFormat != null) bestBitrate else fallbackBitrate
-                            android.util.Log.i("NativeCore", "[PlaybackTrace] Selected client ${candidate.clientName} (chunkable=$isChunkable, bitrate=$chosenBitrate)")
+                            android.util.Log.i("NativeCore", "[PlaybackTrace] Selected client ${candidate.clientName} (chunkable=$isChunkable, bitrate=$chosenBitrate, loudnessDb=$parsedLoudnessDb)")
                             return@withContext StreamResolutionResult(
                                 url = url,
                                 format = chosenFormat.optString("mimeType", "audio/mp4"),
                                 codec = chosenFormat.optString("mimeType", "").substringAfter("codecs=\"", "").substringBefore("\""),
                                 bitrate = if (chosenBitrate > 0) chosenBitrate else 128000,
-                                userAgent = candidate.userAgent
+                                userAgent = candidate.userAgent,
+                                loudnessDb = parsedLoudnessDb,
+                                perceptualLoudnessDb = parsedPerceptualLoudnessDb
                             )
                         }
                     }

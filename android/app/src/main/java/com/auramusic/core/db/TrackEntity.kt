@@ -16,5 +16,6 @@ data class TrackEntity(
     val playCount: Int = 0,
     val isDownloaded: Boolean = false,
     val downloadedAt: Long? = null,
-    val contentLength: Long? = null
+    val contentLength: Long? = null,
+    val loudnessDb: Double? = null
 )

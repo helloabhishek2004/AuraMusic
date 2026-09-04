@@ -143,6 +143,25 @@ export class PlaybackService {
     }
   }
 
+  static async appendQueue(tracks: PlayerTrack[]) {
+    if (!AuraPlayer || tracks.length === 0) return;
+    if (typeof AuraPlayer.appendQueue === 'function') {
+      AuraPlayer.appendQueue(tracks.map(t => t.id));
+    }
+    if (typeof AuraPlayer.saveTracksMetadata === 'function') {
+      AuraPlayer.saveTracksMetadata(
+        tracks.map(t => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist || 'Unknown Artist',
+          album: t.album || null,
+          duration: t.duration ? Number(t.duration) : 0,
+          art: extractRawArtworkUrl(t) || null,
+        }))
+      );
+    }
+  }
+
   static async reorderQueue(fromIdx: number, toIdx: number, currentQueue: PlayerTrack[], activeIndex: number) {
     this.syncQueue(currentQueue, activeIndex);
   }

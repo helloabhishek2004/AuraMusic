@@ -16,9 +16,6 @@ export interface SettingsState {
   autoDownloadLikedSongs: boolean;
 
   // PLAYBACK
-  crossfadeEnabled: boolean;
-  crossfadeDuration: number; // 0–12
-  gaplessPlayback: boolean;
   normalizeVolume: boolean;
   autoplayEnabled: boolean;
   smartShuffleEnabled: boolean;
@@ -36,8 +33,7 @@ export interface SettingsState {
   // ACTIONS
   setStreamingQuality: (type: 'wifi' | 'cellular', quality: AudioQuality) => void;
   setDownloadQuality: (type: 'wifi' | 'cellular', quality: AudioQuality) => void;
-  toggleSetting: (key: keyof Omit<SettingsState, 'streamingQualityWifi' | 'streamingQualityCellular' | 'downloadQualityWifi' | 'downloadQualityCellular' | 'crossfadeDuration' | 'maxSongCacheGB' | 'accentColor' | 'setStreamingQuality' | 'setDownloadQuality' | 'toggleSetting' | 'setCrossfadeDuration' | 'setMaxSongCache' | 'setAccentColor' | 'setGoogleSyncEnabled'>) => void;
-  setCrossfadeDuration: (duration: number) => void;
+  toggleSetting: (key: keyof Omit<SettingsState, 'streamingQualityWifi' | 'streamingQualityCellular' | 'downloadQualityWifi' | 'downloadQualityCellular' | 'maxSongCacheGB' | 'accentColor' | 'setStreamingQuality' | 'setDownloadQuality' | 'toggleSetting' | 'setMaxSongCache' | 'setAccentColor' | 'setGoogleSyncEnabled'>) => void;
   setMaxSongCache: (limit: number | 'unlimited') => void;
   setAccentColor: (color: string) => void;
   setGoogleSyncEnabled: (enabled: boolean) => void;
@@ -68,9 +64,6 @@ export const useSettingsStore = create<SettingsState>()(
       downloadQualityCellular: 'high',
       downloadOnlyOnWifi: true,
       autoDownloadLikedSongs: false,
-      crossfadeEnabled: false,
-      crossfadeDuration: 3,
-      gaplessPlayback: true,
       normalizeVolume: true,
       autoplayEnabled: true,
       smartShuffleEnabled: true,
@@ -99,13 +92,6 @@ export const useSettingsStore = create<SettingsState>()(
       toggleSetting: (key) => set((state: any) => {
         const newValue = !state[key];
         const updates: any = { [key]: newValue };
-        
-        // Mutual Exclusivity: Crossfade vs Gapless
-        if (key === 'crossfadeEnabled' && newValue === true) {
-          updates.gaplessPlayback = false;
-        } else if (key === 'gaplessPlayback' && newValue === true) {
-          updates.crossfadeEnabled = false;
-        }
 
         // Auto-download liked songs backfill
         if (key === 'autoDownloadLikedSongs' && newValue === true) {
@@ -123,10 +109,6 @@ export const useSettingsStore = create<SettingsState>()(
         }, 0);
 
         return updates;
-      }),
-      setCrossfadeDuration: (duration) => set({ 
-          crossfadeDuration: duration,
-          gaplessPlayback: duration > 0 ? false : true 
       }),
       setMaxSongCache: (limit) => {
         set({ maxSongCacheGB: limit });
