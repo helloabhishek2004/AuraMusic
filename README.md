@@ -515,3 +515,18 @@ AuraMusic is made possible thanks to the following open-source projects and comm
 * [LRCLIB](https://lrclib.net/) for providing community-driven synchronized lyrics.
 * [Zustand](https://github.com/pmndrs/zustand) for predictable, minimal state management.
 * [Anthropic](https://anthropic.com/), [Google DeepMind](https://deepmind.google/), [Google Stitch](https://stitch.google/), and [OpenAI](https://openai.com/) for empowering developer workflows through intelligent coding agents and design generation.
+
+---
+
+## ❤️ Special Thanks
+
+> **Massive shoutout & absolute GOAT energy to [Gokul](https://github.com/Gokul7105) ([@Gokul7105](https://github.com/Gokul7105))! 🐐🔥**
+
+Bro literally came in clutch and sponsored my **Google Antigravity** paid plan throughout the entire development grind of AuraMusic.
+
+From the chaotic early days when playback was straight-up broken and streams were bugging, through the intense deep-dive of rewriting the native Android Media3 core, all the way to optimizing and dropping this public beta — that support kept the whole vision alive and cooking.
+
+Legit, AuraMusic wouldn't have made it to this stage without you backing the vision. Absolute legend, real one fr fr. 🤝✨
+
+— **Abhishek**
+
