@@ -31,7 +31,7 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { useScrollToTopOnTabPress } from "@/src/hooks/use-scroll-to-top";
 import { FlashList } from "@shopify/flash-list";
 import React, {
@@ -813,9 +813,6 @@ const TrackRow = memo(({
                 </Text>
               </View>
 
-              {/* Duration */}
-              <Text style={s.trackDuration}>{track.time}</Text>
-
               {/* More */}
               <TouchableOpacity
                 hitSlop={{ top:12, bottom:12, left:12, right:8 }}
@@ -1024,6 +1021,19 @@ const DownloadedTrackRow = memo(({
     }
   }, [isActive]);
 
+  const isLiked = useLikesStore((s) => !!s.likedTrackIds[track.id]);
+  const toggleLike = useLikesStore((s) => s.toggleLike);
+
+  const handleDelete = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const { DownloadManager } = await import("@/src/features/download/services/download.manager");
+      await DownloadManager.removeDownload(track.id);
+    } catch (e) {
+      console.warn("[Library] Failed to delete downloaded track:", e);
+    }
+  }, [track.id]);
+
   const handlePlay = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -1090,17 +1100,34 @@ const DownloadedTrackRow = memo(({
                 </Text>
               </View>
 
-              <Text style={s.trackDuration}>{formatDuration(track.duration)}</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                <TouchableOpacity
+                  hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    toggleLike(track as any);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={isLiked ? `Unlike ${track.title}` : `Like ${track.title}`}
+                  style={{ padding: 6 }}
+                >
+                  <Ionicons
+                    name={isLiked ? "heart" : "heart-outline"}
+                    size={18}
+                    color={isLiked ? C.primary : C.muted}
+                  />
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                hitSlop={{ top:12, bottom:12, left:12, right:8 }}
-                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-                accessibilityRole="button"
-                accessibilityLabel={`More options for ${track.title}`}
-                style={s.trackMoreBtn}
-              >
-                <Ionicons name="ellipsis-vertical" size={17} color={C.muted} />
-              </TouchableOpacity>
+                <TouchableOpacity
+                  hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                  onPress={handleDelete}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${track.title} from downloads`}
+                  style={{ padding: 6 }}
+                >
+                  <Ionicons name="trash-outline" size={18} color={C.muted} />
+                </TouchableOpacity>
+              </View>
             </View>
           </Glass>
         </TouchableOpacity>
@@ -1124,6 +1151,14 @@ export default function LibraryScreen() {
   const handlePlayLikedSongs = useCallback(async () => {
     goPlaylist("liked-songs");
   }, [goPlaylist]);
+
+  useFocusEffect(
+    useCallback(() => {
+      import("@/src/features/download/services/download-queue-manager").then(({ DownloadQueueManager }) => {
+        DownloadQueueManager.syncFromNative();
+      }).catch(() => {});
+    }, [])
+  );
 
   // Subtitle entrance
   const subOp = useRef(new Animated.Value(0)).current;

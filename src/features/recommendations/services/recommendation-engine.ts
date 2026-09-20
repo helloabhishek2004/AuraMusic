@@ -12,6 +12,7 @@ export interface RecommendationSeed {
   seedArtists?: string[];
   confidence?: number; // 0 - 100 confidence score
   reason?: string;
+  query?: string;
   trackIds?: string[];
   tracks?: PlayerTrack[];
 }

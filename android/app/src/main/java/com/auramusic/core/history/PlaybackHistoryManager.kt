@@ -66,7 +66,10 @@ class PlaybackHistoryManager(private val database: AuraDatabase) {
                     playCount = existing?.playCount ?: 0,
                     isDownloaded = existing?.isDownloaded ?: false,
                     downloadedAt = existing?.downloadedAt,
-                    contentLength = existing?.contentLength
+                    contentLength = existing?.contentLength,
+                    loudnessDb = existing?.loudnessDb,
+                    albumId = existing?.albumId,
+                    artistId = existing?.artistId
                 )
             )
         }

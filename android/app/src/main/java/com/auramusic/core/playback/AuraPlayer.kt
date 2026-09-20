@@ -13,14 +13,21 @@ import androidx.media3.common.Player
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
+import androidx.media3.session.CommandButton
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import com.auramusic.core.stream.UnifiedStreamResolver
 import com.auramusic.core.db.TrackEntity
+import com.anonymous.AuraMusic.R
 import kotlinx.coroutines.*
 import okhttp3.Dns
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CopyOnWriteArraySet
 
 private const val TAG = "NativeCore"
 private const val SESSION_TAG = "MediaSessionTrace"
@@ -28,6 +35,7 @@ private const val STREAM_RANGE_CHUNK_SIZE = 1_048_576L // 1 MB chunk bounding fo
 
 typealias PlaybackStateListener = (AuraPlaybackState) -> Unit
 typealias PlaybackEventListener = (PlaybackEvent, String?) -> Unit
+typealias LikeToggleListener = (String, Boolean) -> Unit
 
 data class TrackMetadata(
     val id: String,
@@ -50,6 +58,8 @@ class AuraPlayer(
     private val streamResolver: UnifiedStreamResolver
 ) {
     companion object {
+        const val CUSTOM_COMMAND_TOGGLE_LIKE = "com.auramusic.ACTION_TOGGLE_LIKE"
+
         @Volatile
         private var mediaCache: androidx.media3.datasource.cache.SimpleCache? = null
 
@@ -137,6 +147,8 @@ class AuraPlayer(
     private var mediaSession: MediaSession? = null
     private val stateListeners = CopyOnWriteArrayList<PlaybackStateListener>()
     private val eventListeners = CopyOnWriteArrayList<PlaybackEventListener>()
+    private val likedTrackIds = ConcurrentHashMap.newKeySet<String>()
+    private val likeToggleListeners = CopyOnWriteArrayList<LikeToggleListener>()
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     // Queue management
@@ -308,6 +320,77 @@ class AuraPlayer(
         exoPlayer?.playlistMetadata = mediaMetadata
         Log.i(SESSION_TAG, "[MEDIASESSION_METADATA_UPDATED] trackId=$trackId title=$title artist=$artist artUri=$artworkUri")
         // == END FIX #2 ==
+        updateCustomLayout()
+    }
+
+    fun addLikeToggleListener(listener: LikeToggleListener) {
+        likeToggleListeners.add(listener)
+    }
+
+    fun removeLikeToggleListener(listener: LikeToggleListener) {
+        likeToggleListeners.remove(listener)
+    }
+
+    private fun notifyLikeToggle(trackId: String, isLiked: Boolean) {
+        for (listener in likeToggleListeners) {
+            try {
+                listener(trackId, isLiked)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in like toggle listener: ${e.message}")
+            }
+        }
+    }
+
+    fun setTrackLiked(trackId: String, isLiked: Boolean) {
+        if (isLiked) {
+            likedTrackIds.add(trackId)
+        } else {
+            likedTrackIds.remove(trackId)
+        }
+        if (currentState.currentTrackId == trackId) {
+            updateCustomLayout()
+        }
+    }
+
+    fun syncLikedTrackIds(trackIds: Collection<String>) {
+        likedTrackIds.clear()
+        likedTrackIds.addAll(trackIds)
+        updateCustomLayout()
+    }
+
+    fun isTrackLiked(trackId: String?): Boolean {
+        if (trackId == null) return false
+        return likedTrackIds.contains(trackId)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun buildLikeButton(isLiked: Boolean): CommandButton {
+        val iconRes = if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline
+        return CommandButton.Builder()
+            .setDisplayName(if (isLiked) "Unlike" else "Like")
+            .setIconResId(iconRes)
+            .setSessionCommand(SessionCommand(CUSTOM_COMMAND_TOGGLE_LIKE, android.os.Bundle.EMPTY))
+            .setEnabled(true)
+            .build()
+    }
+
+    fun updateCustomLayout() {
+        val session = mediaSession ?: return
+        val currentTrackId = currentState.currentTrackId
+        val isLiked = if (currentTrackId != null) likedTrackIds.contains(currentTrackId) else false
+        val customLayout = listOf(buildLikeButton(isLiked))
+        try {
+            session.setCustomLayout(customLayout)
+        } catch (e: Throwable) {
+            Log.w(SESSION_TAG, "[MediaSessionTrace] setCustomLayout(layout) error: ${e.message}")
+        }
+        for (controller in session.connectedControllers) {
+            try {
+                session.setCustomLayout(controller, customLayout)
+            } catch (e: Throwable) {
+                Log.w(SESSION_TAG, "[MediaSessionTrace] setCustomLayout(controller, layout) error: ${e.message}")
+            }
+        }
     }
 
     fun initialize() {
@@ -405,7 +488,10 @@ class AuraPlayer(
                 controller: MediaSession.ControllerInfo
             ): MediaSession.ConnectionResult {
                 Log.i(SESSION_TAG, "[MediaSessionTrace] CONTROLLER_CONNECTED pkg=${controller.packageName}")
-                val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon().build()
+                val customCmd = SessionCommand(CUSTOM_COMMAND_TOGGLE_LIKE, android.os.Bundle.EMPTY)
+                val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                    .add(customCmd)
+                    .build()
                 val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                     .add(Player.COMMAND_SEEK_TO_NEXT)
                     .add(Player.COMMAND_SEEK_TO_PREVIOUS)
@@ -414,10 +500,51 @@ class AuraPlayer(
                     .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
                     .add(Player.COMMAND_PLAY_PAUSE)
                     .build()
+
+                val currentTrackId = currentState.currentTrackId
+                val isLiked = if (currentTrackId != null) likedTrackIds.contains(currentTrackId) else false
+                val customLayout = listOf(buildLikeButton(isLiked))
+
                 return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                     .setAvailableSessionCommands(sessionCommands)
                     .setAvailablePlayerCommands(playerCommands)
+                    .setCustomLayout(customLayout)
                     .build()
+            }
+
+            override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+                val currentTrackId = currentState.currentTrackId
+                val isLiked = if (currentTrackId != null) likedTrackIds.contains(currentTrackId) else false
+                try {
+                    session.setCustomLayout(controller, listOf(buildLikeButton(isLiked)))
+                } catch (e: Exception) {
+                    Log.w(SESSION_TAG, "[MediaSessionTrace] onPostConnect setCustomLayout error: ${e.message}")
+                }
+            }
+
+            override fun onCustomCommand(
+                session: MediaSession,
+                controller: MediaSession.ControllerInfo,
+                customCommand: SessionCommand,
+                args: android.os.Bundle
+            ): ListenableFuture<SessionResult> {
+                if (customCommand.customAction == CUSTOM_COMMAND_TOGGLE_LIKE) {
+                    val currentTrackId = currentState.currentTrackId
+                    if (currentTrackId != null) {
+                        val wasLiked = likedTrackIds.contains(currentTrackId)
+                        val newLikedState = !wasLiked
+                        if (newLikedState) {
+                            likedTrackIds.add(currentTrackId)
+                        } else {
+                            likedTrackIds.remove(currentTrackId)
+                        }
+                        updateCustomLayout()
+                        notifyLikeToggle(currentTrackId, newLikedState)
+                        Log.i(SESSION_TAG, "[MediaSessionTrace] LIKE_TOGGLED via controller pkg=${controller.packageName} trackId=$currentTrackId newLiked=$newLikedState")
+                    }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
             }
         }
 

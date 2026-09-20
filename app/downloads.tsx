@@ -35,13 +35,14 @@ import {
   ViewStyle,
   Modal,
   ScrollView,
-  ActivityIndicator
+  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
 import { openAlbum, openArtistByName, openNowPlaying } from "@/src/navigation/music-navigation";
 import * as Haptics from "expo-haptics";
+import AddToPlaylistSheet from "@/src/features/playlist/components/AddToPlaylistSheet";
 
 import AnimatedReanimated, {
   useSharedValue,
@@ -571,13 +572,11 @@ const TrackRow = React.memo(
     track,
     onPlay,
     onRemove,
-    onShowOptions,
     index,
   }: {
     track: any;
     onPlay: (t: any) => void;
     onRemove: (id: string) => void;
-    onShowOptions: (t: any) => void;
     index: number;
   }) => {
     const trashScale = useSharedValue(1);
@@ -639,15 +638,6 @@ const TrackRow = React.memo(
               size={20}
               color={isLiked ? C.primary : C.muted}
             />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => onShowOptions(track)}
-            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-            accessibilityLabel={`Options for ${track.title}`}
-            accessibilityRole="button"
-            style={{ padding: 10 }}
-          >
-            <Ionicons name="ellipsis-horizontal" size={20} color={C.muted} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={pressTrash}
@@ -1094,10 +1084,6 @@ export default function DownloadsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const tabs = ["Songs", "Albums", "Playlists", "Downloading"];
 
-  const [actionSheetVisible, setActionSheetVisible] = useState(false);
-  const [selectedTrack, setSelectedTrack] = useState<any>(null);
-  const [isSearchingAlbum, setIsSearchingAlbum] = useState(false);
-
   const downloadedTracks = useDownloadStore((s) => s.downloadedTracks);
   
   // Custom selector with equality check to prevent re-renders on active tasks progress increments
@@ -1131,8 +1117,11 @@ export default function DownloadsScreen() {
   const downloadQueue = useDownloadStore((s) => s.downloadQueue);
   const playlists = usePlaylistStore((s) => s.playlists);
 
-  // Simulate initial load skeleton
+  // Simulate initial load skeleton & sync from native
   useEffect(() => {
+    import("@/src/features/download/services/download-queue-manager").then(({ DownloadQueueManager }) => {
+      DownloadQueueManager.syncFromNative();
+    }).catch(() => {});
     const t = setTimeout(() => setIsLoading(false), 600);
     return () => clearTimeout(t);
   }, []);
@@ -1148,10 +1137,13 @@ export default function DownloadsScreen() {
   const albums = useMemo(() => {
     const map: Record<string, any> = {};
     tracks.forEach((t) => {
-      const key = t.album || "Unknown";
+      const albumTitle = (t.album && t.album.trim().length > 0 && t.album !== "Unknown Album" && t.album !== "Unknown")
+        ? t.album
+        : (t.artist ? `Single — ${t.artist}` : "Single");
+      const key = albumTitle;
       if (!map[key]) {
         map[key] = {
-          id: t.albumId || `local-album-${encodeURIComponent(t.album || "unknown")}`,
+          id: t.albumId || `local-album-${encodeURIComponent(albumTitle)}`,
           title: key,
           artist: t.artist,
           art: t.art,
@@ -1206,83 +1198,6 @@ export default function DownloadsScreen() {
     DownloadManager.cancelDownload(trackId);
   }, []);
 
-  const handleShowOptions = useCallback((track: any) => {
-    setSelectedTrack(track);
-    setActionSheetVisible(true);
-  }, []);
-
-  const handleGoToAlbum = useCallback(async () => {
-    if (!selectedTrack) return;
-    
-    // Check if albumId is available directly or cached
-    const { useMediaCacheStore } = require("@/src/features/cache/store/media-cache.store");
-    const cacheStore = useMediaCacheStore.getState();
-    const cachedTrack = cacheStore.getCachedTrack(selectedTrack.id);
-    const targetAlbumId =
-      selectedTrack.albumId ||
-      cachedTrack?.track?.albumId ||
-      (selectedTrack.album && selectedTrack.artist ? cacheStore.getAlbumId(selectedTrack.album, selectedTrack.artist) : null);
-
-    if (targetAlbumId) {
-      setActionSheetVisible(false);
-      openAlbum(router, targetAlbumId);
-    } else {
-      setIsSearchingAlbum(true);
-      try {
-        const { musicService } = await import("@/src/services/api/music");
-        const { MetadataCache } = await import("@/src/features/cache/services/metadata-cache.service");
-        const { usePlayerStore } = await import("@/src/features/player/store/player.store");
-        
-        let search = null;
-        if (selectedTrack.album && selectedTrack.album !== 'Unknown' && selectedTrack.album !== '') {
-          search = await musicService.lookupAlbumByName(
-            `${selectedTrack.album} ${selectedTrack.artist || ''}`.trim()
-          );
-        }
-
-        // Title + Artist fuzzy search fallback
-        if (!search || !search.id) {
-          const searchQuery = `${selectedTrack.title || ''} ${selectedTrack.artist || ''}`.trim();
-          const songSearch = await musicService.searchSongs(searchQuery);
-          const bestMatch = songSearch && songSearch[0];
-          if (bestMatch && bestMatch.albumId) {
-            search = { id: bestMatch.albumId, title: bestMatch.album || 'Album' };
-          }
-        }
-
-        if (search && search.id) {
-          MetadataCache.mergeEntry(selectedTrack, { albumId: search.id, album: search.title });
-          usePlayerStore.getState().updateTrackMetadata(selectedTrack.id, { albumId: search.id, album: search.title });
-          setActionSheetVisible(false);
-          openAlbum(router, search.id);
-        } else {
-          setActionSheetVisible(false);
-          const fallbackAlbum = selectedTrack.album || 'Unknown Album';
-          openAlbum(router, `local-album-${encodeURIComponent(fallbackAlbum)}`);
-        }
-      } catch (e) {
-        console.warn(e);
-        setActionSheetVisible(false);
-        const fallbackAlbum = selectedTrack.album || 'Unknown Album';
-        openAlbum(router, `local-album-${encodeURIComponent(fallbackAlbum)}`);
-      } finally {
-        setIsSearchingAlbum(false);
-      }
-    }
-  }, [selectedTrack, router]);
-
-  const handleGoToArtist = useCallback(() => {
-    if (!selectedTrack) return;
-    setActionSheetVisible(false);
-    openArtistByName(router, selectedTrack.artist);
-  }, [selectedTrack, router]);
-
-  const handleRemoveSelected = useCallback(() => {
-    if (!selectedTrack) return;
-    setActionSheetVisible(false);
-    handleRemove(selectedTrack.id);
-  }, [selectedTrack, handleRemove]);
-
   const renderItem = useCallback(
     ({ item, index }: { item: any; index: number }) => {
       if (isLoading) return <SkeletonRow />;
@@ -1292,7 +1207,6 @@ export default function DownloadsScreen() {
             track={{...item, isCurrent: currentTrack?.id === item.id && activeContext?.type === "downloads"}}
             onPlay={handlePlay}
             onRemove={handleRemove}
-            onShowOptions={handleShowOptions}
             index={index}
           />
         );
@@ -1318,7 +1232,7 @@ export default function DownloadsScreen() {
         );
       return null;
     },
-    [activeTab, handlePlay, handleRemove, handleCancel, handleShowOptions, isLoading, router, currentTrack, activeContext],
+    [activeTab, handlePlay, handleRemove, handleCancel, isLoading, router, currentTrack, activeContext],
   );
 
   const listData = useMemo(() => {
@@ -1439,121 +1353,6 @@ export default function DownloadsScreen() {
         contentContainerStyle={{ paddingBottom: 200 + safeBottom }}
         showsVerticalScrollIndicator={false}
       />
-
-      <Modal
-        visible={actionSheetVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setActionSheetVisible(false)}
-      >
-        <TouchableOpacity
-          style={s.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setActionSheetVisible(false)}
-        >
-          <BlurView
-            intensity={50}
-            tint="dark"
-            style={StyleSheet.absoluteFill}
-          />
-          <View
-            style={[
-              StyleSheet.absoluteFill,
-              { backgroundColor: "rgba(0,0,0,0.6)" },
-            ]}
-          />
-        </TouchableOpacity>
-        <View style={s.modalCardWrap} pointerEvents="box-none">
-          <LiquidGlass
-            style={s.actionSheetCard}
-            borderRadius={30}
-            intensity={70}
-          >
-            <View style={s.modalHandleWrap}>
-              <View style={s.modalHandle} />
-            </View>
-            {selectedTrack && (
-              <>
-                <View style={s.modalHeaderInfo}>
-                  <Text style={s.modalTitle} numberOfLines={1}>
-                    {selectedTrack.title}
-                  </Text>
-                  <Text style={s.modalSubtitle} numberOfLines={1}>
-                    {selectedTrack.artist}
-                  </Text>
-                </View>
-                <View style={s.modalDivider} />
-                <ScrollView
-                  style={s.modalActionsList}
-                  showsVerticalScrollIndicator={false}
-                >
-                  <TouchableOpacity
-                    style={[s.modalActionRow, isSearchingAlbum && { opacity: 0.6 }]}
-                    disabled={isSearchingAlbum}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      handleGoToAlbum();
-                    }}
-                  >
-                    <Ionicons
-                      name="disc-outline"
-                      size={22}
-                      color="rgba(255,255,255,0.85)"
-                    />
-                    <Text style={s.modalActionLabel}>
-                      {isSearchingAlbum ? "Searching..." : "Go to Album"}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={s.modalActionRow}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      handleGoToArtist();
-                    }}
-                  >
-                    <Ionicons
-                      name="person-outline"
-                      size={22}
-                      color="rgba(255,255,255,0.85)"
-                    />
-                    <Text style={s.modalActionLabel}>Go to Artist</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={s.modalActionRow}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      handleRemoveSelected();
-                    }}
-                  >
-                    <Ionicons
-                      name="trash-outline"
-                      size={22}
-                      color="#ff453a"
-                    />
-                    <Text style={[s.modalActionLabel, { color: "#ff453a" }]}>
-                      Delete Download
-                    </Text>
-                  </TouchableOpacity>
-                </ScrollView>
-              </>
-            )}
-            <TouchableOpacity
-              onPress={() => setActionSheetVisible(false)}
-              style={s.modalDoneBtn}
-            >
-              <LinearGradient
-                colors={[C.primary, C.primaryMid]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={StyleSheet.absoluteFill}
-              />
-              <Text style={s.modalDoneText}>DONE</Text>
-            </TouchableOpacity>
-          </LiquidGlass>
-        </View>
-      </Modal>
     </View>
   );
 }

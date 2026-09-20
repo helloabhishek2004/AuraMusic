@@ -744,23 +744,6 @@ const ListHeader = React.memo(
                 </LiquidGlassSurface>
               </TouchableOpacity>
             </AnimatedReanimated.View>
-
-            <AnimatedReanimated.View style={sharePress.style}>
-              <TouchableOpacity
-                activeOpacity={1}
-                onPressIn={sharePress.onIn}
-                onPressOut={sharePress.onOut}
-                accessibilityRole="button"
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  showActionSheet("Share Playlist", [{ label: "Copy Link", icon: "link-outline", onPress: () => {} }], "Sharing coming soon!");
-                }}
-              >
-                <LiquidGlassSurface style={styles.actionBtn} borderRadius={28} blurIntensity={60} enableRipple>
-                  <Ionicons name="share-outline" size={22} color="#FFF" />
-                </LiquidGlassSurface>
-              </TouchableOpacity>
-            </AnimatedReanimated.View>
           </View>
         </AnimatedReanimated.View>
 
@@ -858,57 +841,61 @@ const TrackRowItem = React.memo(
     const isLiked = useLikesStore((s) => !!s.likedTrackIds[item.id]);
     const toggleLike = useLikesStore((s) => s.toggleLike);
 
-    return (
-      <ScaleDecorator>
-        <TouchableOpacity
-          style={[styles.trackRow, isTrackActive && styles.activeTrackRow, isActive && { backgroundColor: "rgba(255,255,255,0.06)" }]}
-          onPress={() => handlePlayTrack(item, index)}
-          onLongPress={drag}
-          delayLongPress={220}
-          activeOpacity={0.7}
-        >
-          <AnimatedReanimated.View style={[StyleSheet.absoluteFill, { borderRadius: 16 }, activeBgStyle]} pointerEvents="none">
-            <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
-            <LinearGradient colors={[hexToRgba(COLORS.primary, 0.22), hexToRgba(COLORS.primary, 0.08), "transparent"]} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
-          </AnimatedReanimated.View>
+    const rowContent = (
+      <TouchableOpacity
+        style={[styles.trackRow, isTrackActive && styles.activeTrackRow, isActive && { backgroundColor: "rgba(255,255,255,0.06)" }]}
+        onPress={() => handlePlayTrack(item, index)}
+        onLongPress={drag}
+        delayLongPress={220}
+        activeOpacity={0.7}
+      >
+        <AnimatedReanimated.View style={[StyleSheet.absoluteFill, { borderRadius: 16 }, activeBgStyle]} pointerEvents="none">
+          <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
+          <LinearGradient colors={[hexToRgba(COLORS.primary, 0.22), hexToRgba(COLORS.primary, 0.08), "transparent"]} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
+        </AnimatedReanimated.View>
 
-          <AnimatedReanimated.View style={[styles.activeAccentBar, activeAccentBarStyle]} pointerEvents="none" />
+        <AnimatedReanimated.View style={[styles.activeAccentBar, activeAccentBarStyle]} pointerEvents="none" />
 
-          <View style={styles.trackIndexContainer}>
-            {isTrackActive ? <Ionicons name="stats-chart" size={18} color={COLORS.primary} /> : <Ionicons name="menu" size={20} color="rgba(255,255,255,0.25)" />}
-          </View>
+        <View style={styles.trackIndexContainer}>
+          {isTrackActive ? <Ionicons name="stats-chart" size={18} color={COLORS.primary} /> : <Ionicons name="menu" size={20} color="rgba(255,255,255,0.25)" />}
+        </View>
 
-          <View style={styles.trackArtWrapper}>
-            <AuraArtwork 
-              source={resolveArtwork(item, 'card')} 
-              entityName={item.title}
-              entityType="song"
-              style={styles.trackArt} 
-              cachePolicy="memory-disk" 
-            />
-            {isTrackActive && (
-              <View style={styles.trackArtPlayOverlay}>
-                <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
-                <Ionicons name="volume-medium" size={14} color={COLORS.primary} />
-              </View>
-            )}
-          </View>
+        <View style={styles.trackArtWrapper}>
+          <AuraArtwork 
+            source={resolveArtwork(item, 'card')} 
+            entityName={item.title}
+            entityType="song"
+            style={styles.trackArt} 
+            cachePolicy="memory-disk" 
+          />
+          {isTrackActive && (
+            <View style={styles.trackArtPlayOverlay}>
+              <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+              <Ionicons name="volume-medium" size={14} color={COLORS.primary} />
+            </View>
+          )}
+        </View>
 
-          <View style={styles.trackInfo}>
-            <Text style={[styles.trackName, isTrackActive && { color: COLORS.primary }]} numberOfLines={1}>{item.title}</Text>
-            <Text style={styles.trackArtist} numberOfLines={1}>{item.artist}</Text>
-          </View>
+        <View style={styles.trackInfo}>
+          <Text style={[styles.trackName, isTrackActive && { color: COLORS.primary }]} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.trackArtist} numberOfLines={1}>{item.artist}</Text>
+        </View>
 
-          <TouchableOpacity style={styles.trackLikeBtn} activeOpacity={0.7} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); toggleLike(item); }}>
-            <Ionicons name={isLiked ? "heart" : "heart-outline"} size={18} color={isLiked ? COLORS.primary : "rgba(255,255,255,0.25)"} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.trackOptionsBtn} activeOpacity={0.7} onPress={() => handleTrackOptions(item)}>
-            <Ionicons name="ellipsis-horizontal" size={18} color="rgba(255,255,255,0.4)" />
-          </TouchableOpacity>
+        <TouchableOpacity style={styles.trackLikeBtn} activeOpacity={0.7} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); toggleLike(item); }}>
+          <Ionicons name={isLiked ? "heart" : "heart-outline"} size={18} color={isLiked ? COLORS.primary : "rgba(255,255,255,0.25)"} />
         </TouchableOpacity>
-      </ScaleDecorator>
+
+        <TouchableOpacity style={styles.trackOptionsBtn} activeOpacity={0.7} onPress={() => handleTrackOptions(item)}>
+          <Ionicons name="ellipsis-horizontal" size={18} color="rgba(255,255,255,0.4)" />
+        </TouchableOpacity>
+      </TouchableOpacity>
     );
+
+    if (drag) {
+      return <ScaleDecorator>{rowContent}</ScaleDecorator>;
+    }
+
+    return rowContent;
   },
 );
 
@@ -1194,7 +1181,7 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
       setResolvedTracks(resolved); setIsResolving(false);
     });
     return () => task.cancel();
-  }, [playlist?.id, playlist?.trackIds, seedTracks.length, downloadedTracks]);
+  }, [playlist?.id, playlist?.trackIds, seedTracks.length, downloadedTracks, isLikedPlaylist, likedTracks]);
 
   useEffect(() => {
     const isPlaylistActive = activeContextType === "playlist" && activeContextId === playlistId;
@@ -1211,13 +1198,34 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
   }, [activeContextId, activeContextType, playlistId, resolvedTracks]);
 
   const downloadStatus = useMemo(() => {
-    if (!playlist?.trackIds?.length) return "none";
-    const dlCount = playlist.trackIds.filter((id: string) => downloadedTracks[id]).length;
-    if (dlCount === playlist.trackIds.length) return "updated";
-    return playlist.trackIds.some((id: string) => activeTasks[id]) ? "downloading" : "none";
-  }, [playlist?.trackIds, downloadedTracks, activeTasks]);
+    const list = resolvedTracks.length > 0 ? resolvedTracks : (playlist?.trackIds || []);
+    if (!list.length) return "none";
+    const ids: string[] = resolvedTracks.length > 0 ? resolvedTracks.map((t: PlayerTrack) => t.id) : playlist.trackIds;
+    const dlCount = ids.filter((id: string) => downloadedTracks[id]).length;
+    if (dlCount === ids.length) return "updated";
+    return ids.some((id: string) => activeTasks[id]) ? "downloading" : "none";
+  }, [resolvedTracks, playlist?.trackIds, downloadedTracks, activeTasks]);
 
   const downloadSpin = useSharedValue(0);
+
+  useEffect(() => {
+    if (downloadStatus === 'downloading') {
+      downloadSpin.value = withRepeat(withTiming(1, { duration: 1000, easing: EasingReanimated.linear }), -1, false);
+    } else {
+      downloadSpin.value = 0;
+    }
+  }, [downloadStatus, downloadSpin]);
+
+  const handleDownload = useCallback(async () => {
+    if (!resolvedTracks || resolvedTracks.length === 0) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const { enqueueDownload, downloadedTracks: dlMap } = useDownloadStore.getState();
+    const unDownloaded = resolvedTracks.filter((t: PlayerTrack) => !dlMap[t.id]);
+    if (unDownloaded.length === 0) return;
+    unDownloaded.forEach((track: PlayerTrack) => {
+      enqueueDownload(track, 'NORMAL');
+    });
+  }, [resolvedTracks]);
   const scrollY = useSharedValue(0);
   const glowPulse = useSharedValue(0.5);
   const glowScale = useSharedValue(1.0);
@@ -1328,7 +1336,7 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
 
       {isLikedPlaylist ? (
         <AnimatedFlashList data={resolvedTracks} keyExtractor={(t: any, i: number) => `${t.id}-${i}`} renderItem={renderFlashItem} estimatedItemSize={72} extraData={currentTrack?.id} onScroll={scrollHandler} {...ScrollPhysics.STANDARD} contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: bottomPadding, paddingHorizontal: 20 }}
-          ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={() => {}} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} showActionSheet={showActionSheet} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
+          ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={handleDownload} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} showActionSheet={showActionSheet} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
           ListEmptyComponent={
             isSeedLoading ? (
               <View style={{ paddingVertical: 48, alignItems: 'center', justifyContent: 'center' }}>
@@ -1342,7 +1350,7 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
         />
       ) : (
         <AnimatedDraggableFlatList data={resolvedTracks} onDragEnd={({ from, to }) => { reorderTracks(playlistId, from, to); if (activeContextId === playlistId) usePlayerStore.getState().reorderQueue(from, to); }} keyExtractor={(t, i) => `${t.id}-${i}`} renderItem={renderDraggableItem} extraData={currentTrack?.id} onScroll={scrollHandler} {...ScrollPhysics.STANDARD} contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: bottomPadding, paddingHorizontal: 20 }}
-          ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={() => {}} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} showActionSheet={showActionSheet} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
+          ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={handleDownload} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} showActionSheet={showActionSheet} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
           ListEmptyComponent={
             isSeedLoading ? (
               <View style={{ paddingVertical: 48, alignItems: 'center', justifyContent: 'center' }}>

@@ -107,6 +107,7 @@ class AuraYouTubeEngine(private val context: Context) {
 
                                         val subRuns = card.optJSONObject("subtitle")?.optJSONArray("runs")
                                         var subtitle = ""
+                                        val artistNames = mutableListOf<String>()
                                         var artistName = ""
                                         var artistId = ""
                                         var albumName = ""
@@ -118,7 +119,7 @@ class AuraYouTubeEngine(private val context: Context) {
                                                 val t = run.optString("text") ?: ""
                                                 subtitle += t
                                                 val trimmed = t.trim()
-                                                if (trimmed.isNotEmpty() && trimmed != "•") {
+                                                if (trimmed.isNotEmpty() && trimmed != "•" && trimmed != "&" && trimmed != ",") {
                                                     subParts.add(trimmed)
                                                 }
 
@@ -127,8 +128,10 @@ class AuraYouTubeEngine(private val context: Context) {
                                                 val pageType = navEnd?.optJSONObject("browseEndpoint")?.optJSONObject("browseEndpointContextSupportedConfigs")?.optJSONObject("browseEndpointContextMusicConfig")?.optString("pageType") ?: ""
 
                                                 if (bId.startsWith("UC") || bId.startsWith("FEmusic_library_privately_owned_artist_detail") || pageType.contains("ARTIST")) {
-                                                    if (artistName.isEmpty()) {
-                                                        artistName = trimmed
+                                                    if (!artistNames.contains(trimmed)) {
+                                                        artistNames.add(trimmed)
+                                                    }
+                                                    if (artistId.isEmpty()) {
                                                         artistId = bId
                                                     }
                                                 } else if (bId.startsWith("MPREb_") || bId.startsWith("FEmusic_library_privately_owned_release_detail") || pageType.contains("ALBUM")) {
@@ -138,6 +141,9 @@ class AuraYouTubeEngine(private val context: Context) {
                                                     }
                                                 }
                                             }
+                                        }
+                                        if (artistNames.isNotEmpty()) {
+                                            artistName = artistNames.joinToString(", ")
                                         }
 
                                         val nav = titleRuns?.optJSONObject(0)?.optJSONObject("navigationEndpoint")
@@ -372,6 +378,8 @@ class AuraYouTubeEngine(private val context: Context) {
             }
         }
 
+        val artistNames = mutableListOf<String>()
+
         // 1. Deep run inspection across all flexColumns for linked artist & album entities
         for (cIdx in 0 until columns.length()) {
             val col = columns.optJSONObject(cIdx)?.optJSONObject("musicResponsiveListItemFlexColumnRenderer") ?: continue
@@ -379,15 +387,17 @@ class AuraYouTubeEngine(private val context: Context) {
             for (rIdx in 0 until runs.length()) {
                 val run = runs.optJSONObject(rIdx) ?: continue
                 val text = run.optString("text").trim()
-                if (text.isEmpty() || text == "•") continue
+                if (text.isEmpty() || text == "•" || text == "&" || text == ",") continue
 
                 val navEnd = run.optJSONObject("navigationEndpoint")
                 val bId = navEnd?.optJSONObject("browseEndpoint")?.optString("browseId") ?: ""
                 val pageType = navEnd?.optJSONObject("browseEndpoint")?.optJSONObject("browseEndpointContextSupportedConfigs")?.optJSONObject("browseEndpointContextMusicConfig")?.optString("pageType") ?: ""
 
                 if (bId.startsWith("UC") || bId.startsWith("FEmusic_library_privately_owned_artist_detail") || pageType.contains("ARTIST")) {
-                    if (artistName.isEmpty()) {
-                        artistName = text
+                    if (!artistNames.contains(text)) {
+                        artistNames.add(text)
+                    }
+                    if (artistId.isEmpty()) {
                         artistId = bId
                     }
                 } else if (bId.startsWith("MPREb_") || bId.startsWith("FEmusic_library_privately_owned_release_detail") || pageType.contains("ALBUM")) {
@@ -397,6 +407,9 @@ class AuraYouTubeEngine(private val context: Context) {
                     }
                 }
             }
+        }
+        if (artistNames.isNotEmpty()) {
+            artistName = artistNames.joinToString(", ")
         }
 
         // 2. Inspect fixedColumns for duration (e.g. table view)
@@ -510,6 +523,7 @@ class AuraYouTubeEngine(private val context: Context) {
 
         val subRuns = twoRow.optJSONObject("subtitle")?.optJSONArray("runs")
         var subtitle = ""
+        val artistNames = mutableListOf<String>()
         var artistName = ""
         var artistId = ""
         var albumName = ""
@@ -521,15 +535,22 @@ class AuraYouTubeEngine(private val context: Context) {
                 val t = run.optString("text") ?: ""
                 subtitle += t
                 val trimmed = t.trim()
-                if (trimmed.isNotEmpty() && trimmed != "•") subParts.add(trimmed)
+                if (trimmed.isNotEmpty() && trimmed != "•" && trimmed != "&" && trimmed != ",") subParts.add(trimmed)
 
                 val navEnd = run.optJSONObject("navigationEndpoint")
                 val bId = navEnd?.optJSONObject("browseEndpoint")?.optString("browseId") ?: ""
-                if (bId.startsWith("UC")) {
-                    artistName = trimmed
-                    artistId = bId
+                if (bId.startsWith("UC") || bId.startsWith("FEmusic_library_privately_owned_artist_detail")) {
+                    if (!artistNames.contains(trimmed)) {
+                        artistNames.add(trimmed)
+                    }
+                    if (artistId.isEmpty()) {
+                        artistId = bId
+                    }
                 }
             }
+        }
+        if (artistNames.isNotEmpty()) {
+            artistName = artistNames.joinToString(", ")
         }
 
         val nav = twoRow.optJSONObject("navigationEndpoint") ?: titleRuns?.optJSONObject(0)?.optJSONObject("navigationEndpoint")
@@ -951,7 +972,18 @@ class AuraYouTubeEngine(private val context: Context) {
                             
                             if (headerSection != null) {
                                 title = headerSection.optJSONObject("title")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text") ?: title
-                                artist = headerSection.optJSONObject("straplineTextOne")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text") ?: artist
+                                val straplineRuns = headerSection.optJSONObject("straplineTextOne")?.optJSONArray("runs")
+                                if (straplineRuns != null && straplineRuns.length() > 0) {
+                                    val artistSb = StringBuilder()
+                                    for (r in 0 until straplineRuns.length()) {
+                                        val runObj = straplineRuns.optJSONObject(r) ?: continue
+                                        artistSb.append(runObj.optString("text"))
+                                    }
+                                    val fullArtist = artistSb.toString().trim()
+                                    if (fullArtist.isNotEmpty()) {
+                                        artist = fullArtist
+                                    }
+                                }
                                 val thumbs = headerSection.optJSONObject("thumbnail")?.optJSONObject("musicThumbnailRenderer")?.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
                                 artwork = if (thumbs != null && thumbs.length() > 0) {
                                     thumbs.optJSONObject(thumbs.length() - 1)?.optString("url") ?: ""
@@ -1070,6 +1102,7 @@ class AuraYouTubeEngine(private val context: Context) {
 
                                 val longBylineRuns = item.optJSONObject("longBylineText")?.optJSONArray("runs")
                                     ?: item.optJSONObject("shortBylineText")?.optJSONArray("runs")
+                                val artistNames = mutableListOf<String>()
                                 var artistName = ""
                                 var artistId = ""
                                 var albumName = ""
@@ -1079,12 +1112,14 @@ class AuraYouTubeEngine(private val context: Context) {
                                     for (r in 0 until longBylineRuns.length()) {
                                         val run = longBylineRuns.optJSONObject(r) ?: continue
                                         val text = run.optString("text").trim()
-                                        if (text.isEmpty() || text == "•") continue
+                                        if (text.isEmpty() || text == "•" || text == "&" || text == ",") continue
                                         val navEnd = run.optJSONObject("navigationEndpoint")
                                         val bId = navEnd?.optJSONObject("browseEndpoint")?.optString("browseId") ?: ""
                                         if (bId.startsWith("UC")) {
-                                            if (artistName.isEmpty()) {
-                                                artistName = text
+                                            if (!artistNames.contains(text)) {
+                                                artistNames.add(text)
+                                            }
+                                            if (artistId.isEmpty()) {
                                                 artistId = bId
                                             }
                                         } else if (bId.startsWith("MPREb_")) {
@@ -1092,10 +1127,13 @@ class AuraYouTubeEngine(private val context: Context) {
                                                 albumName = text
                                                 albumId = bId
                                             }
-                                        } else if (artistName.isEmpty()) {
-                                            artistName = text
+                                        } else if (artistNames.isEmpty()) {
+                                            artistNames.add(text)
                                         }
                                     }
+                                }
+                                if (artistNames.isNotEmpty()) {
+                                    artistName = artistNames.joinToString(", ")
                                 }
 
                                 val lengthText = item.optJSONObject("lengthText")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text")

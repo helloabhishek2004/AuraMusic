@@ -63,6 +63,8 @@ interface AuraPlayerModuleInterface {
   getAudioSessionId(): Promise<number>;
   setNormalizeVolume(enabled: boolean): Promise<boolean>;
   openSystemEqualizer(): Promise<boolean>;
+  setTrackLiked(trackId: string, isLiked: boolean): void;
+  syncLikedTrackIds(trackIds: string[]): void;
 }
 
 interface AuraYouTubeModuleInterface {
@@ -178,6 +180,14 @@ export function onTrackChanged(
   return emitter.addListener('onTrackChanged', callback);
 }
 
+export function onNotificationLikeToggled(
+  callback: (data: { trackId: string; isLiked: boolean }) => void
+) {
+  const emitter = getEmitter();
+  if (!emitter) return { remove: () => {} };
+  return emitter.addListener('onNotificationLikeToggled', callback);
+}
+
 // ─── Download Module Types & Access ────────────────────────────────
 
 export interface NativeDownloadProgress {
@@ -203,6 +213,8 @@ export interface NativeDownloadedTrack {
   title: string;
   artist: string;
   album: string | null;
+  albumId?: string | null;
+  artistId?: string | null;
   duration: number;
   artworkUrl: string | null;
   isDownloaded: boolean;
@@ -225,6 +237,8 @@ interface AuraDownloadModuleInterface {
     title: string;
     artist: string;
     album?: string | null;
+    albumId?: string | null;
+    artistId?: string | null;
     duration?: number;
     artworkUrl?: string | null;
     artwork?: string | null;

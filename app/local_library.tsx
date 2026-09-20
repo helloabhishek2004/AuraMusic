@@ -732,26 +732,21 @@ const EmptyGrantState = ({
     onGrant: () => void;
 }) => (
     <View style={s.stateContainer}>
-        <LiquidGlass borderRadius={32} intensity={22} style={s.stateGlass}>
-            <LinearGradient
-                colors={[GLASS_TINT, GLASS_TINT_HI]}
-                style={[StyleSheet.absoluteFill, { borderRadius: 32 }]}
-                pointerEvents="none"
-            />
+        <View style={s.stateCard}>
             <View style={s.stateSpecular} pointerEvents="none" />
 
-            <View style={s.stateIconWrap}>
+            <View style={s.stateIconOuter}>
                 <LinearGradient
-                    colors={["rgba(191,90,242,0.22)", "rgba(120,40,200,0.10)"]}
+                    colors={["rgba(191,90,242,0.25)", "rgba(120,40,200,0.12)"]}
                     style={s.stateIconBg}
                 >
-                    <Ionicons name="folder-open-outline" size={40} color={palette.primary} />
+                    <Ionicons name="folder-open-outline" size={36} color={palette.primary} />
                 </LinearGradient>
             </View>
 
             <Text style={s.stateTitle}>Folder Access Required</Text>
             <Text style={s.stateSub}>
-                Grant access to your music folders to start playing offline tracks.
+                Grant access to your device's music folders to browse, index, and play your offline tracks.
             </Text>
 
             <PressScale
@@ -771,7 +766,7 @@ const EmptyGrantState = ({
                 <Ionicons name="folder-open" size={18} color="#fff" />
                 <Text style={s.primaryBtnTxt}>Grant Music Folder Access</Text>
             </PressScale>
-        </LiquidGlass>
+        </View>
     </View>
 );
 
@@ -785,31 +780,26 @@ const EmptyNoTracksState = ({
     onScan: () => void;
 }) => (
     <View style={s.stateContainer}>
-        <LiquidGlass borderRadius={32} intensity={22} style={s.stateGlass}>
-            <LinearGradient
-                colors={[GLASS_TINT, GLASS_TINT_HI]}
-                style={[StyleSheet.absoluteFill, { borderRadius: 32 }]}
-                pointerEvents="none"
-            />
+        <View style={s.stateCard}>
             <View style={s.stateSpecular} pointerEvents="none" />
 
-            <View style={s.stateIconWrap}>
+            <View style={s.stateIconOuter}>
                 <LinearGradient
-                    colors={["rgba(191,90,242,0.22)", "rgba(120,40,200,0.10)"]}
+                    colors={["rgba(191,90,242,0.25)", "rgba(120,40,200,0.12)"]}
                     style={s.stateIconBg}
                 >
-                    <Ionicons name="musical-notes-outline" size={40} color={palette.primary} />
+                    <Ionicons name="musical-notes" size={36} color={palette.primary} />
                 </LinearGradient>
             </View>
 
-            <Text style={s.stateTitle}>No music found</Text>
+            <Text style={s.stateTitle}>No Music Found</Text>
             <Text style={s.stateSub}>
-                We couldn't find any supported audio files in the granted folders.
+                We couldn't find any supported audio files in your granted folders. Add a music folder to start listening offline.
             </Text>
 
-            <View style={s.dualBtnRow}>
+            <View style={s.actionBtnCol}>
                 <PressScale
-                    style={[s.primaryBtn, { flex: 1 }]}
+                    style={s.primaryBtn}
                     onPress={onAddFolder}
                     haptic={Haptics.ImpactFeedbackStyle.Medium}
                     accessibilityLabel="Add folder"
@@ -822,20 +812,22 @@ const EmptyNoTracksState = ({
                         style={StyleSheet.absoluteFill}
                     />
                     <View style={s.primaryBtnSpec} pointerEvents="none" />
-                    <Text style={s.primaryBtnTxt}>Add Folder</Text>
+                    <Ionicons name="folder-open" size={18} color="#fff" />
+                    <Text style={s.primaryBtnTxt}>Add Music Folder</Text>
                 </PressScale>
 
                 <PressScale
-                    style={[s.ghostBtn, { flex: 1 }]}
+                    style={s.ghostBtn}
                     onPress={onScan}
                     haptic={Haptics.ImpactFeedbackStyle.Light}
                     accessibilityLabel="Scan again"
                     accessibilityRole="button"
                 >
-                    <Text style={s.ghostBtnTxt}>Scan Again</Text>
+                    <Ionicons name="refresh" size={17} color={palette.primary} />
+                    <Text style={s.ghostBtnTxt}>Scan Folders Again</Text>
                 </PressScale>
             </View>
-        </LiquidGlass>
+        </View>
     </View>
 );
 
@@ -1198,18 +1190,18 @@ export default function LocalLibraryScreen() {
                 ListHeaderComponent={
                     <View>
                         {/* ── Header ─────────────────────────────────────────────── */}
-                        <View style={[s.header, { paddingTop: insets.top + SP16 }]}>
+                        <View style={[s.header, { paddingTop: Math.max(insets.top, 16) + SP8 }]}>
                             {/* Back button */}
                             <PressScale
                                 onPress={() => router.back()}
                                 haptic={Haptics.ImpactFeedbackStyle.Light}
                                 accessibilityLabel="Go back"
                                 accessibilityRole="button"
+                                style={s.headerBtnTouch}
                             >
-                                <LiquidGlass borderRadius={20} intensity={16} style={s.iconBtn}>
-                                    <View style={s.iconBtnSpec} pointerEvents="none" />
-                                    <Ionicons name="chevron-back" size={20} color={palette.ink} />
-                                </LiquidGlass>
+                                <View style={s.headerIconBtn}>
+                                    <Ionicons name="chevron-back" size={22} color="#FFFFFF" style={{ marginLeft: -1 }} />
+                                </View>
                             </PressScale>
 
                             {/* Title block */}
@@ -1231,17 +1223,17 @@ export default function LocalLibraryScreen() {
                                 haptic={Haptics.ImpactFeedbackStyle.Light}
                                 accessibilityLabel="Refresh library"
                                 accessibilityRole="button"
+                                style={s.headerBtnTouch}
                             >
-                                <LiquidGlass borderRadius={20} intensity={16} style={s.iconBtn}>
-                                    <View style={s.iconBtnSpec} pointerEvents="none" />
+                                <View style={s.headerIconBtn}>
                                     <Animated.View style={rotateStyle}>
                                         <Ionicons
                                             name="reload"
-                                            size={18}
+                                            size={20}
                                             color={isLoading ? palette.inkDim : palette.primary}
                                         />
                                     </Animated.View>
-                                </LiquidGlass>
+                                </View>
                             </PressScale>
                         </View>
 
@@ -1334,25 +1326,37 @@ const s = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         paddingHorizontal: PAD,
-        marginBottom: SP24,
+        marginBottom: SP20,
         gap: SP16,
+    },
+    headerBtnTouch: {
+        width: 44,
+        height: 44,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    headerIconBtn: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: "rgba(255, 255, 255, 0.08)",
+        borderWidth: 1,
+        borderColor: "rgba(255, 255, 255, 0.12)",
+        justifyContent: "center",
+        alignItems: "center",
     },
     iconBtn: {
         width: 44,
         height: 44,
         justifyContent: "center",
         alignItems: "center",
-        borderWidth: 0.5,
-        borderColor: BORDER_SUBTLE,
+        borderRadius: 22,
+        backgroundColor: "rgba(255, 255, 255, 0.08)",
+        borderWidth: 1,
+        borderColor: "rgba(255, 255, 255, 0.12)",
     },
     iconBtnSpec: {
-        position: "absolute",
-        top: 0,
-        left: SP8,
-        right: SP8,
-        height: 1,
-        backgroundColor: "rgba(255,255,255,0.16)",
-        borderRadius: 0.5,
+        display: "none",
     },
     headerMid: {
         flex: 1,
@@ -1864,14 +1868,18 @@ const s = StyleSheet.create({
     },
     stateContainer: {
         paddingHorizontal: PAD,
-        marginTop: SP24,
+        marginTop: SP20,
     },
-    stateGlass: {
-        padding: SP32,
+    stateCard: {
+        backgroundColor: "rgba(20, 18, 30, 0.82)",
+        borderRadius: 28,
+        borderWidth: 1,
+        borderColor: "rgba(255, 255, 255, 0.10)",
+        paddingHorizontal: SP24,
+        paddingVertical: SP32,
         alignItems: "center",
+        position: "relative",
         overflow: "hidden",
-        borderWidth: 0.5,
-        borderColor: "rgba(255,255,255,0.09)",
     },
     stateSpecular: {
         position: "absolute",
@@ -1879,15 +1887,22 @@ const s = StyleSheet.create({
         left: SP24,
         right: SP24,
         height: 1,
-        backgroundColor: SPEC_TOP,
+        backgroundColor: "rgba(255, 255, 255, 0.18)",
     },
-    stateIconWrap: {
-        marginBottom: SP24,
+    stateIconOuter: {
+        marginBottom: SP20,
+        shadowColor: palette.primary,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.35,
+        shadowRadius: 16,
+        elevation: 8,
     },
     stateIconBg: {
-        width: 80,
-        height: 80,
+        width: 76,
+        height: 76,
         borderRadius: 24,
+        borderWidth: 1,
+        borderColor: "rgba(191, 90, 242, 0.32)",
         justifyContent: "center",
         alignItems: "center",
     },
@@ -1901,19 +1916,22 @@ const s = StyleSheet.create({
         lineHeight: isTablet ? 28 : 26,
     },
     stateSub: {
-        color: palette.inkMuted,
+        color: "rgba(255, 255, 255, 0.62)",
         fontSize: 14,
         lineHeight: 22,
         textAlign: "center",
-        marginBottom: SP32,
+        marginBottom: SP24,
         paddingHorizontal: SP8,
-        opacity: 0.9,
+    },
+    actionBtnCol: {
+        width: "100%",
+        gap: SP12,
     },
 
     // Primary CTA button
     primaryBtn: {
-        height: 52,
-        borderRadius: 26,
+        height: 50,
+        borderRadius: 25,
         overflow: "hidden",
         justifyContent: "center",
         alignItems: "center",
@@ -1945,17 +1963,20 @@ const s = StyleSheet.create({
 
     // Ghost / secondary button
     ghostBtn: {
-        height: 52,
-        borderRadius: 26,
+        height: 46,
+        borderRadius: 23,
         backgroundColor: "rgba(255,255,255,0.06)",
-        borderWidth: 0.5,
+        borderWidth: 1,
         borderColor: "rgba(255,255,255,0.12)",
         justifyContent: "center",
         alignItems: "center",
+        flexDirection: "row",
+        gap: SP8,
+        width: "100%",
     },
     ghostBtnTxt: {
         color: palette.ink,
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: "700",
     },
 

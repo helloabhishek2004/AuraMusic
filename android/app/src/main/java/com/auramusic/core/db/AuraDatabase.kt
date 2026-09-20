@@ -63,7 +63,7 @@ interface HistoryDao {
 
 @Database(
     entities = [TrackEntity::class, HistoryEntity::class, LyricsEntity::class, PlaylistEntity::class, PlaylistTrackCrossRef::class],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AuraDatabase : RoomDatabase() {
@@ -151,6 +151,13 @@ abstract class AuraDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `tracks` ADD COLUMN `albumId` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `tracks` ADD COLUMN `artistId` TEXT DEFAULT NULL")
+            }
+        }
+
         fun getInstance(context: Context): AuraDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: run {
@@ -165,10 +172,10 @@ abstract class AuraDatabase : RoomDatabase() {
                                 android.database.sqlite.SQLiteDatabase.OPEN_READONLY
                             ).use { sqliteDb ->
                                 val userVersion = sqliteDb.version
-                                if (userVersion > 5) {
+                                if (userVersion > 6) {
                                     android.util.Log.w(
                                         "AuraRestore",
-                                        "[AuraRestore] Newer database version detected (user_version = $userVersion, app version = 5). Preserving backup copy before proceeding."
+                                        "[AuraRestore] Newer database version detected (user_version = $userVersion, app version = 6). Preserving backup copy before proceeding."
                                     )
                                     val backupCopy = java.io.File(dbFile.parentFile, "aura_music_v${userVersion}_backup.db")
                                     if (!backupCopy.exists()) {
@@ -187,7 +194,7 @@ abstract class AuraDatabase : RoomDatabase() {
                         AuraDatabase::class.java,
                         "aura_music.db"
                     )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigrationOnDowngrade()
                     .build().also { INSTANCE = it }
                 }
@@ -198,7 +205,7 @@ abstract class AuraDatabase : RoomDatabase() {
             try {
                 val db = getInstance(context)
                 val supportDb = db.openHelper.writableDatabase
-                val cursor = supportDb.query("PRAGMA wal_checkpoint(FULL)")
+                val cursor = supportDb.query("PRAGMA wal_checkpoint(TRUNCATE)")
                 cursor.close()
                 android.util.Log.i("AuraRestore", "[AuraRestore] WAL checkpoint completed successfully")
             } catch (e: Exception) {

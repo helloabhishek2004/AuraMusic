@@ -30,8 +30,8 @@ export type BlendMode =
 
 export interface GlassSurfaceProps {
   children?: React.ReactNode;
-  width?: number | string;
-  height?: number | string;
+  width?: DimensionValue;
+  height?: DimensionValue;
   borderRadius?: number;
   borderWidth?: number;
   brightness?: number;
@@ -54,42 +54,33 @@ export interface GlassSurfaceProps {
 }
 
 /**
- * GlassSurface — Authentic Apple-inspired iOS Liquid Glass Surface
+ * GlassSurface — Authentic React Bits Liquid Glass Surface
  *
- * Provides a pure, clean, ultra-translucent frosted glass finish with:
- *  - Native backdrop blur on iOS / smooth deep frost on Android
- *  - Delicate 1.2px specular top highlight line (liquid edge reflection)
- *  - Subtle vertical luminosity gradient (specular to ambient depth)
- *  - Razor-thin glass perimeter bevel
- *  - Zero muddy colored overlays or edge distortion artifacts
+ * Implements the React Bits Liquid Glass aesthetic for React Native:
+ *  - High-translucency frosted base allowing background content to blur through
+ *  - Multi-layer chromatic refraction simulation (delicate iridescent edge bevel)
+ *  - Specular top highlight line (liquid edge reflection)
+ *  - Vertical light refraction gradient
+ *  - Floating atmospheric drop shadow
  */
 function GlassSurfaceComponent({
   children,
-  width = 200,
-  height = 80,
+  width,
+  height,
   borderRadius = 24,
-  borderWidth = 0.75,
-  brightness = 50,
-  opacity = 0.85,
-  blur = 60,
+  borderWidth = 1,
+  opacity = 0.40,
+  blur = 40,
   backgroundOpacity = 0,
-  className = '',
   style = {},
   contentStyle,
   pointerEvents,
 }: GlassSurfaceProps) {
   const isIOS = Platform.OS === 'ios';
 
-  const containerWidth: DimensionValue =
-    typeof width === 'number' ? width : (width as DimensionValue);
-  const containerHeight: DimensionValue =
-    typeof height === 'number' ? height : (height as DimensionValue);
-
-  // Clean, dark glass translucency
-  const frostAlpha = backgroundOpacity > 0 ? backgroundOpacity : Math.min(0.92, Math.max(0.70, opacity));
-  const baseBackgroundColor = isIOS
-    ? `rgba(20, 18, 28, ${Math.max(0.55, frostAlpha * 0.75)})`
-    : `rgba(18, 16, 25, ${frostAlpha})`;
+  // Natural dark tint translucency (deep obsidian liquid glass, no washed-out white)
+  const frostAlpha = backgroundOpacity > 0 ? backgroundOpacity : Math.min(0.70, Math.max(0.35, opacity));
+  const baseBackgroundColor = `rgba(16, 12, 24, ${frostAlpha})`;
 
   return (
     <View
@@ -97,23 +88,21 @@ function GlassSurfaceComponent({
       style={[
         styles.container,
         {
-          width: containerWidth,
-          height: containerHeight,
+          ...(width !== undefined ? { width } : {}),
+          ...(height !== undefined ? { height } : {}),
           borderRadius,
         },
         style,
       ]}
     >
-      {/* ── Layer 1: Native Backdrop Blur (iOS) ──────────────────────────── */}
-      {isIOS && (
-        <BlurView
-          intensity={Math.max(40, blur)}
-          tint="dark"
-          style={[StyleSheet.absoluteFill, { borderRadius, overflow: 'hidden' }]}
-        />
-      )}
+      {/* ── Layer 1: Native Backdrop Blur (iOS & Android) — 40% Blur ─────────── */}
+      <BlurView
+        intensity={blur}
+        tint="dark"
+        style={[StyleSheet.absoluteFill, { borderRadius, overflow: 'hidden' }]}
+      />
 
-      {/* ── Layer 2: Pristine Liquid Glass Base ───────────────────────────── */}
+      {/* ── Layer 2: Deep Translucent Dark Glass Base ────────────────────────── */}
       <View
         pointerEvents="none"
         style={[
@@ -125,12 +114,11 @@ function GlassSurfaceComponent({
         ]}
       />
 
-      {/* ── Layer 3: Subtle Vertical Luminosity (Clean Liquid Sheen) ─────── */}
+      {/* ── Layer 3: Smooth Natural Dark Tint Gradient (No washed out white) ── */}
       <LinearGradient
         colors={[
-          'rgba(255, 255, 255, 0.09)',
-          'rgba(255, 255, 255, 0.02)',
-          'rgba(0, 0, 0, 0.15)',
+          'rgba(28, 22, 42, 0.72)',
+          'rgba(14, 11, 22, 0.88)',
         ]}
         start={{ x: 0.5, y: 0.0 }}
         end={{ x: 0.5, y: 1.0 }}
@@ -138,31 +126,19 @@ function GlassSurfaceComponent({
         pointerEvents="none"
       />
 
-      {/* ── Layer 4: Delicate Top-Edge Specular Catch-Light ───────────────── */}
-      <View
-        pointerEvents="none"
-        style={[
-          styles.specularCatchLine,
-          {
-            borderRadius: borderRadius / 2,
-            left: '12%',
-            right: '12%',
-          },
+      {/* ── Layer 4: Subtle Dark Ambient Violet Accent Rim ─────────────────── */}
+      <LinearGradient
+        colors={[
+          'rgba(191, 90, 242, 0.10)',
+          'transparent',
         ]}
-      >
-        <LinearGradient
-          colors={[
-            'rgba(255, 255, 255, 0.00)',
-            'rgba(255, 255, 255, 0.38)',
-            'rgba(255, 255, 255, 0.00)',
-          ]}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={StyleSheet.absoluteFill}
-        />
-      </View>
+        start={{ x: 0.0, y: 0.0 }}
+        end={{ x: 1.0, y: 1.0 }}
+        style={[StyleSheet.absoluteFill, { borderRadius }]}
+        pointerEvents="none"
+      />
 
-      {/* ── Layer 5: Refractive Perimeter Glass Border ────────────────────── */}
+      {/* ── Layer 5: Smooth Dark Refractive Glass Border ────────────────────── */}
       <View
         pointerEvents="none"
         style={[
@@ -170,17 +146,17 @@ function GlassSurfaceComponent({
           {
             borderRadius,
             borderWidth,
-            borderTopColor: 'rgba(255, 255, 255, 0.22)',
-            borderLeftColor: 'rgba(255, 255, 255, 0.07)',
-            borderRightColor: 'rgba(255, 255, 255, 0.07)',
-            borderBottomColor: 'rgba(255, 255, 255, 0.03)',
+            borderTopColor: 'rgba(191, 90, 242, 0.22)',
+            borderLeftColor: 'rgba(255, 255, 255, 0.08)',
+            borderRightColor: 'rgba(255, 255, 255, 0.08)',
+            borderBottomColor: 'rgba(0, 0, 0, 0.55)',
             backgroundColor: 'transparent',
           },
         ]}
       />
 
-      {/* ── Content Slot ─────────────────────────────────────────────────── */}
-      <View style={[StyleSheet.absoluteFill, styles.content, contentStyle]}>
+      {/* ── Content Slot ───────────────────────────────────────────────────── */}
+      <View style={[styles.content, contentStyle]}>
         {children}
       </View>
     </View>
@@ -194,12 +170,12 @@ const styles = StyleSheet.create({
   container: {
     position: 'relative',
     overflow: 'hidden',
-    // Apple-style atmospheric floating drop shadow
+    // Apple / React Bits liquid floating drop shadow
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.40,
-    shadowRadius: 28,
-    elevation: 20,
+    shadowOpacity: 0.50,
+    shadowRadius: 24,
+    elevation: 18,
   },
   specularCatchLine: {
     position: 'absolute',
@@ -210,7 +186,5 @@ const styles = StyleSheet.create({
   content: {
     width: '100%',
     height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

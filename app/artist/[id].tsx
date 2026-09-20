@@ -156,6 +156,7 @@ import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
 import { requestIdleTask } from "@/src/utils/idle-task";
 import { musicService } from "@/src/services/api/music";
+import { useAnalyticsStore } from "@/src/features/analytics/store/analytics.store";
 
 // ─── Design system (UNCHANGED) ───────────────────────────────────────────────
 import { glass, motion, palette, radius, spacing } from "@/src/design/tokens";
@@ -479,28 +480,35 @@ function ArtistPage() {
         IN_MEMORY_CACHE[targetBrowseId] = enriched;
         await AsyncStorage.setItem(CACHE_PREFIX + id, JSON.stringify(enriched));
       } else {
-        const local = resolveLocalArtist(id);
-        if (local) {
-          setArtist(local);
-          setIsOfflineEmpty(false);
-        } else {
-          setIsOfflineEmpty(true);
+        if (!artist && !IN_MEMORY_CACHE[id]) {
+          const local = resolveLocalArtist(id);
+          if (local) {
+            setArtist(local);
+            setIsOfflineEmpty(false);
+          } else {
+            setIsOfflineEmpty(true);
+          }
         }
       }
     } catch (e: any) {
       console.warn("[Artist Page] Remote fetch failed, trying local resolution:", e?.message || e);
-      const local = resolveLocalArtist(id);
-      if (local) {
-        setArtist(local);
-        setError(null);
+      if (artist || IN_MEMORY_CACHE[id]) {
         setIsOfflineEmpty(false);
+        setError(null);
       } else {
-        const { useNetworkStore } = require('@/src/features/network/store/network.store');
-        if (!useNetworkStore.getState().isOnline) {
-          setIsOfflineEmpty(true);
+        const local = resolveLocalArtist(id);
+        if (local) {
+          setArtist(local);
           setError(null);
+          setIsOfflineEmpty(false);
         } else {
-          setError(e?.message || "Unable to load artist. Please check your connection.");
+          const { useNetworkStore } = require('@/src/features/network/store/network.store');
+          if (!useNetworkStore.getState().isOnline) {
+            setIsOfflineEmpty(true);
+            setError(null);
+          } else {
+            setError(e?.message || "Unable to load artist. Please check your connection.");
+          }
         }
       }
     } finally {
@@ -782,7 +790,7 @@ function ArtistPage() {
   }, [isModalLoadingMore, isModalFetching]);
 
   // ─── Offline Empty State ───────────────────────────────────────────────────
-  if (isOfflineEmpty) {
+  if (isOfflineEmpty && !artist) {
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
@@ -817,7 +825,7 @@ function ArtistPage() {
   }
 
   // ─── Error State ───────────────────────────────────────────────────────────
-  if (error) {
+  if (error && !artist) {
     return (
       <View style={styles.container}>
         <StatusBar style="light" />
@@ -1269,12 +1277,6 @@ const FloatingControlPanel = memo(
           active: isFollowing,
         },
         {
-          icon: "share-social-outline",
-          label: "Share",
-          onPress: () => { },
-          active: false,
-        },
-        {
           icon: "ellipsis-horizontal",
           label: "More",
           onPress: () => { },
@@ -1372,20 +1374,67 @@ const FloatingControlPanel = memo(
 );
 
 // ─── Quick Stats ───────────────────────────────────────────────────────────────
-// ENHANCED:
-//  • Each stat card has a coloured left accent bar (3 px) for visual rhythm
-//  • Icon sits in a small primary-tinted pill instead of bare
-//  • Value font scale slightly larger; label ALL CAPS with stronger tracking
-// AUDIT FIX: stats array in useMemo
+// Uses only real artist metadata and genuine listening analytics
 const QuickStats = memo(({ artist }: { artist: ArtistDetails }) => {
-  const stats = useMemo(
-    () => [
-      { label: "Monthly", sublabel: "Listeners", value: artist.subscribers || "12.4M", icon: "headset-outline" },
-      { label: "Total", sublabel: "Plays", value: "2.1B", icon: "play-circle-outline" },
-      { label: "Total", sublabel: "Followers", value: "840K", icon: "people-outline" },
-    ],
-    [artist.subscribers],
-  );
+  const localPlays = useAnalyticsStore((s) => {
+    if (!artist?.name) return 0;
+    const direct = s.artistAffinities?.[artist.name]?.playCount || 0;
+    if (direct > 0) return direct;
+    return s.artistAffinities?.[artist.name.trim()]?.playCount || 0;
+  });
+
+  const stats = useMemo(() => {
+    const items: Array<{ label: string; sublabel: string; value: string; icon: string }> = [];
+
+    // 1. Genuine subscriber count if available from API
+    if (artist.subscribers && artist.subscribers.trim().length > 0) {
+      const cleanSubs = artist.subscribers.replace(/\s*subscribers/i, "").trim();
+      items.push({
+        label: "Audience",
+        sublabel: "Subscribers",
+        value: cleanSubs,
+        icon: "people-outline",
+      });
+    }
+
+    // 2. Available track count
+    const trackCount = artist.songs?.length || 0;
+    if (trackCount > 0) {
+      items.push({
+        label: "Catalog",
+        sublabel: trackCount === 1 ? "Track" : "Tracks",
+        value: String(trackCount),
+        icon: "musical-notes-outline",
+      });
+    }
+
+    // 3. Available albums/releases count
+    const releaseCount = (artist.albums?.length || 0) + (artist.singles?.length || 0);
+    if (releaseCount > 0) {
+      items.push({
+        label: "Discography",
+        sublabel: releaseCount === 1 ? "Release" : "Releases",
+        value: String(releaseCount),
+        icon: "disc-outline",
+      });
+    }
+
+    // 4. Genuine local play count from analytics affinity
+    if (localPlays > 0) {
+      items.push({
+        label: "Your Plays",
+        sublabel: localPlays === 1 ? "Play" : "Plays",
+        value: String(localPlays),
+        icon: "play-circle-outline",
+      });
+    }
+
+    return items;
+  }, [artist.subscribers, artist.songs, artist.albums, artist.singles, localPlays]);
+
+  if (stats.length === 0) {
+    return null;
+  }
 
   return (
     <View style={styles.statsSection}>

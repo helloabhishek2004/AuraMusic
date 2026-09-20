@@ -39,6 +39,48 @@ export class DownloadManager {
     const store = useDownloadStore.getState();
     const downloadStartTime = Date.now();
 
+    // Bounded metadata enrichment (max 2500ms) to ensure album & artist metadata are populated
+    try {
+      const { MetadataCache } = await import("@/src/features/cache/services/metadata-cache.service");
+      const cached = MetadataCache.getHotEntry(task.track) || await MetadataCache.getEntry(task.track);
+      if (cached?.album && cached.album !== "Unknown Album") {
+        task.track.album = cached.album;
+        if (cached.albumId) task.track.albumId = cached.albumId;
+        if (cached.artistId && !task.track.artistId) task.track.artistId = cached.artistId;
+      } else {
+        const { useNetworkStore } = await import("@/src/features/network/store/network.store");
+        if (useNetworkStore.getState().isOnline) {
+          const enrichPromise = (async () => {
+            const { AuraYouTube, isNativeCoreAvailable } = await import("@/src/services/native-core");
+            if (isNativeCoreAvailable() && AuraYouTube && typeof AuraYouTube.getTrack === "function") {
+              return await AuraYouTube.getTrack(trackId);
+            }
+            return null;
+          })();
+          const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500));
+          const details: any = await Promise.race([enrichPromise, timeoutPromise]);
+          if (details?.album && details.album !== "Unknown Album") {
+            task.track.album = details.album;
+            if (details.albumId) task.track.albumId = details.albumId;
+            if (details.artistId && !task.track.artistId) task.track.artistId = details.artistId;
+            MetadataCache.mergeEntry(task.track, {
+              album: details.album,
+              albumId: details.albumId || null,
+              artistId: details.artistId || null,
+            });
+          }
+        }
+      }
+    } catch {
+      // Non-blocking: proceed with best available metadata
+    }
+
+    // Graceful album fallback when missing: "Single — <Artist>"
+    const safeAlbum = (task.track.album && task.track.album.trim().length > 0 && task.track.album !== "Unknown Album" && task.track.album !== "Unknown")
+      ? task.track.album
+      : (task.track.artist ? `Single — ${task.track.artist}` : "Single");
+    task.track.album = safeAlbum;
+
     const { AuraDownload } = await import("@/src/services/native-core");
     if (AuraDownload) {
       try {
@@ -49,6 +91,8 @@ export class DownloadManager {
           title: task.track.title,
           artist: task.track.artist,
           album: task.track.album,
+          albumId: (task.track as any).albumId || undefined,
+          artistId: (task.track as any).artistId || undefined,
           duration: task.track.duration,
           artworkUrl: task.track.art || (task.track as any).artworkUrl,
         });

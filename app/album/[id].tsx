@@ -9,6 +9,7 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState
 } from "react";
@@ -23,7 +24,6 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Share,
   ScrollView
 } from "react-native";
 
@@ -326,12 +326,14 @@ function AlbumScreen() {
         album.tracks.map((t) => ({
           id: t.id,
           title: t.title,
-          artist: t.artist,
-          art: t.art,
+          artist: t.artist || album.artist,
+          art: t.art || album.thumbnail,
           url: "",
           duration: parseDuration(t.duration),
           source: t.source || "album",
           album: album.title,
+          albumId: album.id,
+          artistId: (t as any).artistId || (album as any).artistId,
         })),
         index,
       );
@@ -344,14 +346,20 @@ function AlbumScreen() {
     handlePlayTrack(album.tracks[0], 0);
   }, [album, handlePlayTrack]);
 
-  const handleShare = useCallback(async () => {
-    if (!album) return;
-    try {
-      await Share.share({
-        message: `Check out ${album.title} by ${album.artist} on AuraMusic!`,
-        url: `auramusic://album/${album.id}`,
-      });
-    } catch (e) {}
+  const albumTracksForDownload: any[] = useMemo(() => {
+    if (!album || !album.tracks) return [];
+    return album.tracks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      artist: t.artist || album.artist,
+      art: t.art || album.thumbnail || "",
+      url: t.url || "",
+      duration: parseDuration(t.duration),
+      album: album.title,
+      albumId: album.id,
+      artistId: (t as any).artistId || (album as any).artistId,
+      source: "album",
+    }));
   }, [album]);
 
   const stickyHeaderStyle = useAnimatedStyle(() => ({
@@ -392,7 +400,7 @@ function AlbumScreen() {
         <MediaListItem
           title={item.title}
           subtitle={item.artist}
-          image={item.art}
+          image={item.art || album?.thumbnail || ""}
           meta={item.duration}
           active={currentTrack?.id === item.id}
           onPress={() => handlePlayTrack(item, index)}
@@ -401,14 +409,17 @@ function AlbumScreen() {
              id: item.id,
              title: item.title,
              artist: item.artist,
-             art: item.art,
+             art: item.art || album?.thumbnail || "",
              url: item.url || "",
-             duration: parseDuration(item.duration)
+             duration: parseDuration(item.duration),
+             album: album?.title,
+             albumId: album?.id,
+             artistId: (item as any).artistId || (album as any)?.artistId,
           }}
         />
       </Materialise>
     ),
-    [currentTrack?.id, handlePlayTrack],
+    [currentTrack?.id, handlePlayTrack, album],
   );
 
   const renderSkeleton = () => (
@@ -540,9 +551,8 @@ function AlbumScreen() {
               <ActionButtons
                 onPlay={handlePlayAlbum}
                 onShuffle={() => toggleShuffle()}
-                onShare={handleShare}
                 isShuffle={isShuffle}
-                tracks={album.tracks || []}
+                tracks={albumTracksForDownload}
               />
             </>
           }
@@ -612,7 +622,7 @@ const HeroSection = memo(
   },
 );
 
-const ActionButtons = memo(({ onPlay, onShuffle, onShare, isShuffle, tracks }: any) => (
+const ActionButtons = memo(({ onPlay, onShuffle, isShuffle, tracks }: any) => (
   <LiquidGlass
     borderRadius={radius.xl}
     intensity={glass.surfaceBlur}
@@ -641,14 +651,6 @@ const ActionButtons = memo(({ onPlay, onShuffle, onShare, isShuffle, tracks }: a
         size={20}
         color={isShuffle ? palette.primary : palette.ink}
       />
-    </PressScale>
-    <PressScale
-      onPress={onShare}
-      wrapperStyle={styles.iconButton}
-      style={styles.innerButton}
-      accessibilityLabel="Share album"
-    >
-      <Ionicons name="share-outline" size={20} color={palette.ink} />
     </PressScale>
     <DownloadAlbumButton
         tracks={tracks}

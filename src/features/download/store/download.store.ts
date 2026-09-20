@@ -63,10 +63,26 @@ export const useDownloadStore = create<DownloadStore>()(
       enqueueDownload: (track: PlayerTrack, priority: 'HIGH' | 'NORMAL' | 'LOW' = 'HIGH') => {
         const { downloadedTracks, queue } = get();
 
+        // 0. Pre-enrich from hot cache if album is missing
+        let enrichedTrack = { ...track };
+        try {
+          const { MetadataCache } = require('@/src/features/cache/services/metadata-cache.service');
+          const hotCache = MetadataCache.getHotEntry(track);
+          if (hotCache?.album && hotCache.album !== "Unknown Album") {
+            enrichedTrack.album = hotCache.album;
+            if (hotCache.albumId) enrichedTrack.albumId = hotCache.albumId;
+            if (hotCache.artistId && !enrichedTrack.artistId) enrichedTrack.artistId = hotCache.artistId;
+          }
+        } catch {}
+
+        if (!enrichedTrack.album || enrichedTrack.album === "Unknown Album" || enrichedTrack.album.trim().length === 0) {
+          enrichedTrack.album = enrichedTrack.artist ? `Single — ${enrichedTrack.artist}` : "Single";
+        }
+
         // Check duplicates: Queued, Preparing, Downloading, Verifying, or Completed
         const existingItem = queue.find(
           (item) =>
-            (item.trackId === track.id || (item.downloadUrl && track.url && item.downloadUrl === track.url)) &&
+            (item.trackId === enrichedTrack.id || (item.downloadUrl && enrichedTrack.url && item.downloadUrl === enrichedTrack.url)) &&
             ['queued', 'preparing', 'downloading', 'verifying', 'completed'].includes(item.status)
         );
 
@@ -74,25 +90,25 @@ export const useDownloadStore = create<DownloadStore>()(
           return existingItem;
         }
 
-        const isCompleted = !!downloadedTracks[track.id];
+        const isCompleted = !!downloadedTracks[enrichedTrack.id];
         if (isCompleted) {
-          const completedItem = queue.find(item => item.trackId === track.id && item.status === 'completed');
+          const completedItem = queue.find(item => item.trackId === enrichedTrack.id && item.status === 'completed');
           if (completedItem) return completedItem;
           
           // If in downloadedTracks but not in queue list, create completed item in queue
           const newItem: DownloadQueueItem = {
-            id: track.id,
-            trackId: track.id,
-            title: track.title,
-            artist: track.artist,
-            artwork: track.art,
+            id: enrichedTrack.id,
+            trackId: enrichedTrack.id,
+            title: enrichedTrack.title,
+            artist: enrichedTrack.artist,
+            artwork: enrichedTrack.art,
             status: 'completed',
             progress: 100,
             retryCount: 0,
             queuedAt: Date.now(),
             completedAt: Date.now(),
             priority,
-            downloadUrl: track.url,
+            downloadUrl: enrichedTrack.url,
           };
           set((state) => ({
             queue: pruneQueue([...state.queue, newItem]),
@@ -101,21 +117,21 @@ export const useDownloadStore = create<DownloadStore>()(
         }
 
         const newItem: DownloadQueueItem = {
-          id: track.id,
-          trackId: track.id,
-          title: track.title,
-          artist: track.artist,
-          artwork: track.art,
+          id: enrichedTrack.id,
+          trackId: enrichedTrack.id,
+          title: enrichedTrack.title,
+          artist: enrichedTrack.artist,
+          artwork: enrichedTrack.art,
           status: 'queued',
           progress: 0,
           retryCount: 0,
           queuedAt: Date.now(),
           priority,
-          downloadUrl: track.url,
+          downloadUrl: enrichedTrack.url,
         };
 
         const newTask: DownloadTask = {
-          track,
+          track: enrichedTrack,
           status: 'queued',
           progress: 0,
           retryCount: 0,
@@ -366,21 +382,26 @@ export const useDownloadStore = create<DownloadStore>()(
       },
 
       setDownloaded: (track: DownloadedTrack) => {
+        const safeAlbum = (track.album && track.album.trim().length > 0 && track.album !== "Unknown Album" && track.album !== "Unknown")
+          ? track.album
+          : (track.artist ? `Single — ${track.artist}` : "Single");
+        const safeTrack: DownloadedTrack = { ...track, album: safeAlbum };
+
         set((state) => {
           const updatedQueue = state.queue.map((item) =>
-            item.trackId === track.id ? { ...item, status: 'completed' as const, progress: 100, completedAt: Date.now() } : item
+            item.trackId === safeTrack.id ? { ...item, status: 'completed' as const, progress: 100, completedAt: Date.now() } : item
           );
           
           const newActiveTasks = { ...state.activeTasks };
-          delete newActiveTasks[track.id];
+          delete newActiveTasks[safeTrack.id];
 
           return {
             downloadedTracks: {
               ...state.downloadedTracks,
-              [track.id]: track,
+              [safeTrack.id]: safeTrack,
             },
             queue: pruneQueue(updatedQueue),
-            downloadQueue: state.downloadQueue.filter((id) => id !== track.id),
+            downloadQueue: state.downloadQueue.filter((id) => id !== safeTrack.id),
             activeTasks: newActiveTasks,
           };
         });

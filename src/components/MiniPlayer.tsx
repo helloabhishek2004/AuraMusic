@@ -48,27 +48,13 @@ import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
 import { AuraArtwork } from '@/src/components/ui/aura-artwork';
 import { Marquee } from '@/src/components/ui/marquee';
 import { MotionTiming, MotionSpring, MotionEasing } from '@/src/design/motion';
+import { getBottomOffset } from '@/src/constants/navigation';
 
 const DEFAULT_ACCENT = '#BF5AF2';
 
-const parseArtists = (artistStr?: string): string[] => {
-  if (!artistStr) return [];
-  const standardized = artistStr
-    .replace(/\s+(featuring|feat\.?|&|\/|with|and)\s+/gi, ", ")
-    .replace(/\s*,\s*/g, ", ");
-  return standardized.split(",").map(name => name.trim()).filter(name => name.length > 0);
-};
-
 const formatArtistDisplay = (artistStr?: string): string => {
   if (!artistStr || typeof artistStr !== 'string' || artistStr.trim() === '') return "—";
-  const raw = artistStr.trim();
-  const artists = parseArtists(raw);
-  if (!artists || artists.length === 0) return raw;
-  if (artists.length === 1) return artists[0];
-  if (artists.length === 2) return `${artists[0]} with ${artists[1]}`;
-  if (artists.length === 3) return `${artists[0]} with ${artists[1]} and ${artists[2]}`;
-  const middle = artists.slice(1, -1).join(", ");
-  return `${artists[0]} with ${middle}, and ${artists[artists.length - 1]}`;
+  return artistStr.trim();
 };
 
 const h2r = (hex: string, a: number) => {
@@ -180,7 +166,7 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
   });
 
   const accent = track?.dominantColors?.[0] ?? DEFAULT_ACCENT;
-  const bottom = bottomOffset ?? (Math.max(insets.bottom + 14, 24) + 80);
+  const bottom = bottomOffset ?? getBottomOffset(true, insets);
 
   const handleOpenNowPlaying = useCallback(() => {
     if (!track) return;

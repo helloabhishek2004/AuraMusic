@@ -60,6 +60,14 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
                 putString("trackId", trackId)
             })
         }
+
+        player.addLikeToggleListener { trackId, isLiked ->
+            val map = Arguments.createMap().apply {
+                putString("trackId", trackId)
+                putBoolean("isLiked", isLiked)
+            }
+            sendEvent("onNotificationLikeToggled", map)
+        }
     }
 
     @ReactMethod
@@ -147,6 +155,24 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
     @ReactMethod
     fun setRepeatMode(mode: String) {
         mainHandler.post { player.setRepeatMode(mode) }
+    }
+
+    @ReactMethod
+    fun setTrackLiked(trackId: String, isLiked: Boolean) {
+        mainHandler.post {
+            player.setTrackLiked(trackId, isLiked)
+        }
+    }
+
+    @ReactMethod
+    fun syncLikedTrackIds(trackIds: ReadableArray) {
+        val ids = mutableListOf<String>()
+        for (i in 0 until trackIds.size()) {
+            trackIds.getString(i)?.let { ids.add(it) }
+        }
+        mainHandler.post {
+            player.syncLikedTrackIds(ids)
+        }
     }
 
     @ReactMethod

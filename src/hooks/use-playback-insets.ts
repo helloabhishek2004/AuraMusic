@@ -1,5 +1,6 @@
 import { useSegments } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getBottomOffset } from '../constants/navigation';
 
 export function usePlaybackInsets() {
   const insets = useSafeAreaInsets();
@@ -9,9 +10,7 @@ export function usePlaybackInsets() {
   const miniPlayerHeight = 68;
   const extraSpace = 24;
 
-  const tabOffset = isTabScreen
-    ? Math.max(insets.bottom + 14, 24) + 80
-    : Math.max(insets.bottom + 8, 12);
+  const tabOffset = getBottomOffset(isTabScreen, insets);
 
   return {
     bottomPadding: tabOffset + miniPlayerHeight + extraSpace,

@@ -153,6 +153,109 @@ export interface TrendingSeed {
   image: string;
   source: 'global' | 'india';
   fetchedAt: number;
+  query?: string;
+  reason?: string;
+}
+
+export interface DiscoveryPoolItem {
+  id: string;
+  title: string;
+  query: string;
+  source: 'global' | 'india';
+  defaultArtwork: string;
+  reason?: string;
+}
+
+export const DISCOVERY_CATALOGUE: DiscoveryPoolItem[] = [
+  {
+    id: 'trending-global',
+    title: 'Global Top Hits',
+    query: 'Top Global Hits',
+    source: 'global',
+    defaultArtwork: 'https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg',
+    reason: 'The hottest tracks trending worldwide right now',
+  },
+  {
+    id: 'trending-india',
+    title: 'Trending in India',
+    query: 'Top Hindi Songs',
+    source: 'india',
+    defaultArtwork: 'https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg',
+    reason: 'Chartbusters and popular hits in India',
+  },
+  {
+    id: 'trending-synthwave',
+    title: 'Synthwave & Chill',
+    query: 'Synthwave Retrowave Chill Electro',
+    source: 'global',
+    defaultArtwork: 'https://i.ytimg.com/vi/4xDzrJKXOOY/hqdefault.jpg',
+    reason: 'Neon retro synth and chill electronic vibes',
+  },
+  {
+    id: 'trending-lofi',
+    title: 'Lo-Fi Chill Beats',
+    query: 'Lofi Hip Hop Chill Beats to Relax Study',
+    source: 'global',
+    defaultArtwork: 'https://i.ytimg.com/vi/5qap5aO4i9A/hqdefault.jpg',
+    reason: 'Mellow lofi beats for relaxing and focus',
+  },
+  {
+    id: 'trending-acoustic',
+    title: 'Acoustic Coffeehouse',
+    query: 'Acoustic Pop Chill Coffeehouse',
+    source: 'global',
+    defaultArtwork: 'https://i.ytimg.com/vi/kOCkne-Bku4/hqdefault.jpg',
+    reason: 'Intimate acoustic sessions and melodic calm',
+  },
+  {
+    id: 'trending-electronic',
+    title: 'EDM & Club Energy',
+    query: 'Dance EDM Electronic Festival Hits',
+    source: 'global',
+    defaultArtwork: 'https://i.ytimg.com/vi/fB8TyLTD7EE/hqdefault.jpg',
+    reason: 'High energy dance and festival anthems',
+  },
+  {
+    id: 'trending-hiphop',
+    title: 'Hip-Hop & R&B Hits',
+    query: 'Hip Hop Rap RnB Top Hits',
+    source: 'global',
+    defaultArtwork: 'https://i.ytimg.com/vi/JGwWNGJdvx8/hqdefault.jpg',
+    reason: 'Fresh flow, beats and urban hits',
+  },
+  {
+    id: 'trending-nightdrive',
+    title: 'Late Night Drive',
+    query: 'Late Night Drive Chill Vibes',
+    source: 'global',
+    defaultArtwork: 'https://i.ytimg.com/vi/21X5lGlDOfg/hqdefault.jpg',
+    reason: 'Atmospheric rhythms for midnight cruising',
+  },
+  {
+    id: 'trending-indie',
+    title: 'Indie & Alternative',
+    query: 'Indie Rock Alternative Hits',
+    source: 'global',
+    defaultArtwork: 'https://i.ytimg.com/vi/YVkUvmDQ3HY/hqdefault.jpg',
+    reason: 'Indie anthems and alternative discoveries',
+  },
+  {
+    id: 'trending-workout',
+    title: 'Beast Mode Workout',
+    query: 'Workout Motivation Gym Music',
+    source: 'global',
+    defaultArtwork: 'https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg',
+    reason: 'High intensity adrenaline for your sessions',
+  },
+];
+
+export function getDiscoverySlice(startIndex: number, count: number = 4): DiscoveryPoolItem[] {
+  const result: DiscoveryPoolItem[] = [];
+  const len = DISCOVERY_CATALOGUE.length;
+  for (let i = 0; i < count; i++) {
+    result.push(DISCOVERY_CATALOGUE[(startIndex + i) % len]);
+  }
+  return result;
 }
 
 export interface RecommendationsState {
@@ -167,6 +270,7 @@ export interface RecommendationsState {
   rediscover: RecommendationSeed[];
   becauseYouLike: RecommendationSeed[];
   recentlyLoved: RecommendationSeed[];
+  discoveryRotationIndex: number;
   trendingSeeds: TrendingSeed[];
   trendingForYou: RecommendationSeed | null;
   topSongs: RecommendationSeed[];
@@ -194,6 +298,7 @@ export interface RecommendationsActions {
   generateRecommendations: () => Promise<void>;
   resetRecommendations: () => void;
   refreshTrendingIfNeeded: () => Promise<void>;
+  refreshDiscover: (forceNext?: boolean) => Promise<void>;
   startPeriodicPreload: () => void;
   registerRecommendationShown: (seedId: string) => void;
   registerRecommendationClick: (seedId: string, action?: 'play' | 'like' | 'complete') => void;
@@ -220,32 +325,17 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
       rediscover: [],
       becauseYouLike: [],
       recentlyLoved: [],
-      trendingSeeds: [
-        {
-          type: 'playlist',
-          id: 'trending-global',
-          title: 'Global Top Hits',
-          image: 'https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg',
-          source: 'global',
-          fetchedAt: Date.now(),
-        },
-        {
-          type: 'playlist',
-          id: 'trending-india',
-          title: 'Trending in India',
-          image: 'https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg',
-          source: 'india',
-          fetchedAt: Date.now(),
-        },
-        {
-          type: 'playlist',
-          id: 'trending-synthwave',
-          title: 'Synthwave & Chill',
-          image: 'https://i.ytimg.com/vi/4xDzrJKXOOY/hqdefault.jpg',
-          source: 'global',
-          fetchedAt: Date.now(),
-        }
-      ],
+      discoveryRotationIndex: 0,
+      trendingSeeds: getDiscoverySlice(0, 4).map(item => ({
+        type: 'playlist',
+        id: item.id,
+        title: item.title,
+        image: item.defaultArtwork,
+        source: item.source,
+        fetchedAt: Date.now(),
+        query: item.query,
+        reason: item.reason,
+      })),
       trendingForYou: null,
       topSongs: [],
       topArtists: [],
@@ -560,42 +650,29 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             forgottenFavorites = generateForgottenFavorites(trackAffinities, history, state.forgottenFavoritesShownAt || {});
           }
 
-          // Caching trending playlist seeds with real artwork preservation
+          // Caching trending playlist seeds with real artwork preservation and catalogue rotation
           const prevTrending = state.trendingSeeds || [];
           const findPrevArt = (id: string, title: string) => {
             const match = prevTrending.find(t => t.id === id);
             if (match?.image && !match.image.startsWith('aura://') && !match.image.includes('placeholder')) {
               return match.image;
             }
-            return resolveArtwork({ type: 'playlist', id, title } as any, 'album');
+            const catItem = DISCOVERY_CATALOGUE.find(d => d.id === id);
+            return catItem?.defaultArtwork || resolveArtwork({ type: 'playlist', id, title } as any, 'album');
           };
 
-          const trendingSeeds: TrendingSeed[] = [
-            {
-              type: 'playlist',
-              id: 'trending-global',
-              title: 'Global Top Hits',
-              image: findPrevArt('trending-global', 'Global Top Hits'),
-              source: 'global',
-              fetchedAt: Date.now(),
-            },
-            {
-              type: 'playlist',
-              id: 'trending-india',
-              title: 'Trending in India',
-              image: findPrevArt('trending-india', 'Trending in India'),
-              source: 'india',
-              fetchedAt: Date.now(),
-            },
-            {
-              type: 'playlist',
-              id: 'trending-synthwave',
-              title: 'Synthwave & Chill',
-              image: findPrevArt('trending-synthwave', 'Synthwave & Chill'),
-              source: 'global',
-              fetchedAt: Date.now(),
-            }
-          ];
+          const rotIndex = state.discoveryRotationIndex || 0;
+          const currentSlice = getDiscoverySlice(rotIndex, 4);
+          const trendingSeeds: TrendingSeed[] = currentSlice.map(item => ({
+            type: 'playlist',
+            id: item.id,
+            title: item.title,
+            image: findPrevArt(item.id, item.title),
+            source: item.source,
+            fetchedAt: Date.now(),
+            query: item.query,
+            reason: item.reason,
+          }));
 
           // Dynamic Artwork Resolution Priority
           const resolveListArtworks = async (list: RecommendationSeed[]) => {
@@ -867,6 +944,49 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
         return queue;
       },
 
+      refreshDiscover: async (forceNext: boolean = false) => {
+        const state = get();
+        const nextIndex = forceNext
+          ? (state.discoveryRotationIndex + 3) % DISCOVERY_CATALOGUE.length
+          : (state.discoveryRotationIndex || 0);
+        
+        const selected = getDiscoverySlice(nextIndex, 4);
+
+        try {
+          const updatedSeeds: TrendingSeed[] = await Promise.all(
+            selected.map(async (item) => {
+              const prevMatch = state.trendingSeeds?.find(s => s.id === item.id);
+              let cover = (prevMatch?.image && !prevMatch.image.startsWith('aura://') && !prevMatch.image.includes('placeholder'))
+                ? prevMatch.image
+                : null;
+              
+              if (!cover) {
+                const fallbackSeed = { type: 'playlist', id: item.id, title: item.title } as any;
+                cover = await resolveTrendingCoverAsync(item.query, fallbackSeed);
+              }
+
+              return {
+                type: 'playlist',
+                id: item.id,
+                title: item.title,
+                image: cover || item.defaultArtwork,
+                source: item.source,
+                fetchedAt: Date.now(),
+                query: item.query,
+                reason: item.reason,
+              };
+            })
+          );
+
+          set({
+            discoveryRotationIndex: nextIndex,
+            trendingSeeds: updatedSeeds,
+          });
+        } catch (e) {
+          console.warn('[RecommendationsStore] Error in refreshDiscover:', e);
+        }
+      },
+
       refreshTrendingIfNeeded: async () => {
         const state = get();
         const currentTrending = state.trendingSeeds || [];
@@ -876,43 +996,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
         if (Date.now() - lastFetched < oneDayMs && hasRealImages) {
           return;
         }
-
-        try {
-          const globalCover = await resolveTrendingCoverAsync('Top Global Hits', { type: 'playlist', id: 'trending-global', title: 'Global Top Hits' } as any);
-          const indiaCover = await resolveTrendingCoverAsync('Top Hindi Songs', { type: 'playlist', id: 'trending-india', title: 'Trending in India' } as any);
-          const synthwaveCover = await resolveTrendingCoverAsync('Synthwave Chill', { type: 'playlist', id: 'trending-synthwave', title: 'Synthwave & Chill' } as any);
-
-          set({
-            trendingSeeds: [
-              {
-                type: 'playlist',
-                id: 'trending-global',
-                title: 'Global Top Hits',
-                image: globalCover,
-                source: 'global',
-                fetchedAt: Date.now(),
-              },
-              {
-                type: 'playlist',
-                id: 'trending-india',
-                title: 'Trending in India',
-                image: indiaCover,
-                source: 'india',
-                fetchedAt: Date.now(),
-              },
-              {
-                type: 'playlist',
-                id: 'trending-synthwave',
-                title: 'Synthwave & Chill',
-                image: synthwaveCover,
-                source: 'global',
-                fetchedAt: Date.now(),
-              }
-            ]
-          });
-        } catch (e) {
-          console.warn('[RecommendationsStore] Error refreshing trending covers:', e);
-        }
+        await get().refreshDiscover(false);
       },
 
       startPeriodicPreload: () => {
@@ -959,6 +1043,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
         fatigueTracker: state.fatigueTracker,
         listeningEventsCountSinceBuild: state.listeningEventsCountSinceBuild,
         lastRecommendationBuild: state.lastRecommendationBuild,
+        discoveryRotationIndex: state.discoveryRotationIndex,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
@@ -968,11 +1053,8 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           if (Array.isArray(state.trendingSeeds)) {
             state.trendingSeeds = state.trendingSeeds.map((s) => {
               if (!s.image || s.image.startsWith('aura://')) {
-                const fallbackImg = s.id === 'trending-global'
-                  ? 'https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg'
-                  : s.id === 'trending-india'
-                  ? 'https://i.ytimg.com/vi/kJQP7kiw5Fk/hqdefault.jpg'
-                  : 'https://i.ytimg.com/vi/4xDzrJKXOOY/hqdefault.jpg';
+                const catItem = DISCOVERY_CATALOGUE.find(d => d.id === s.id);
+                const fallbackImg = catItem?.defaultArtwork || 'https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg';
                 return { ...s, image: fallbackImg };
               }
               return s;

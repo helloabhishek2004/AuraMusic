@@ -339,7 +339,10 @@ export const usePlayerStore = create<any>()(
             } else {
                 const { parseLyricsData } = require("../utils/lyrics-parser");
                 const parsed = parseLyricsData(cached.lyrics);
-                set({ lyrics: parsed, isLyricsLoading: false });
+                const activeTrack = get().currentTrack;
+                if (activeTrack && (activeTrack.id === track.id || getCanonicalTrackId(activeTrack) === canonicalId)) {
+                    set({ lyrics: parsed ? { ...parsed, trackId: track.id } : null, isLyricsLoading: false });
+                }
                 return;
             }
         }
@@ -361,12 +364,12 @@ export const usePlayerStore = create<any>()(
           }
           
           const activeTrack = get().currentTrack;
-          if (activeTrack && getCanonicalTrackId(activeTrack) === canonicalId) {
-            set({ lyrics: parsed, isLyricsLoading: false });
+          if (activeTrack && (activeTrack.id === track.id || getCanonicalTrackId(activeTrack) === canonicalId)) {
+            set({ lyrics: parsed ? { ...parsed, trackId: track.id } : null, isLyricsLoading: false });
           }
         } catch (error) {
           const activeTrack = get().currentTrack;
-          if (activeTrack && getCanonicalTrackId(activeTrack) === canonicalId) {
+          if (activeTrack && (activeTrack.id === track.id || getCanonicalTrackId(activeTrack) === canonicalId)) {
             set({ isLyricsLoading: false, lyrics: null });
           }
         }

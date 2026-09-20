@@ -1,11 +1,11 @@
 import React, { useCallback } from 'react';
 import { Tabs } from 'expo-router';
-import FloatingNav from '../../src/components/FloatingNav';
-import { AtmosphericBackground } from '../../src/components/ui/atmospheric-background';
-import { palette } from '../../src/design/tokens';
+import { FloatingNavBar } from '@/src/components/navigation/FloatingNavBar';
+import { AtmosphericBackground } from '@/src/components/ui/atmospheric-background';
+import { palette } from '@/src/design/tokens';
 
 export default function TabLayout() {
-  const renderTabBar = useCallback((props: any) => <FloatingNav {...props} />, []);
+  const renderTabBar = useCallback((props: any) => <FloatingNavBar {...props} />, []);
 
   return (
     <>
@@ -18,7 +18,7 @@ export default function TabLayout() {
           headerShown: false,
           lazy: true,
           freezeOnBlur: true,
-          sceneStyle: { backgroundColor: palette.background }
+          sceneStyle: { backgroundColor: palette.background },
         }}
       >
         <Tabs.Screen

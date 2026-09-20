@@ -1,7 +1,8 @@
 import { usePlayerStore } from "../store/player.store";
 import { playbackProgress } from "./playback-progress";
-import { onPlaybackStateChanged, onTrackChanged, NativePlaybackState } from "../../../services/native-core";
+import { onPlaybackStateChanged, onTrackChanged, onNotificationLikeToggled, AuraPlayer, NativePlaybackState } from "../../../services/native-core";
 import { PlaybackService } from "./playback.service";
+import { useLikesStore } from "../../likes/store/likes.store";
 
 let _controllerInitialized = false;
 
@@ -18,6 +19,49 @@ export class PlaybackController {
     if (this.isInitialized || _controllerInitialized) return;
     this.isInitialized = true;
     _controllerInitialized = true;
+
+    // Sync initial liked tracks to native Media3 player
+    try {
+      const initialLikedIds = useLikesStore.getState().getLikedIds();
+      if (initialLikedIds && initialLikedIds.length > 0) {
+        AuraPlayer?.syncLikedTrackIds(initialLikedIds);
+      }
+    } catch (e) {
+      console.warn('[PlaybackController] Failed to sync initial likes with native:', e);
+    }
+
+    // Subscribe to in-app like state changes to update lock screen / notification heart icon
+    useLikesStore.subscribe((state, prevState) => {
+      const currentTrackId = usePlayerStore.getState().currentTrack?.id;
+      if (!currentTrackId) return;
+
+      const isLikedNow = !!state.likedTrackIds[currentTrackId];
+      const wasLiked = !!prevState.likedTrackIds[currentTrackId];
+
+      if (isLikedNow !== wasLiked) {
+        AuraPlayer?.setTrackLiked(currentTrackId, isLikedNow);
+      }
+    });
+
+    // Listen to lock-screen / notification heart button taps
+    onNotificationLikeToggled(({ trackId, isLiked }) => {
+      console.log(`[PlaybackController] Notification like toggled: ${trackId}, isLiked: ${isLiked}`);
+      const likesStore = useLikesStore.getState();
+      const currentlyLiked = likesStore.isLiked(trackId);
+
+      if (isLiked !== currentlyLiked) {
+        if (isLiked) {
+          const currentTrack = usePlayerStore.getState().currentTrack;
+          const trackToLike = (currentTrack && currentTrack.id === trackId)
+            ? currentTrack
+            : PlaybackController.recoverTrack(trackId);
+
+          likesStore.likeTrack(trackToLike);
+        } else {
+          likesStore.unlikeTrack(trackId);
+        }
+      }
+    });
 
     // Listen to our custom Native module
     onPlaybackStateChanged((state: NativePlaybackState) => {
@@ -146,7 +190,9 @@ export class PlaybackController {
             store.queue[store.currentIndex]?.id === data.trackId
           ) {
             if (store.currentTrack?.id !== data.trackId) {
-              usePlayerStore.setState({ currentTrack: store.queue[store.currentIndex] });
+              const nextTrack = store.queue[store.currentIndex];
+              usePlayerStore.setState({ currentTrack: nextTrack, lyrics: null, isLyricsLoading: false });
+              usePlayerStore.getState().fetchLyrics(nextTrack);
             }
           } else if (store.currentTrack?.id !== data.trackId) {
             const queue = store.queue;
@@ -161,14 +207,19 @@ export class PlaybackController {
               }
             }
             if (resolvedIdx !== -1) {
-              usePlayerStore.setState({ currentIndex: resolvedIdx, currentTrack: queue[resolvedIdx] });
+              const nextTrack = queue[resolvedIdx];
+              usePlayerStore.setState({ currentIndex: resolvedIdx, currentTrack: nextTrack, lyrics: null, isLyricsLoading: false });
+              usePlayerStore.getState().fetchLyrics(nextTrack);
             } else {
               const recovered = this.recoverTrack(data.trackId);
               usePlayerStore.setState({
                 currentTrack: recovered,
                 queue: [recovered],
                 currentIndex: 0,
+                lyrics: null,
+                isLyricsLoading: false,
               });
+              usePlayerStore.getState().fetchLyrics(recovered);
             }
           }
           break;
@@ -314,6 +365,8 @@ export class PlaybackController {
 
     try {
       const { useLikesStore } = require("../../likes/store/likes.store");
+      const snapshot = useLikesStore.getState().trackMetadata?.[trackId];
+      if (snapshot && snapshot.title) return snapshot;
       const liked = useLikesStore.getState().likedTracks?.find((t: any) => t.id === trackId);
       if (liked) return liked;
     } catch (_) {}

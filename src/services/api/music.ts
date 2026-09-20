@@ -482,7 +482,15 @@ export const musicService = {
             year: nData.year || "",
             thumbnail: nData.thumbnail || nData.art || "",
             tracks: (nData.tracks || nData.songs || []).map((s: any) => ({
-              id: s.id, title: s.title, artist: s.artist || nData.artist || "", album: nData.title, duration: s.duration, art: s.artworkUrl || s.art || nData.thumbnail || "", source: 'ytmusic'
+              id: s.id,
+              title: s.title,
+              artist: s.artist || nData.artist || "",
+              artistId: s.artistId || undefined,
+              album: nData.title,
+              albumId: nData.id,
+              duration: s.duration,
+              art: s.artworkUrl || s.art || nData.thumbnail || "",
+              source: 'ytmusic'
             }))
           };
         }

@@ -236,7 +236,7 @@ Reusable UI primitives MUST exist.
 Examples:
 
 * LiquidGlassCard
-* FloatingNavBar
+* NativeBottomTabs
 * DynamicGradientBackground
 * GlassButton
 * GlassSheet

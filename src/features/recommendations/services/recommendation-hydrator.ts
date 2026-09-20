@@ -749,6 +749,22 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
           } catch (e) {}
         }
 
+        // Hydrate any discovery catalog or trending seed dynamically
+        if (seed.id && (seed.id.startsWith('trending-') || seed.query)) {
+          try {
+            const { musicService } = require('../../../services/api/music');
+            const { DISCOVERY_CATALOGUE } = require('../store/recommendations.store');
+            const catItem = DISCOVERY_CATALOGUE?.find((d: any) => d.id === seed.id);
+            const query = seed.query || catItem?.query || seed.title;
+            if (query) {
+              const songs = await musicService.searchSongs(query);
+              if (songs && songs.length > 0) {
+                return applyDiversityFilter(songs, 25);
+              }
+            }
+          } catch (e) {}
+        }
+
         // Generic fallback for any other named seed
         if (seed.title) {
           try {

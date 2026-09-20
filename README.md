@@ -11,7 +11,7 @@
 
   <!-- Badges -->
   <p align="center">
-    <a href="#-tech-stack"><img src="https://img.shields.io/badge/Version-v0.1.0--beta.1-8A2BE2?style=for-the-badge&logo=android&logoColor=white" alt="Version" /></a>
+    <a href="#-tech-stack"><img src="https://img.shields.io/badge/Version-v2.0.0-8A2BE2?style=for-the-badge&logo=android&logoColor=white" alt="Version" /></a>
     <a href="#-tech-stack"><img src="https://img.shields.io/badge/Platform-Android%20First-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Platform" /></a>
     <a href="#-architecture"><img src="https://img.shields.io/badge/Core-Kotlin%20%7C%20Media3-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Native Core" /></a>
     <a href="#-tech-stack"><img src="https://img.shields.io/badge/Framework-Expo%20SDK%2055-000020?style=for-the-badge&logo=expo&logoColor=white" alt="Expo" /></a>
@@ -38,7 +38,7 @@
     <a href="#-ai-engineering-tooling"><b>AI Tools</b></a>
   </p>
 
-  <sub>🚀 <b>v0.1.0-beta.1 — Public Beta</b> | Distributed as source code & standalone APK builds. Not currently hosted on the Google Play Store.</sub>
+  <sub>🚀 <b>v2.0.0 — Official Release</b> | Distributed as source code & standalone signed APK builds.</sub>
 
 </div>
 

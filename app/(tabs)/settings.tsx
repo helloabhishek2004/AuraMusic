@@ -15,7 +15,7 @@ import * as Haptics from "expo-haptics";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -423,6 +423,7 @@ const CachePills = React.memo(({ current, onSelect }: { current: number | "unlim
 // ─────────────────────────────────────────────────────────────────────────────
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   
   // Settings selectors
   const toggleSetting = useSettingsStore(s => s.toggleSetting);
@@ -851,7 +852,10 @@ export default function SettingsScreen() {
           <GlassCard r={32} style={{ overflow: "hidden" }}>
             {/* FAQ */}
             <TouchableOpacity
-              onPress={() => Alert.alert("FAQ", "Frequently Asked Questions coming soon.")}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push('/faq' as any);
+              }}
               activeOpacity={0.7}
               delayPressIn={0}
               style={st.row}
@@ -863,13 +867,16 @@ export default function SettingsScreen() {
                   </View>
                   <Text style={st.rowLabel}>Frequently Asked Questions</Text>
                 </View>
-                <MaterialIcons name="open-in-new" size={18} color="rgba(255,255,255,0.28)" />
+                <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.28)" />
               </View>
             </TouchableOpacity>
             <Divider />
             {/* Privacy Policy */}
             <TouchableOpacity
-              onPress={() => Alert.alert("Privacy Policy", "AuraMusic Privacy Policy coming soon.")}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push('/privacy_policy' as any);
+              }}
               activeOpacity={0.7}
               delayPressIn={0}
               style={st.row}

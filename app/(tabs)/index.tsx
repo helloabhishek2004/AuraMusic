@@ -17,8 +17,8 @@ import {
   ActivityIndicator,
   Animated,
   InteractionManager,
-  Share,
-  Modal
+  Modal,
+  RefreshControl
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -828,12 +828,13 @@ const SeedTrackCard = React.memo(({ seed, onPress }: any) => {
 });
 
 // ── SECTION HEADER ─────────────────────────────────────────────────────────
-const SectionHeader = memo(({ title, subtitle, onSeeAll }: any) => (
+const SectionHeader = memo(({ title, subtitle, onSeeAll, rightAction }: any) => (
   <View style={s.sectionHeader}>
     <View style={{ flex: 1 }}>
       <Text style={s.sectionTitle}>{title}</Text>
       {subtitle && <Text style={s.sectionSubtitle}>{subtitle}</Text>}
     </View>
+    {rightAction}
     {onSeeAll && (
       <TouchableOpacity onPress={onSeeAll} activeOpacity={0.7}>
         <Text style={s.seeAllText}>See all</Text>
@@ -1176,18 +1177,6 @@ const TrackActionSheet = memo(({ visible, track, onClose }: { visible: boolean; 
     }
   };
 
-  const handleShare = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onClose();
-    try {
-      await Share.share({
-        message: `Check out "${track.title}" by ${track.artist} on AuraMusic!`,
-      });
-    } catch (error) {
-      console.error('Error sharing:', error);
-    }
-  };
-
   return (
     <Modal
       visible={visible}
@@ -1304,13 +1293,6 @@ const TrackActionSheet = memo(({ visible, track, onClose }: { visible: boolean; 
                 {isDownloaded ? 'Remove' : (isDownloading ? 'Downloading' : 'Download')}
               </Text>
             </TouchableOpacity>
-
-            <TouchableOpacity style={s.actionSheetBtn} onPress={handleShare}>
-              <View style={s.actionSheetIconCircle}>
-                <Ionicons name="share-outline" size={20} color="#FFF" />
-              </View>
-              <Text style={s.actionSheetBtnText}>Share</Text>
-            </TouchableOpacity>
           </View>
 
           <TouchableOpacity style={s.actionSheetCancelBtn} onPress={onClose}>
@@ -1362,6 +1344,40 @@ export default function HomeScreen() {
   const becauseYouLike = useRecommendationsStore(s => s.becauseYouLike ?? EMPTY_ARRAY);
   const trendingSeeds = useRecommendationsStore(s => s.trendingSeeds ?? EMPTY_ARRAY);
   const recsReadiness = useRecommendationsStore(s => s.readiness);
+  const refreshDiscover = useRecommendationsStore(s => s.refreshDiscover);
+  const generateRecommendations = useRecommendationsStore(s => s.generateRecommendations);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [isRotatingDiscover, setIsRotatingDiscover] = useState(false);
+
+  const handleRefreshDiscoverOnly = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setIsRotatingDiscover(true);
+    try {
+      if (refreshDiscover) {
+        await refreshDiscover(true);
+      }
+    } catch (e) {
+      console.warn('[HomeScreen] Rotate discover error:', e);
+    } finally {
+      setIsRotatingDiscover(false);
+    }
+  }, [refreshDiscover]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      if (refreshDiscover) {
+        await refreshDiscover(true);
+      }
+      await generateRecommendations();
+    } catch (err) {
+      console.warn('[HomeScreen] Refresh error:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshDiscover, generateRecommendations]);
 
   useEffect(() => {
     console.info('[HomeScreen] Mounted and interactive');
@@ -1486,7 +1502,25 @@ export default function HomeScreen() {
       case 'discover_music':
         return (
             <View style={s.section}>
-                <SectionHeader title="Discover Music" />
+                <SectionHeader 
+                  title="Discover Music" 
+                  rightAction={
+                    <TouchableOpacity 
+                      onPress={handleRefreshDiscoverOnly} 
+                      activeOpacity={0.7} 
+                      style={{ paddingHorizontal: 8, paddingVertical: 4, flexDirection: 'row', alignItems: 'center' }}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      accessibilityLabel="Refresh discover music"
+                      accessibilityRole="button"
+                    >
+                      {isRotatingDiscover ? (
+                        <ActivityIndicator size="small" color={P.primary} />
+                      ) : (
+                        <Ionicons name="refresh" size={18} color="rgba(255,255,255,0.6)" />
+                      )}
+                    </TouchableOpacity>
+                  }
+                />
                 <FlashList
                     // @ts-ignore
                     estimatedItemSize={160}
@@ -1627,7 +1661,7 @@ export default function HomeScreen() {
       default:
         return null;
     }
-  }, [greetingData, handlePlayTrack, goPlaylist, goArtist, goAlbum]);
+  }, [greetingData, handlePlayTrack, goPlaylist, goArtist, goAlbum, handleRefreshDiscoverOnly, isRotatingDiscover]);
 
   return (
     <View style={s.container}>
@@ -1635,6 +1669,15 @@ export default function HomeScreen() {
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={[s.scrollContent, { paddingTop: insets.top + 10, paddingBottom: bottomPadding }]}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={P.primary}
+              colors={[P.primary]}
+              progressBackgroundColor="rgba(28, 28, 30, 0.95)"
+            />
+          }
           {...ScrollPhysics.STANDARD}
         >
           {sectionsData.map((item: any) => (

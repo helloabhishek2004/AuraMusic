@@ -36,7 +36,7 @@ import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useNavigation } from "expo-router";
 import { FlashList } from "@shopify/flash-list";
 import React, {
   useCallback,
@@ -64,6 +64,7 @@ import {
   Keyboard,
   InteractionManager,
   AppState,
+  DeviceEventEmitter,
 } from "react-native";
 import { useScrollToTopOnTabPress } from "@/src/hooks/use-scroll-to-top";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -1475,6 +1476,40 @@ export default function SearchScreen() {
 
   const [activeCategory, setActiveCategory] = useState("All");
   const inputRef = useRef<TextInput>(null);
+  const navigation = useNavigation();
+
+  // Focus search text input and show keyboard when tapping search tab while already on search
+  useEffect(() => {
+    const handleFocus = () => {
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+    };
+
+    const unsubDevice = DeviceEventEmitter.addListener('AURA_FOCUS_SEARCH_INPUT', handleFocus);
+
+    if (!navigation) {
+      return () => {
+        unsubDevice.remove();
+      };
+    }
+
+    const handleTabPress = () => {
+      if (navigation.isFocused()) {
+        handleFocus();
+      }
+    };
+
+    const unsubCurrent = navigation.addListener("tabPress" as any, handleTabPress);
+    const parent = navigation.getParent();
+    const unsubParent = parent ? parent.addListener("tabPress" as any, handleTabPress) : undefined;
+
+    return () => {
+      unsubDevice.remove();
+      unsubCurrent();
+      unsubParent?.();
+    };
+  }, [navigation]);
 
   // ── Search focus state — slide search bar for keyboard ──────────────────
   const [isFocused, setIsFocused] = useState(false);
@@ -2047,50 +2082,56 @@ export default function SearchScreen() {
 
         {/* Search Bar */}
         <Mat delay={50}>
-          <Glass r={28} blur={65} style={s.searchBar}>
-            <Ionicons
-              name="search"
-              size={18}
-              color={C.dim}
-              style={{ marginLeft: 18, marginRight: 8 }}
-            />
-            <TextInput
-              ref={inputRef}
-              style={s.searchInput}
-              placeholder="Songs, artists, albums…"
-              placeholderTextColor={C.dim}
-              value={localQuery}
-              onChangeText={handleQueryChange}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
-              returnKeyType="search"
-              clearButtonMode="never"
-              autoCorrect={false}
-              autoCapitalize="none"
-              accessibilityLabel="Search input"
-              accessibilityHint="Type to search for songs, artists, and albums"
-            />
-            {localQuery.length > 0 && (
-              <TouchableOpacity
-                onPress={() => {
-                  setLocalQuery("");
-                  setQuery("");
-                }}
-                style={{ paddingHorizontal: 14, paddingVertical: 4 }}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="Clear search"
-                accessibilityRole="button"
-              >
-                <View style={s.clearBtn}>
-                  <Ionicons
-                    name="close"
-                    size={13}
-                    color="rgba(255,255,255,0.75)"
-                  />
-                </View>
-              </TouchableOpacity>
-            )}
-          </Glass>
+          <Pressable
+            onPress={() => inputRef.current?.focus()}
+            accessible={false}
+          >
+            <Glass r={28} blur={65} style={s.searchBar}>
+              <Ionicons
+                name="search"
+                size={18}
+                color={C.dim}
+                style={{ marginLeft: 18, marginRight: 8 }}
+              />
+              <TextInput
+                ref={inputRef}
+                style={s.searchInput}
+                placeholder="Songs, artists, albums…"
+                placeholderTextColor={C.dim}
+                value={localQuery}
+                onChangeText={handleQueryChange}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                returnKeyType="search"
+                clearButtonMode="never"
+                autoCorrect={false}
+                autoCapitalize="none"
+                accessibilityLabel="Search input"
+                accessibilityHint="Type to search for songs, artists, and albums"
+              />
+              {localQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    setLocalQuery("");
+                    setQuery("");
+                  }}
+                  style={{ paddingHorizontal: 14, paddingVertical: 4 }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityLabel="Clear search"
+                  accessibilityRole="button"
+                >
+                  <View style={s.clearBtn}>
+                    <Ionicons
+                      name="close"
+                      size={13}
+                      color="rgba(255,255,255,0.75)"
+                    />
+                  </View>
+                </TouchableOpacity>
+              )}
+            </Glass>
+          </Pressable>
         </Mat>
 
         {/* Category Filter Bar */}

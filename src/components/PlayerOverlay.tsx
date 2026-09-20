@@ -12,7 +12,6 @@ import {
   Dimensions,
   Platform,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -75,6 +74,7 @@ import { FlashList, ListRenderItem } from "@shopify/flash-list";
 const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as any;
 
 import { MotionTiming, MotionSpring, MotionEasing } from "@/src/design/motion";
+import { getBottomOffset } from "@/src/constants/navigation";
 
 const { width: SW, height: SH } = Dimensions.get("window");
 const NAV_WIDTH = Math.min(SW - 32, SW >= 720 ? 620 : SW > SH ? 560 : SW - 32);
@@ -123,30 +123,9 @@ const formatTime = (sec: number) => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
-const parseArtists = (artistStr?: string): string[] => {
-  if (!artistStr) return [];
-  // Standardize delimiters: replace featuring, feat, &, /, with, and with commas
-  const standardized = artistStr
-    .replace(/\s+(featuring|feat\.?|&|\/|with|and)\s+/gi, ", ")
-    .replace(/\s*,\s*/g, ", ");
-  
-  return standardized
-    .split(",")
-    .map(name => name.trim())
-    .filter(name => name.length > 0);
-};
-
 const formatArtistDisplay = (artistStr?: string): string => {
-  if (!artistStr) return "—";
-  const artists = parseArtists(artistStr);
-  if (artists.length === 0) return "—";
-  if (artists.length === 1) return artists[0];
-  if (artists.length === 2) return `${artists[0]} with ${artists[1]}`;
-  if (artists.length === 3) return `${artists[0]} with ${artists[1]} and ${artists[2]}`;
-  
-  // artists.length >= 4
-  const middle = artists.slice(1, -1).join(", ");
-  return `${artists[0]} with ${middle}, and ${artists[artists.length - 1]}`;
+  if (!artistStr || typeof artistStr !== 'string' || artistStr.trim() === '') return "—";
+  return artistStr.trim();
 };
 
 // ── Playback Scrubber (Optimized) ──────────────────────────────────────────
@@ -493,6 +472,13 @@ const LyricsSurface = memo(({
   const isLoading = usePlayerStore(s => s.isLyricsLoading);
   const currentTrack = usePlayerStore(s => s.currentTrack);
 
+  // Validate that lyrics belong to the currently playing track
+  const activeLyrics = useMemo(() => {
+    if (!lyricsData || !currentTrack) return null;
+    if (lyricsData.trackId && lyricsData.trackId !== currentTrack.id) return null;
+    return lyricsData;
+  }, [lyricsData, currentTrack?.id]);
+
   const handleRetryFetch = useCallback(() => {
     if (currentTrack) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -501,13 +487,16 @@ const LyricsSurface = memo(({
   }, [currentTrack]);
 
   useEffect(() => {
-    if (visible && currentTrack && !lyricsData && !isLoading) {
-      usePlayerStore.getState().fetchLyrics(currentTrack);
+    if (visible && currentTrack) {
+      const isMissingForCurrent = !lyricsData || (lyricsData.trackId && lyricsData.trackId !== currentTrack.id);
+      if (isMissingForCurrent && !isLoading) {
+        usePlayerStore.getState().fetchLyrics(currentTrack);
+      }
     }
   }, [visible, currentTrack?.id, lyricsData, isLoading]);
 
-  const lyrics: LyricLineType[] = useMemo(() => lyricsData?.lyrics || [], [lyricsData]);
-  const isSynced = useMemo(() => lyricsData?.synced ?? false, [lyricsData]);
+  const lyrics: LyricLineType[] = useMemo(() => activeLyrics?.lyrics || [], [activeLyrics]);
+  const isSynced = useMemo(() => activeLyrics?.synced ?? false, [activeLyrics]);
 
   const lyricsScrollRef = useRef<any>(null);
   const isLyricsUserScrolling = useSharedValue(false);
@@ -694,7 +683,7 @@ const LyricsSurface = memo(({
   );
 });
 // ── Secondary Sheets ─────────────────────────────────────────────────────────
-const MoreMenuSurface = memo(({ visible, onClose, accentColor, currentTrack, onAddToPlaylist, onShare }: any) => {
+const MoreMenuSurface = memo(({ visible, onClose, accentColor, currentTrack, onAddToPlaylist }: any) => {
   const isShuffle = usePlayerStore(s => s.isShuffle);
   const repeatMode = usePlayerStore(s => s.repeatMode);
   const { toggleRepeat, toggleShuffle, play, pause, prev, next } = useMusicActions();
@@ -763,10 +752,6 @@ const MoreMenuSurface = memo(({ visible, onClose, accentColor, currentTrack, onA
           <TouchableOpacity style={st.menuItem} onPress={() => { onClose(); onAddToPlaylist(); }}>
             <Ionicons name="add-circle-outline" size={22} color="#FFF" />
             <Text style={st.menuItemText}>Add to Playlist</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={st.menuItem} onPress={() => { onClose(); onShare(); }}>
-            <Ionicons name="share-outline" size={22} color="#FFF" />
-            <Text style={st.menuItemText}>Share Song</Text>
           </TouchableOpacity>
           {hasAlbum && (
             <TouchableOpacity 
@@ -922,8 +907,7 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     if (artistName) {
       collapse();
       const trimmed = artistName.trim();
-      const currentArtist = currentTrack?.artist || (currentTrack as any)?.artistName || (currentTrack as any)?.author || "";
-      if (currentTrack?.artistId && (currentArtist.toLowerCase().includes(trimmed.toLowerCase()) || parseArtists(currentArtist)[0]?.toLowerCase() === trimmed.toLowerCase())) {
+      if (currentTrack?.artistId) {
         openArtist(router, currentTrack.artistId);
       } else {
         openArtistByName(router, trimmed);
@@ -938,63 +922,10 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     }
 
     const artistStr = rawArtist.trim();
-    const artists = parseArtists(artistStr);
-    if (!artists || artists.length === 0) {
-      return (
-        <Text style={st.artistName} numberOfLines={1}>
-          <Text onPress={() => handleSingleArtistPress(artistStr)}>
-            {artistStr}
-          </Text>
-        </Text>
-      );
-    }
-
-    if (artists.length === 1) {
-      return (
-        <Text style={st.artistName} numberOfLines={1}>
-          <Text onPress={() => handleSingleArtistPress(artists[0])}>
-            {artists[0]}
-          </Text>
-        </Text>
-      );
-    }
-
-    if (artists.length === 2) {
-      return (
-        <Text style={st.artistName} numberOfLines={1}>
-          <Text onPress={() => handleSingleArtistPress(artists[0])}>{artists[0]}</Text>
-          {" with "}
-          <Text onPress={() => handleSingleArtistPress(artists[1])}>{artists[1]}</Text>
-        </Text>
-      );
-    }
-
-    if (artists.length === 3) {
-      return (
-        <Text style={st.artistName} numberOfLines={1}>
-          <Text onPress={() => handleSingleArtistPress(artists[0])}>{artists[0]}</Text>
-          {" with "}
-          <Text onPress={() => handleSingleArtistPress(artists[1])}>{artists[1]}</Text>
-          {" and "}
-          <Text onPress={() => handleSingleArtistPress(artists[2])}>{artists[2]}</Text>
-        </Text>
-      );
-    }
-
-    // artists.length >= 4
     return (
       <Text style={st.artistName} numberOfLines={1}>
-        <Text onPress={() => handleSingleArtistPress(artists[0])}>{artists[0]}</Text>
-        {" with "}
-        {artists.slice(1, -1).map((artist, idx) => (
-          <React.Fragment key={`${artist}-${idx}`}>
-            <Text onPress={() => handleSingleArtistPress(artist)}>{artist}</Text>
-            {", "}
-          </React.Fragment>
-        ))}
-        {"and "}
-        <Text onPress={() => handleSingleArtistPress(artists[artists.length - 1])}>
-          {artists[artists.length - 1]}
+        <Text onPress={() => handleSingleArtistPress(artistStr)}>
+          {artistStr}
         </Text>
       </Text>
     );
@@ -1040,9 +971,7 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   const artworkUri = currentTrack?.art;
 
   const isTabScreen = segments[0] === '(tabs)';
-  const bottomOffset = isTabScreen 
-    ? Math.max(insets.bottom + 14, 24) + 80
-    : Math.max(insets.bottom + 8, 12);
+  const bottomOffset = getBottomOffset(isTabScreen, insets);
   const MINI_HEIGHT = 68;
   const COLLAPSED_Y = SH - (MINI_HEIGHT + bottomOffset);
 
@@ -1576,7 +1505,7 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
       </Animated.View>
       {(activeSurface === 'queue' || lastSurface === 'queue') && <QueueSheet isVisible={activeSurface === 'queue'} onClose={closeQueue} accentColor={AURA_ACCENT} />}
       {activeSurface === 'devices' && <DevicePickerSurface visible={true} onClose={closeDevices} accentColor={AURA_ACCENT} />}
-      {(activeSurface === 'menu' || lastSurface === 'menu') && currentTrack && <MoreMenuSurface visible={activeSurface === 'menu'} onClose={closeMenu} accentColor={AURA_ACCENT} currentTrack={currentTrack} onAddToPlaylist={() => { closeMenu(); setTimeout(() => setShowPlaylist(true), 150); }} onShare={async () => { closeMenu(); try { await Share.share({ message: `Listening to "${currentTrack.title}" by ${currentTrack.artist}` }); const { useAnalyticsStore } = require('../features/analytics/store/analytics.store'); useAnalyticsStore.getState().trackShared(currentTrack.id); } catch(_) {} }} />}
+      {(activeSurface === 'menu' || lastSurface === 'menu') && currentTrack && <MoreMenuSurface visible={activeSurface === 'menu'} onClose={closeMenu} accentColor={AURA_ACCENT} currentTrack={currentTrack} onAddToPlaylist={() => { closeMenu(); setTimeout(() => setShowPlaylist(true), 150); }} />}
       {showInsight && currentTrack && <InsightPanel isVisible={true} onClose={() => setShowInsight(false)} track={currentTrack} accentColor={AURA_ACCENT} />}
       {showPlaylist && currentTrack && <AddToPlaylistSheet visible={true} track={currentTrack} onClose={() => setShowPlaylist(false)} />}
     </View>

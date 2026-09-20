@@ -347,12 +347,6 @@ export const QueueActionSheet = ({
             isDestructive={isDownloaded}
           />
           <ActionBtn
-            icon="share-outline"
-            label="Share Track"
-            onPress={() => {}}
-            comingSoon
-          />
-          <ActionBtn
             icon="heart-outline"
             label="Like"
             onPress={() => {}}

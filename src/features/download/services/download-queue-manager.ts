@@ -45,31 +45,51 @@ export class DownloadQueueManager {
         );
       });
 
-      onDownloadStateChanged((state) => {
+      onDownloadStateChanged(async (state) => {
         const s = useDownloadStore.getState();
         if (state.stateName === "COMPLETED" || state.isDownloaded) {
           const task = s.activeTasks[state.trackId];
-          const track = task?.track || { id: state.trackId, title: "Unknown", artist: "Unknown" };
-          const trackAny = track as any;
-          // == FIX #3b: Preserve full metadata in COMPLETED handler ==
+          const queueItem = s.queue.find((q) => q.trackId === state.trackId);
+          const existingDownloaded = s.downloadedTracks[state.trackId];
+          const stateAny = state as any;
+
+          const title = (stateAny.title && stateAny.title !== "Unknown Title" && stateAny.title !== "Unknown")
+            ? stateAny.title
+            : (task?.track?.title || queueItem?.title || existingDownloaded?.title || "Unknown");
+
+          const artist = (stateAny.artist && stateAny.artist !== "Unknown Artist" && stateAny.artist !== "Unknown")
+            ? stateAny.artist
+            : (task?.track?.artist || queueItem?.artist || existingDownloaded?.artist || "Unknown");
+
+          const album = stateAny.album || task?.track?.album || existingDownloaded?.album || undefined;
+          const albumId = stateAny.albumId || (task?.track as any)?.albumId || existingDownloaded?.albumId || undefined;
+          const artistId = stateAny.artistId || (task?.track as any)?.artistId || existingDownloaded?.artistId || undefined;
+          const art = stateAny.artworkUrl || task?.track?.art || (task?.track as any)?.artworkUrl || queueItem?.artwork || existingDownloaded?.art || "";
+          const duration = (typeof stateAny.duration === 'number' && stateAny.duration > 0)
+            ? stateAny.duration
+            : (typeof task?.track?.duration === 'number' && task.track.duration > 0
+                ? task.track.duration
+                : (typeof existingDownloaded?.duration === 'number' ? existingDownloaded.duration : undefined));
+
           s.setDownloaded({
             id: state.trackId,
-            url: trackAny.url || `auramusic://track/${state.trackId}`,
-            title: track.title,
-            artist: track.artist,
-            art: trackAny.art || trackAny.artwork || trackAny.artworkUrl || "",
-            localAudioPath: `auramusic://track/${state.trackId}`,
-            localArtPath: trackAny.art || trackAny.artwork || trackAny.artworkUrl || "",
-            fileSize: state.contentLength || state.bytesDownloaded || 0,
-            downloadedAt: Date.now(),
-            // Preserved from original track object
-            album: trackAny.album || undefined,
-            albumId: trackAny.albumId || undefined,
-            artistId: trackAny.artistId || undefined,
-            duration: typeof trackAny.duration === 'number' && trackAny.duration > 0 ? trackAny.duration : undefined,
+            url: (task?.track as any)?.url || existingDownloaded?.url || `auramusic://track/${state.trackId}`,
+            title,
+            artist,
+            art,
+            localAudioPath: existingDownloaded?.localAudioPath || `auramusic://track/${state.trackId}`,
+            localArtPath: art,
+            fileSize: state.contentLength || state.bytesDownloaded || existingDownloaded?.fileSize || 0,
+            downloadedAt: existingDownloaded?.downloadedAt || Date.now(),
+            album,
+            albumId,
+            artistId,
+            duration,
           });
-          // == END FIX #3b ==
           s.updateStatus(state.trackId, "completed");
+
+          // Resync from native Room DB to guarantee 100% authoritative metadata
+          await DownloadQueueManager.syncFromNative();
         } else if (state.stateName === "DOWNLOADING") {
           s.updateStatus(state.trackId, "downloading");
         } else if (state.stateName === "QUEUED") {
@@ -295,23 +315,35 @@ export class DownloadQueueManager {
     if (!AuraDownload) return;
     try {
       const nativeTracks = await AuraDownload.getDownloadedTracks();
-      const downloadedMap: Record<string, DownloadedTrack> = {};
+      console.log("[DEBUG_SYNC] nativeTracks count:", nativeTracks.length, "first 3:", JSON.stringify(nativeTracks.slice(0, 3)));
+      const currentStore = useDownloadStore.getState();
+      const downloadedMap: Record<string, DownloadedTrack> = { ...currentStore.downloadedTracks };
       nativeTracks.forEach((t) => {
         const nativeAny = t as any;
+        const prev = downloadedMap[t.id];
+
+        const isNativeTitleValid = t.title && t.title !== "Unknown Title" && t.title !== "Unknown";
+        const isPrevTitleValid = prev?.title && prev.title !== "Unknown Title" && prev.title !== "Unknown";
+        const title = isNativeTitleValid ? t.title : (isPrevTitleValid ? prev.title : t.title);
+
+        const isNativeArtistValid = t.artist && t.artist !== "Unknown Artist" && t.artist !== "Unknown";
+        const isPrevArtistValid = prev?.artist && prev.artist !== "Unknown Artist" && prev.artist !== "Unknown";
+        const artist = isNativeArtistValid ? t.artist : (isPrevArtistValid ? prev.artist : t.artist);
+
         downloadedMap[t.id] = {
           id: t.id,
-          url: `auramusic://track/${t.id}`,
-          title: t.title,
-          artist: t.artist,
-          art: t.artworkUrl || "",
-          localAudioPath: `auramusic://track/${t.id}`,
-          localArtPath: t.artworkUrl || "",
-          fileSize: t.contentLength || 0,
-          downloadedAt: t.downloadedAt || Date.now(),
-          album: t.album || undefined,
-          albumId: nativeAny.albumId || undefined,
-          artistId: nativeAny.artistId || undefined,
-          duration: typeof t.duration === 'number' && t.duration > 0 ? t.duration : undefined,
+          url: prev?.url || `auramusic://track/${t.id}`,
+          title,
+          artist,
+          art: t.artworkUrl || prev?.art || "",
+          localAudioPath: prev?.localAudioPath || `auramusic://track/${t.id}`,
+          localArtPath: t.artworkUrl || prev?.localArtPath || "",
+          fileSize: t.contentLength || prev?.fileSize || 0,
+          downloadedAt: t.downloadedAt || prev?.downloadedAt || Date.now(),
+          album: (t.album && t.album !== "Single — Unknown") ? t.album : (prev?.album || t.album || undefined),
+          albumId: nativeAny.albumId || prev?.albumId || undefined,
+          artistId: nativeAny.artistId || prev?.artistId || undefined,
+          duration: (typeof t.duration === 'number' && t.duration > 0) ? t.duration : (prev?.duration || undefined),
           isLocal: true,
         };
       });

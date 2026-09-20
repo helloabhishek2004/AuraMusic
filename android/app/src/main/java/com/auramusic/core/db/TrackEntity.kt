@@ -17,5 +17,7 @@ data class TrackEntity(
     val isDownloaded: Boolean = false,
     val downloadedAt: Long? = null,
     val contentLength: Long? = null,
-    val loudnessDb: Double? = null
+    val loudnessDb: Double? = null,
+    val albumId: String? = null,
+    val artistId: String? = null
 )
