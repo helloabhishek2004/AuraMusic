@@ -1,23 +1,32 @@
-# AuraMusic Landing Page
+# React + TypeScript + Vite
 
-The official landing website for [AuraMusic](https://github.com/helloabhishek2004/AuraMusic) — a modern Android music player featuring native AndroidX Media3 playback, offline caching, and a signature Liquid Glass interface.
+This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
-## Tech Stack
+Currently, two official plugins are available:
 
-- **Next.js 15** (React 19)
-- **Tailwind CSS 4**
-- **TypeScript**
-- **Lucide Icons**
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
-## Getting Started
+## React Compiler
 
-```bash
-pnpm install
-pnpm dev
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+
+## Expanding the Oxlint configuration
+
+If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+
+```json
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
-
-## Deployment
-
-This project is configured for **Vercel** deployment. Connect the GitHub repo to Vercel and it will auto-deploy on push.
+See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
