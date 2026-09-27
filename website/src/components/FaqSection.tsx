@@ -42,9 +42,14 @@ const FAQS: FaqItem[] = [
     icon: <Radio size={18} className="text-[#DAB9FF]" />
   },
   {
+    question: 'How is this project distinct from other apps named AuraMusic?',
+    answer: 'AuraMusic is created and maintained exclusively by Abhishek (@helloabhishek2004) at github.com/helloabhishek2004/AuraMusic. It is not affiliated with, a fork of, or connected to third-party Play Store ad-supported apps or unrelated organizations. AuraMusic is distinguished by its native AndroidX Media3 hardware engine, custom Liquid Glass interface, and complete ad-free privacy.',
+    icon: <ShieldCheck size={18} className="text-[#46F5E0]" />
+  },
+  {
     question: 'Is AuraMusic open source?',
     answer: 'AuraMusic is developed and maintained by Abhishek as a source-available project. The entire codebase is publicly viewable on GitHub at helloabhishek2004/AuraMusic for complete architectural transparency, security inspection, and community issue tracking.',
-    icon: <HelpCircle size={18} className="text-[#46F5E0]" />
+    icon: <HelpCircle size={18} className="text-[#BF5AF2]" />
   }
 ];
 

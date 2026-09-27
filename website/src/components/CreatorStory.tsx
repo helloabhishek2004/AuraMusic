@@ -48,10 +48,10 @@ export const CreatorStory: React.FC = () => {
                 />
               </div>
               <h3 className="font-display font-bold text-2xl text-white">
-                @bh!shek
+                Abhishek (@bh!shek)
               </h3>
               <p className="text-xs text-white/50 font-mono mt-0.5">
-                Architecture & Liquid Glass Design
+                Maintainer of helloabhishek2004/AuraMusic
               </p>
 
               {/* Creator Links */}

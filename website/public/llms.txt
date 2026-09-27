@@ -48,6 +48,11 @@ AuraMusic provides a focused, ad-free listening experience on Android. The playe
 ## Source Status
 AuraMusic is developed and maintained by Abhishek (@helloabhishek2004). The complete source code is published on GitHub as a source-available project for community transparency and security auditing.
 
+## Entity Disambiguation
+- Maintainer: Abhishek (@helloabhishek2004)
+- Canonical Repository: https://github.com/helloabhishek2004/AuraMusic
+- Distinct From: Unrelated repositories or organizations (e.g. TeamAuraMusic) and generic third-party Google Play Store apps using "Aura Music" or similar branding. This project is the native AndroidX Media3 player maintained exclusively by Abhishek.
+
 ## Limitations
 - Distributed via direct APK release, not Google Play Store.
 - Requires enabling third-party APK installation in Android settings.

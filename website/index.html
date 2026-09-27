@@ -47,17 +47,30 @@
           "@id": "https://listenwith-auramusic.vercel.app/#website",
           "url": "https://listenwith-auramusic.vercel.app/",
           "name": "AuraMusic",
+          "alternateName": ["AuraMusic Android", "AuraMusic Player"],
           "description": "Free, ad-free Android music player with offline playback, downloads, and native Media3 sound fidelity.",
           "publisher": {
-            "@type": "Person",
-            "name": "Abhishek",
-            "url": "https://github.com/helloabhishek2004"
+            "@id": "https://listenwith-auramusic.vercel.app/#author"
           }
+        },
+        {
+          "@type": "Person",
+          "@id": "https://listenwith-auramusic.vercel.app/#author",
+          "name": "Abhishek",
+          "alternateName": ["helloabhishek2004", "@bh!shek"],
+          "url": "https://about-abhishek.vercel.app",
+          "sameAs": [
+            "https://github.com/helloabhishek2004",
+            "https://about-abhishek.vercel.app",
+            "https://buymeacoffee.com/helloabhisy"
+          ],
+          "jobTitle": "Lead Software Architect & Designer"
         },
         {
           "@type": "SoftwareApplication",
           "@id": "https://listenwith-auramusic.vercel.app/#software",
           "name": "AuraMusic",
+          "alternateName": ["AuraMusic Android", "AuraMusic Player"],
           "applicationCategory": "MultimediaApplication",
           "operatingSystem": "Android 7.0 (API 24) and higher",
           "offers": {
@@ -70,11 +83,88 @@
           "softwareVersion": "v2.0.0",
           "fileSize": "110.2MB",
           "author": {
-            "@type": "Person",
-            "name": "Abhishek",
-            "url": "https://github.com/helloabhishek2004"
+            "@id": "https://listenwith-auramusic.vercel.app/#author"
           },
-          "url": "https://listenwith-auramusic.vercel.app/"
+          "codeRepository": "https://github.com/helloabhishek2004/AuraMusic",
+          "url": "https://listenwith-auramusic.vercel.app/",
+          "featureList": [
+            "100% Free and Ad-Free with zero paywalls or banner advertisements",
+            "Direct high-fidelity offline audio downloads to Android storage",
+            "Local device audio library scanner and playback (MP3, FLAC, WAV, AAC)",
+            "AndroidX Media3 hardware-accelerated audio pipeline",
+            "Real-time synchronized lyrics via LRCLIB with offline caching",
+            "Liquid Glass dynamic user interface with fluid gesture physics"
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "@id": "https://listenwith-auramusic.vercel.app/#faq",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "Is AuraMusic completely free to use?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. AuraMusic is 100% free with no subscription plans, no paywalled features, and no in-app purchases. You can download the universal APK and access full playback capabilities immediately."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Does AuraMusic display any advertisements?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "No. AuraMusic contains zero advertisements. There are no banner ads, video popups, audio sponsor interruptions between tracks, or third-party ad networks embedded in the player."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Can I listen to music offline without an internet connection?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. AuraMusic features dedicated offline listening. You can download tracks and albums with high-fidelity audio and embedded cover art directly into local storage, enabling continuous offline playback on planes, commutes, or in areas without signal."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Can AuraMusic play local music files stored on my Android phone?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. AuraMusic scans and organizes local audio files (including MP3, FLAC, AAC, and WAV) from your device storage through Android MediaStore, allowing you to seamlessly play personal files alongside saved tracks."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Where can I safely download the official AuraMusic APK?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "The official signed release is distributed exclusively through the developer GitHub repository at github.com/helloabhishek2004/AuraMusic/releases. The primary build is AuraMusic-v2.0.0-universal.apk (110.2 MB). Never download AuraMusic APKs from untrusted third-party mirror portals."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Which Android versions and devices are supported?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "AuraMusic requires Android 7.0 (Nougat / API level 24) or higher. It is built and physically tested on Android 14 hardware, targeting SDK 36, and is compatible with modern ARM64, ARMv7, and x86_64 Android smartphones and tablets."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "How is this project distinct from other apps named AuraMusic?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "AuraMusic is created and maintained exclusively by Abhishek (@helloabhishek2004) at github.com/helloabhishek2004/AuraMusic. It is not affiliated with, a fork of, or connected to third-party Play Store ad-supported apps or unrelated organizations. AuraMusic is distinguished by its native AndroidX Media3 hardware engine, custom Liquid Glass interface, and complete ad-free privacy."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Is AuraMusic open source?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "AuraMusic is developed and maintained by Abhishek as a source-available project. The entire codebase is publicly viewable on GitHub at helloabhishek2004/AuraMusic for complete architectural transparency, security inspection, and community issue tracking."
+              }
+            }
+          ]
         }
       ]
     }
@@ -90,7 +180,7 @@
       <div style="padding: 2.5rem 1.5rem; max-width: 800px; margin: 0 auto; color: #FFFFFF; font-family: system-ui, -apple-system, sans-serif;">
         <h1 style="font-size: 2rem; font-weight: 800; margin-bottom: 1rem;">AuraMusic — Free, Ad-Free Offline Android Music Player</h1>
         <p style="font-size: 1.1rem; line-height: 1.6; color: rgba(255,255,255,0.75); margin-bottom: 2rem;">
-          AuraMusic is a free, ad-free Android music player engineered for distraction-free listening without advertising, subscription requirements, or third-party cloud scrapers. It features direct on-device audio stream resolution, offline downloads, synced lyrics, local music file management, and native AndroidX Media3 sound fidelity.
+          AuraMusic is an independent free, ad-free Android music player maintained by Abhishek (@helloabhishek2004) at github.com/helloabhishek2004/AuraMusic. Engineered for distraction-free listening without advertising, subscription requirements, or third-party cloud scrapers, it features direct on-device audio stream resolution, offline downloads, synced lyrics, local music file management, and native AndroidX Media3 sound fidelity.
         </p>
         <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.75rem;">Core Capabilities</h2>
         <ul style="line-height: 1.8; color: rgba(255,255,255,0.8); margin-bottom: 2rem; padding-left: 1.25rem;">

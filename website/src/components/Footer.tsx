@@ -104,15 +104,15 @@ export const Footer: React.FC<FooterProps> = ({
           </a>
         </div>
 
-        {/* Legal & Open Source Disclaimer */}
+        {/* Legal & Source Disclaimer */}
         <div className="mt-14 max-w-xl text-xs text-white/40 leading-relaxed font-body">
-          AuraMusic is an independent open-source client application developed for personal study, technical research, and experimentation with modern Android audio architecture. AuraMusic does not host, store, or distribute copyrighted media files.
+          AuraMusic is an independent source-available personal project developed by Abhishek (@helloabhishek2004) for personal study, technical research, and experimentation with modern Android audio architecture. AuraMusic does not host, store, or distribute copyrighted media files.
         </div>
 
         {/* Bottom Bar: Copyright & Back to Top */}
         <div className="mt-12 pt-8 w-full border-t border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-mono text-white/45">
           <div>
-            © 2026 Abhishek (@bh!shek). Distributed as open source.
+            © 2026 Abhishek (@helloabhishek2004). Source-available on GitHub.
           </div>
 
           <div className="flex items-center gap-6">
