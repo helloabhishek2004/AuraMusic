@@ -216,7 +216,7 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
                 1. Acceptance of Terms
               </h2>
               <p>
-                By downloading, installing, accessing, or using the AuraMusic Android application ("Application") or the AuraMusic website (<a href="https://auramusic.app" className="text-[#DAB9FF] hover:underline">auramusic.app</a>, "Website"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, please do not install or use the Application or Website.
+                By downloading, installing, accessing, or using the AuraMusic Android application ("Application") or the AuraMusic website (<a href="https://listenwith-auramusic.vercel.app" className="text-[#DAB9FF] hover:underline">listenwith-auramusic.vercel.app</a>, "Website"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, please do not install or use the Application or Website.
               </p>
               <p>
                 These Terms constitute a binding legal agreement between you as an individual user and the AuraMusic open-source project maintainer, Abhishek (<code className="text-[#46F5E0] bg-white/[0.06] px-1.5 py-0.5 rounded">@bh!shek</code>).
@@ -474,7 +474,7 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
             </button>
           </div>
           <div>
-            © 2026 AuraMusic Project • Open Source Client
+            © 2026 AuraMusic Project • Source-Available Client
           </div>
         </div>
       </div>

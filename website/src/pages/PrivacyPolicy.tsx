@@ -353,7 +353,7 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({
                 <li>No Sentry, PostHog, Mixpanel, Amplitude, Bugsnag, or Plausible trackers.</li>
                 <li>No advertising SDKs (AdMob, Unity Ads, AppLovin). Zero in-app banner or video ads.</li>
                 <li>No reading of Android Advertising ID (AAID) or hardware identifiers (IMEI, MAC address).</li>
-                <li>The website (<a href="https://auramusic.app" className="text-[#DAB9FF] hover:underline">auramusic.app</a>) places zero tracking cookies, utilizes zero web beacons, and sets zero persistent identifiers in localStorage.</li>
+                <li>The website (<a href="https://listenwith-auramusic.vercel.app" className="text-[#DAB9FF] hover:underline">listenwith-auramusic.vercel.app</a>) places zero tracking cookies, utilizes zero web beacons, and sets zero persistent identifiers in localStorage.</li>
               </ul>
             </section>
 
@@ -614,7 +614,7 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({
                 13. Policy Changes & Versioning
               </h2>
               <p>
-                If future versions of AuraMusic introduce new features that alter networking or storage architecture, this Privacy Policy will be revised with an updated "Last Updated" timestamp and published directly within official application releases and on <a href="https://auramusic.app/privacy" className="text-[#DAB9FF] hover:underline">auramusic.app/privacy</a>. Continued use of AuraMusic following an update constitutes acceptance of the amended policy.
+                If future versions of AuraMusic introduce new features that alter networking or storage architecture, this Privacy Policy will be revised with an updated "Last Updated" timestamp and published directly within official application releases and on <a href="https://listenwith-auramusic.vercel.app/privacy" className="text-[#DAB9FF] hover:underline">listenwith-auramusic.vercel.app/privacy</a>. Continued use of AuraMusic following an update constitutes acceptance of the amended policy.
               </p>
             </section>
 
@@ -682,7 +682,7 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({
             </button>
           </div>
           <div>
-            © 2026 AuraMusic Project • Open Source & Private by Design
+            © 2026 AuraMusic Project • Private by Design
           </div>
         </div>
       </div>

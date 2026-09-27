@@ -1,19 +1,32 @@
 # AuraMusic
 > Free, Ad-Free Offline Android Music Player
 
-AuraMusic is a native Android music player designed for listening without advertising, subscription requirements, or third-party cloud scrapers. It features direct on-device audio stream resolution, offline downloads, synced lyrics, local music file management, and native AndroidX Media3 integration.
+AuraMusic is a native Android music player built for listening without advertising, subscription requirements, or third-party cloud scrapers. It features direct on-device audio stream resolution, offline downloads, synced lyrics, local music file management, and native AndroidX Media3 integration.
 
-## Key Facts
-- Platform: Android 7.0+ (API 24+)
-- Target SDK: 36
-- Maintainer: Abhishek (@helloabhishek2004)
+## Overview
+AuraMusic provides a focused, ad-free listening experience on Android. The player runs directly on device hardware with native Android audio services, eliminating cloud proxy latency and maintaining audio playback fidelity.
+
+## Platform
+- Operating System: Android 7.0 (API level 24) and higher
+- Target SDK: 36 (Android 14+ compatible)
+- Architectures: Universal ABI (arm64-v8a, armeabi-v7a, x86_64)
+- Package Identifier: com.anonymous.AuraMusic
+
+## Current Release
+- Stable Version: v2.0.0
+- Release Tag: v2.0.0
+- Package Name: AuraMusic-v2.0.0-universal.apk
+- File Size: 110.2 MB (115,529,948 bytes)
+- Release Date: September 20, 2026
+- Distribution: Direct standalone APK release
+
+## Official Links
+- Website: https://listenwith-auramusic.vercel.app/
 - Canonical Repository: https://github.com/helloabhishek2004/AuraMusic
-- Official Website: https://listenwith-auramusic.vercel.app/
-- Current Version: v2.0.0
-- Primary Package: com.anonymous.AuraMusic
-- APK File: AuraMusic-v2.0.0-universal.apk (110.2 MB)
-- Direct Download: https://github.com/helloabhishek2004/AuraMusic/releases/download/v2.0.0/AuraMusic-v2.0.0-universal.apk
-- License / Source Status: Source-available personal project on GitHub.
+- GitHub Releases: https://github.com/helloabhishek2004/AuraMusic/releases
+- Direct APK Download: https://github.com/helloabhishek2004/AuraMusic/releases/download/v2.0.0/AuraMusic-v2.0.0-universal.apk
+- Privacy Policy: https://listenwith-auramusic.vercel.app/privacy
+- Terms of Service: https://listenwith-auramusic.vercel.app/terms
 
 ## Core Capabilities
 - 100% Free & Ad-Free: Zero advertisements inside the app, zero promotional banners, and no subscription tiers.
@@ -23,7 +36,19 @@ AuraMusic is a native Android music player designed for listening without advert
 - Synced Lyrics: Line-by-line vocal tracking powered by LRCLIB with offline caching.
 - Lock-Screen & Notification Controls: Native MediaSession controls with like/unlike action integration.
 
-## Limitations & Scope
+## Downloads
+- Official Universal APK: https://github.com/helloabhishek2004/AuraMusic/releases/download/v2.0.0/AuraMusic-v2.0.0-universal.apk
+- SHA-256 Checksum: B7FDA10E79918535C0E659745F41A3F942D92B8D702D5B83336F065D14EC84A3
+
+## Documentation / Legal
+- Privacy Policy: https://listenwith-auramusic.vercel.app/privacy
+- Terms of Service: https://listenwith-auramusic.vercel.app/terms
+- Security Vulnerability Disclosure: https://github.com/helloabhishek2004/AuraMusic/security/advisories
+
+## Source Status
+AuraMusic is developed and maintained by Abhishek (@helloabhishek2004). The complete source code is published on GitHub as a source-available project for community transparency and security auditing.
+
+## Limitations
 - Distributed via direct APK release, not Google Play Store.
 - Requires enabling third-party APK installation in Android settings.
 - Third-party music and lyrics availability depends on external API endpoint reachability.
