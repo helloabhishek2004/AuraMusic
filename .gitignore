@@ -65,4 +65,5 @@ venv/
 scratch/
 *.log
 log*.txt
+website_vite_backup/
 
