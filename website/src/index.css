@@ -88,16 +88,6 @@ h1, h2, h3, h4, .font-display {
 
 
 /* Liquid Glass Utilities */
-.glass-surface {
-  background: rgba(16, 16, 24, 0.62);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 
-    0 20px 40px -15px rgba(0, 0, 0, 0.7),
-    inset 0 1px 1px 0 rgba(255, 255, 255, 0.14);
-}
-
 .glass-pill {
   background: rgba(18, 16, 28, 0.72);
   backdrop-filter: blur(24px);
