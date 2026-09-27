@@ -52,6 +52,7 @@ export const Footer: React.FC<FooterProps> = ({
           <a href="#experience" className="hover:text-white transition-colors">Experience</a>
           <a href="#architecture" className="hover:text-white transition-colors">Architecture</a>
           <a href="#showcase" className="hover:text-white transition-colors">Showcase</a>
+          <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
           <a href="#download" className="hover:text-white transition-colors">Download</a>
           <a
             href="/privacy"

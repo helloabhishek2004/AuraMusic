@@ -46,7 +46,7 @@ export const DownloadSection: React.FC = () => {
           direction="bottom"
         />
         <p className="mt-3 sm:mt-4 text-sm sm:text-base md:text-lg text-white/70 max-w-xl mx-auto font-body">
-          Download the latest standalone signed Android APK directly or explore the open-source repository on GitHub.
+          Download the official standalone signed Android APK directly for offline listening, or explore the source repository on GitHub.
         </p>
 
         {/* Release Version Tag */}
@@ -123,8 +123,8 @@ export const DownloadSection: React.FC = () => {
             <Smartphone size={18} className="text-[#BF5AF2] shrink-0 mt-0.5" />
             <div>
               <div className="text-xs font-mono text-white/40 uppercase">Compatibility</div>
-              <div className="text-sm font-medium text-white/90">Android 8.0+ (API 26+)</div>
-              <div className="text-[11px] text-white/50">Targeting Android 14+</div>
+              <div className="text-sm font-medium text-white/90">Android 7.0+ (API 24+)</div>
+              <div className="text-[11px] text-white/50">Targeting Android 14+ (SDK 36)</div>
             </div>
           </div>
 

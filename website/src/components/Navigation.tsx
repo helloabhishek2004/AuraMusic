@@ -55,9 +55,9 @@ export const Navigation: React.FC<NavigationProps> = ({ activeSection }) => {
 
   const navLinks = [
     { label: 'Features', href: '#features' },
-    { label: 'Experience', href: '#experience' },
     { label: 'Architecture', href: '#architecture' },
     { label: 'Showcase', href: '#showcase' },
+    { label: 'FAQ', href: '#faq' },
   ];
 
   return (

@@ -134,11 +134,27 @@ export const Hero: React.FC = () => {
             {/* Concise Supporting Copy */}
             <motion.p
               variants={fadeUpItem}
-              className="mt-4 sm:mt-6 text-sm sm:text-lg text-white/70 leading-relaxed font-body font-normal max-w-xl"
+              className="mt-4 sm:mt-6 text-sm sm:text-lg text-white/75 leading-relaxed font-body font-normal max-w-xl"
             >
-              An open-source Android music player built around immersive visuals,
-              native playback, offline listening, and an interface that moves with your music.
+              A free, ad-free Android music player engineered for distraction-free listening,
+              featuring true offline playback, local file management, and native AndroidX Media3 sound fidelity.
             </motion.p>
+
+            {/* High-Intent Value Chips */}
+            <motion.div variants={fadeUpItem} className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-[#BF5AF2]/15 text-[#DAB9FF] border border-[#BF5AF2]/25">
+                100% Ad-Free
+              </span>
+              <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-[#46F5E0]/15 text-[#46F5E0] border border-[#46F5E0]/25">
+                Offline Downloads
+              </span>
+              <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-white/[0.08] text-white/80 border border-white/10">
+                Local Device Audio
+              </span>
+              <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-white/[0.08] text-white/80 border border-white/10">
+                Direct APK
+              </span>
+            </motion.div>
 
             {/* CTAs Cluster */}
             <motion.div

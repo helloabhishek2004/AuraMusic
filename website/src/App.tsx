@@ -8,6 +8,7 @@ import { ArchitectureEngine } from './components/ArchitectureEngine';
 import { ShowcaseGallery } from './components/ShowcaseGallery';
 import { DownloadSection } from './components/DownloadSection';
 import { CreatorStory } from './components/CreatorStory';
+import { FaqSection } from './components/FaqSection';
 import { Footer } from './components/Footer';
 import { OptionWheel } from './components/OptionWheel';
 import GradualBlur from './components/GradualBlur';
@@ -137,6 +138,8 @@ export function App() {
         <div id="showcase">
           <ShowcaseGallery />
         </div>
+
+        <FaqSection />
 
         <div id="download">
           <DownloadSection />
