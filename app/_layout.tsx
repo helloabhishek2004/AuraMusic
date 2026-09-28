@@ -297,9 +297,19 @@ export default function RootLayout() {
                 <Stack.Screen name="downloads" />
                 <Stack.Screen name="download-queue" />
                 <Stack.Screen name="local_library" />
+                <Stack.Screen name="connected_apps" />
+                <Stack.Screen 
+                  name="auth/spotify" 
+                  options={{ 
+                    animation: 'fade',
+                    headerShown: false 
+                  }} 
+                />
                 <Stack.Screen name="library-health" />
                 <Stack.Screen name="privacy_policy" />
                 <Stack.Screen name="faq" />
+                <Stack.Screen name="about_creator" />
+                <Stack.Screen name="software_update" />
               </Stack>
             </Animated.View>
             <PlayerOverlay expandProgress={expandProgress} />

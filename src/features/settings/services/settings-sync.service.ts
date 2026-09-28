@@ -17,7 +17,12 @@ export class SettingsSyncService {
       const streamingQuality = device.isWifi
         ? settings.streamingQualityWifi
         : settings.streamingQualityCellular;
-      if (AuraPlayer && typeof AuraPlayer.setStreamingQuality === 'function') {
+      if (AuraPlayer && typeof AuraPlayer.setStreamingQualityConfig === 'function') {
+        await AuraPlayer.setStreamingQualityConfig(
+          settings.streamingQualityWifi,
+          settings.streamingQualityCellular
+        );
+      } else if (AuraPlayer && typeof AuraPlayer.setStreamingQuality === 'function') {
         await AuraPlayer.setStreamingQuality(streamingQuality);
       }
 

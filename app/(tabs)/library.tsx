@@ -20,6 +20,7 @@
  */
 
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
+import { ConnectedAppsBanner } from "@/src/features/connected-libraries";
 import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
 import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
 import { AuraArtwork } from "@/src/components/ui/aura-artwork";
@@ -72,6 +73,7 @@ import type { DownloadedTrack } from "@/src/features/download/types/download";
 import { formatDuration } from "@/src/utils/time";
 import { usePlaylistStore } from "@/src/features/playlist/store/playlist.store";
 import PlaylistArtwork from "@/src/features/playlist/components/PlaylistArtwork";
+import DynamicCollectionArtwork from "@/src/features/playlist/components/DynamicCollectionArtwork";
 import type { Playlist } from "@/src/features/playlist/types/playlist";
 
 // ─── Dimensions & layout ──────────────────────────────────────────────────────
@@ -370,23 +372,6 @@ const HeroCard = memo(({ onPress }: { onPress: () => void }) => {
   const heartPulse = useRef(new Animated.Value(1)).current;
   const likedCount = useLikesStore((s) => Object.keys(s.likedTrackIds).length);
 
-  const newestLikedArtwork = useLikesStore((s) => {
-    if (s.latestLikedTrackId) {
-      const art = s.trackMetadata[s.latestLikedTrackId]?.art;
-      if (art && art.trim() !== "") return art;
-    }
-    const likedIds = Object.keys(s.likedTrackIds).sort(
-      (a, b) => (s.likedAt[b] || 0) - (s.likedAt[a] || 0)
-    );
-    for (const id of likedIds) {
-      const art = s.trackMetadata[id]?.art;
-      if (art && art.trim() !== "") return art;
-    }
-    return null;
-  });
-
-  const artworkSource = newestLikedArtwork || "aura://generated?name=Liked%20Songs&type=playlist";
-
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
@@ -407,12 +392,11 @@ const HeroCard = memo(({ onPress }: { onPress: () => void }) => {
           accessibilityLabel="Open Liked Songs playlist"
         >
           <Glass style={{ height: HERO_H }} radius={26} blur={62}>
-            {/* Art fill */}
-            <Image
-              source={{ uri: getArtworkUrl({ art: artworkSource }, 'album') }}
+            {/* Dynamic composite art fill */}
+            <DynamicCollectionArtwork
+              isLikedCollection={true}
+              borderRadius={26}
               style={[StyleSheet.absoluteFill, { borderRadius: 26 }]}
-              contentFit="cover"
-              transition={350}
               cachePolicy="memory-disk"
             />
             {/* Dark vignette */}
@@ -1179,6 +1163,7 @@ export default function LibraryScreen() {
     list.push({ id: 'header', type: 'header' });
     list.push({ id: 'hero', type: 'hero' });
     list.push({ id: 'bento', type: 'bento' });
+    list.push({ id: 'connected_libraries', type: 'connected_libraries' });
     list.push({ id: 'local_library', type: 'local_library' });
     list.push({ id: 'recent_downloads_header', type: 'recent_downloads_header' });
     
@@ -1219,6 +1204,12 @@ export default function LibraryScreen() {
               onCreatePlaylist={() => router.push("/create_playlist")}
               onDownloads={() => router.push("/downloads")}
             />
+          </View>
+        );
+      case 'connected_libraries':
+        return (
+          <View style={{ paddingHorizontal: PAD }}>
+            <ConnectedAppsBanner onPress={() => router.push("/connected_apps" as any)} />
           </View>
         );
       case 'local_library':

@@ -150,24 +150,47 @@ export function getShortStats(playlist: Playlist): string {
  * Returns up to `limit` unique, non-empty URIs.
  */
 export function getCollageArtUrls(playlist: Playlist, limit = 4): string[] {
-  if (playlist.coverArt) return [playlist.coverArt];
-  if (!playlist.trackSnapshots) return [];
+  if (!playlist) return [];
 
   const urls: string[] = [];
-  for (const id of playlist.trackIds) {
-    if (urls.length >= limit) break;
-    const art = playlist.trackSnapshots[id]?.art;
-    if (art && art.length > 0 && !urls.includes(art)) {
-      urls.push(art);
+
+  // 1. From embedded tracks array if present
+  const embeddedTracks = (playlist as any).tracks;
+  if (embeddedTracks && Array.isArray(embeddedTracks)) {
+    for (const track of embeddedTracks) {
+      if (urls.length >= limit) break;
+      const art = track.art || track.artwork;
+      if (art && typeof art === 'string' && art.trim().length > 0 && !art.startsWith('aura://') && !art.includes('placeholder')) {
+        urls.push(art);
+      }
     }
+    if (urls.length > 0) return urls;
   }
-  return urls;
+
+  // 2. From trackIds + trackSnapshots
+  if (playlist.trackIds && Array.isArray(playlist.trackIds) && playlist.trackSnapshots) {
+    for (const id of playlist.trackIds) {
+      if (urls.length >= limit) break;
+      const art = playlist.trackSnapshots[id]?.art;
+      if (art && typeof art === 'string' && art.trim().length > 0 && !art.startsWith('aura://') && !art.includes('placeholder')) {
+        urls.push(art);
+      }
+    }
+    if (urls.length > 0) return urls;
+  }
+
+  // 3. Fallback to custom non-generated coverArt if present
+  if (playlist.coverArt && typeof playlist.coverArt === 'string' && !playlist.coverArt.startsWith('aura://')) {
+    return [playlist.coverArt];
+  }
+
+  return [];
 }
 
 // ─── Gradient Generation ──────────────────────────────────────────────────────
 
 // 8 curated gradient pairs aligned to AuraMusic palette
-const GRADIENT_PRESETS: Array<[string, string]> = [
+const GRADIENT_PRESETS: [string, string][] = [
   ['#bf5af2', '#6f2bbe'],  // Purple (brand)
   ['#2f8cff', '#1a5ccc'],  // Blue
   ['#46f5e0', '#1a8c7d'],  // Cyan

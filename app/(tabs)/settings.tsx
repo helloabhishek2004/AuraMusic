@@ -14,8 +14,11 @@ import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
+import Constants from "expo-constants";
+import { Image } from "expo-image";
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useFocusEffect, useRouter } from "expo-router";
+import packageJson from "../../package.json";
 import {
   ActivityIndicator,
   Alert,
@@ -38,7 +41,6 @@ import Animated, {
   useSharedValue,
   withRepeat,
   withTiming,
-  withSpring,
   withDelay,
   interpolateColor,
   interpolate,
@@ -53,8 +55,15 @@ import { useDownloadStore } from "../../src/features/download/store/download.sto
 import { AudioSessionController } from "../../src/features/audio/native/audio-session";
 import { downloadCleanupService } from "../../src/features/download/services/download-cleanup.service";
 import { useScrollToTopOnTabPress } from "../../src/hooks/use-scroll-to-top";
+import { LiquidToggle } from "@/src/components/ui/liquid-toggle";
+import { useUpdateStore } from "../../src/features/update/store/update.store";
 
 const { width: SW } = Dimensions.get("window");
+const APP_VERSION =
+  Constants.expoConfig?.version ??
+  (Constants as any).nativeAppVersion ??
+  packageJson.version ??
+  "3.0.0";
 
 // ── Palette (matches HTML exactly) ───────────────────────────────────────────
 const PRIMARY = "#BF5AF2";  // purple toggle / ring slice 1
@@ -111,18 +120,23 @@ const GlassCard = React.memo(({ children, style, r = 32, frosted = false }: {
   children: React.ReactNode; style?: any; r?: number; frosted?: boolean;
 }) => (
   <View style={[{ borderRadius: r, overflow: "hidden" }, style]}>
-    {Platform.OS === "ios"
-      ? <BlurView intensity={frosted ? 68 : 24} tint="dark" style={StyleSheet.absoluteFill} />
-      : <View style={[StyleSheet.absoluteFillObject, { backgroundColor: frosted ? "rgba(24,24,30,0.96)" : "rgba(53,52,58,0.92)" }]} />}
+    <BlurView intensity={frosted ? 75 : 45} tint="dark" style={StyleSheet.absoluteFill} />
+    <View
+      style={[
+        StyleSheet.absoluteFillObject,
+        { backgroundColor: frosted ? "rgba(16, 14, 24, 0.94)" : "rgba(22, 19, 32, 0.84)" },
+      ]}
+    />
     {/* Subtle top specular */}
-    <View pointerEvents="none" style={{ position: "absolute", top: 0, left: r * 0.4, right: r * 0.4, height: 1.5, backgroundColor: "rgba(255,255,255,0.12)", zIndex: 9 }} />
+    <View pointerEvents="none" style={{ position: "absolute", top: 0, left: r * 0.4, right: r * 0.4, height: 1.5, backgroundColor: "rgba(255,255,255,0.22)", zIndex: 9 }} />
     {/* Border ring */}
-    <View pointerEvents="none" style={{ ...StyleSheet.absoluteFillObject, borderRadius: r, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" }} />
+    <View pointerEvents="none" style={{ ...StyleSheet.absoluteFillObject, borderRadius: r, borderWidth: 1, borderColor: "rgba(255,255,255,0.13)" }} />
     {/* Inner sheen */}
-    <LinearGradient colors={["rgba(255,255,255,0.07)", "rgba(255,255,255,0.02)", "transparent"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
+    <LinearGradient colors={["rgba(255,255,255,0.08)", "rgba(255,255,255,0.02)", "transparent"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} pointerEvents="none" />
     {children}
   </View>
 ));
+GlassCard.displayName = "GlassCard";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STAGGERED SECTION  (matches .animate-stagger > *:nth-child(n))
@@ -157,6 +171,7 @@ const Section = React.memo(({ children, index }: { children: React.ReactNode; in
     </Animated.View>
   );
 });
+Section.displayName = "Section";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION HEADER LABEL
@@ -169,57 +184,21 @@ const SectionLabel = React.memo(({ icon, title }: { icon: string; title: string 
     </Text>
   </View>
 ));
+SectionLabel.displayName = "SectionLabel";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SPRING TOGGLE  (matches .custom-toggle / .custom-toggle.active)
-// cubic-bezier(0.175,0.885,0.32,1.275) bounce
+// LIQUID TOGGLE (Optical pop, refraction flare, and liquid fill animation)
 // ─────────────────────────────────────────────────────────────────────────────
 const Toggle = React.memo(({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) => {
-  const anim = useSharedValue(value ? 1 : 0);
-
-  useEffect(() => {
-    anim.value = withSpring(value ? 1 : 0, {
-      damping: 15,
-      stiffness: 150,
-      mass: 0.8,
-    });
-  }, [value]);
-
-  const animatedTrackStyle = useAnimatedStyle(() => {
-    const backgroundColor = interpolateColor(
-      anim.value,
-      [0, 1],
-      ["rgba(255,255,255,0.10)", PRIMARY]
-    );
-    return { backgroundColor };
-  });
-
-  const animatedThumbStyle = useAnimatedStyle(() => {
-    const translateX = interpolate(anim.value, [0, 1], [2, 26]);
-    const scale = interpolate(anim.value, [0, 0.5, 1], [1, 0.88, 1]);
-    return {
-      transform: [{ translateX }, { scale }],
-    };
-  });
-
-  return (
-    <Pressable
-      onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onChange(!value); }}
-      accessibilityRole="switch"
-      accessibilityState={{ checked: value }}
-      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-    >
-      <Animated.View style={[st.toggleTrack, animatedTrackStyle]}>
-        <Animated.View style={[st.toggleThumb, animatedThumbStyle]} />
-      </Animated.View>
-    </Pressable>
-  );
+  return <LiquidToggle value={value} onChange={onChange} />;
 });
+Toggle.displayName = 'Toggle';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DIVIDER  (divide-y divide-white/5)
 // ─────────────────────────────────────────────────────────────────────────────
 const Divider = React.memo(() => <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.05)", marginHorizontal: 0 }} />);
+Divider.displayName = "Divider";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ROW  (p-6 flex items-center justify-between hover:bg-white/[0.03])
@@ -258,6 +237,7 @@ const Row = React.memo(({
   }
   return <View style={st.row}>{Inner}</View>;
 });
+Row.displayName = "Row";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CUSTOM SELECT BUTTON  (mimics <select> from HTML)
@@ -273,112 +253,271 @@ const SelectBtn = React.memo(({ label, onPress }: { label: string; onPress: () =
     <MaterialIcons name="keyboard-arrow-down" size={20} color="rgba(255,255,255,0.40)" />
   </TouchableOpacity>
 ));
+SelectBtn.displayName = "SelectBtn";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QUALITY MODAL  (bottom-sheet, spring slide-up)
+// ─────────────────────────────────────────────────────────────────────────────
+// QUALITY MODAL  (Apple-grade calm, effortless Liquid Glass sheet)
 // ─────────────────────────────────────────────────────────────────────────────
 const QualityModal = React.memo(({ visible, onClose, title, selectedOption, onSelect }: {
   visible: boolean; onClose: () => void; title: string;
   selectedOption: AudioQuality; onSelect: (q: AudioQuality) => void;
 }) => {
+  const insets = useSafeAreaInsets();
   const [rendered, setRendered] = useState(visible);
-  const slideY = useSharedValue(550);
-  const overlayOp = useSharedValue(0);
+  const isClosingRef = useRef(false);
 
+  // Preserve title and selected option across closing transition to prevent visual jumps
+  const persistentTitleRef = useRef(title);
+  const persistentSelectedRef = useRef(selectedOption);
+
+  if (visible) {
+    persistentTitleRef.current = title;
+    persistentSelectedRef.current = selectedOption;
+  }
+
+  const activeTitle = visible ? title : persistentTitleRef.current;
+  const activeSelected = visible ? selectedOption : persistentSelectedRef.current;
+
+  // Single coherent motion values — zero spring overshoot, pure ease-out
+  const overlayOp = useSharedValue(0);
+  const sheetTranslateY = useSharedValue(64);
+  const sheetOpacity = useSharedValue(0);
+  const sheetScale = useSharedValue(0.985);
+
+  const finishClose = useCallback(() => {
+    isClosingRef.current = false;
+    setRendered(false);
+    onClose();
+  }, [onClose]);
+
+  const triggerClose = useCallback(() => {
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+
+    overlayOp.value = withTiming(0, {
+      duration: 190,
+      easing: ReanimatedEasing.in(ReanimatedEasing.quad),
+    });
+    sheetOpacity.value = withTiming(0, {
+      duration: 170,
+      easing: ReanimatedEasing.in(ReanimatedEasing.quad),
+    });
+    sheetTranslateY.value = withTiming(48, {
+      duration: 190,
+      easing: ReanimatedEasing.bezier(0.4, 0, 0.6, 1),
+    });
+    sheetScale.value = withTiming(
+      0.985,
+      {
+        duration: 190,
+        easing: ReanimatedEasing.bezier(0.4, 0, 0.6, 1),
+      },
+      (finished) => {
+        if (finished) {
+          runOnJS(finishClose)();
+        }
+      }
+    );
+  }, [overlayOp, sheetOpacity, sheetTranslateY, sheetScale, finishClose]);
+
+  // Pan responder for natural downward swipe to dismiss without spring oscillation
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        return gestureState.dy > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+      onMoveShouldSetPanResponder: (_evt, gestureState) => {
+        return gestureState.dy > 7 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
       },
-      onPanResponderMove: (e, gestureState) => {
+      onPanResponderMove: (_e, gestureState) => {
         if (gestureState.dy > 0) {
-          slideY.value = gestureState.dy;
+          sheetTranslateY.value = gestureState.dy;
         }
       },
-      onPanResponderRelease: (e, gestureState) => {
-        if (gestureState.dy > 80 || gestureState.vy > 0.4) {
-          overlayOp.value = withTiming(0, { duration: 150 });
-          slideY.value = withTiming(550, { duration: 180 }, () => {
-            runOnJS(onClose)();
-          });
+      onPanResponderRelease: (_e, gestureState) => {
+        if (gestureState.dy > 70 || gestureState.vy > 0.4) {
+          triggerClose();
         } else {
-          slideY.value = withSpring(0, { damping: 24, stiffness: 280 });
+          sheetTranslateY.value = withTiming(0, {
+            duration: 220,
+            easing: ReanimatedEasing.out(ReanimatedEasing.cubic),
+          });
         }
       },
     })
   ).current;
 
+  // React to visible prop
   useEffect(() => {
     if (visible) {
+      isClosingRef.current = false;
       setRendered(true);
-      overlayOp.value = withTiming(1, { duration: 180 });
-      slideY.value = withSpring(0, { damping: 24, stiffness: 280 });
-    } else {
-      overlayOp.value = withTiming(0, { duration: 150 });
-      slideY.value = withTiming(550, { duration: 180 }, () => {
-        runOnJS(setRendered)(false);
+
+      // Start values
+      overlayOp.value = 0;
+      sheetOpacity.value = 0;
+      sheetTranslateY.value = 64;
+      sheetScale.value = 0.985;
+
+      // Reveal smoothly: 280ms Apple ease-out curve, zero overshoot, settles once
+      overlayOp.value = withTiming(1, {
+        duration: 280,
+        easing: ReanimatedEasing.out(ReanimatedEasing.quad),
       });
+      sheetOpacity.value = withTiming(1, {
+        duration: 240,
+        easing: ReanimatedEasing.out(ReanimatedEasing.quad),
+      });
+      sheetTranslateY.value = withTiming(0, {
+        duration: 280,
+        easing: ReanimatedEasing.bezier(0.16, 1, 0.3, 1),
+      });
+      sheetScale.value = withTiming(1, {
+        duration: 280,
+        easing: ReanimatedEasing.bezier(0.16, 1, 0.3, 1),
+      });
+    } else if (rendered && !isClosingRef.current) {
+      triggerClose();
     }
-  }, [visible]);
+  }, [visible, rendered, triggerClose, overlayOp, sheetOpacity, sheetTranslateY, sheetScale]);
+
+  const handleOptionPress = useCallback((optVal: AudioQuality) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    // 1. Immediately apply selection
+    onSelect(optVal);
+    // 2. Smoothly dismiss surface
+    triggerClose();
+  }, [onSelect, triggerClose]);
 
   const OPTIONS: { label: string; value: AudioQuality; sub: string; icon: string }[] = [
     { label: "Low", value: "low", sub: "96 kbps · Data saver", icon: "speed" },
     { label: "Normal", value: "normal", sub: "128 kbps · Balanced", icon: "graphic-eq" },
     { label: "High", value: "high", sub: "160 kbps · Great quality", icon: "high-quality" },
-    { label: "Best", value: "best", sub: "320 kbps / Lossless · Premium", icon: "workspace-premium" },
+    { label: "Best", value: "best", sub: "Original / Best · Maximum fidelity", icon: "workspace-premium" },
   ];
 
   const overlayStyle = useAnimatedStyle(() => ({
-    backgroundColor: "rgba(0,0,0,0.65)",
     opacity: overlayOp.value,
   }));
 
   const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: slideY.value }],
-    paddingHorizontal: 14,
-    paddingBottom: 14,
+    opacity: sheetOpacity.value,
+    transform: [
+      { translateY: sheetTranslateY.value },
+      { scale: sheetScale.value },
+    ],
   }));
 
   if (!rendered) return null;
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      <Animated.View style={[StyleSheet.absoluteFill, overlayStyle]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+    <Modal
+      visible={rendered}
+      transparent
+      statusBarTranslucent
+      animationType="none"
+      onRequestClose={triggerClose}
+    >
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(5, 5, 9, 0.62)" }, overlayStyle]}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={triggerClose}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss popup"
+        />
       </Animated.View>
+
       <View style={{ flex: 1, justifyContent: "flex-end", pointerEvents: "box-none" }}>
         <Animated.View
-          style={sheetStyle}
+          style={[
+            {
+              paddingHorizontal: 14,
+              paddingBottom: Math.max(insets.bottom, 14) + 6,
+            },
+            sheetStyle,
+          ]}
           {...panResponder.panHandlers}
         >
-          <GlassCard r={32} frosted>
-            {/* Handle */}
-            <View style={{ alignItems: "center", paddingTop: 14, paddingBottom: 2 }}>
-              <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: `${PRIMARY}50` }} />
+          <GlassCard r={30} frosted>
+            {/* Grab handle */}
+            <View style={{ alignItems: "center", paddingTop: 12, paddingBottom: 6 }}>
+              <View
+                style={{
+                  width: 36,
+                  height: 4,
+                  borderRadius: 2,
+                  backgroundColor: "rgba(255, 255, 255, 0.22)",
+                }}
+              />
             </View>
-            <Text style={st.modalTitle}>{title}</Text>
+
+            {/* Title */}
+            <Text style={st.modalTitle}>{activeTitle}</Text>
+
+            {/* Option rows — entire surface composed at once, zero child stagger */}
             {OPTIONS.map((opt, i) => {
-              const sel = selectedOption === opt.value;
+              const isSelected = activeSelected === opt.value;
               return (
                 <React.Fragment key={opt.value}>
-                  {i > 0 && <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: "rgba(255,255,255,0.06)", marginHorizontal: 20 }} />}
+                  {i > 0 && (
+                    <View
+                      style={{
+                        height: StyleSheet.hairlineWidth,
+                        backgroundColor: "rgba(255, 255, 255, 0.06)",
+                        marginHorizontal: 16,
+                      }}
+                    />
+                  )}
                   <TouchableOpacity
-                    onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onSelect(opt.value); onClose(); }}
-                    style={[st.modalOpt, sel && { backgroundColor: `${PRIMARY}12` }]}
-                    activeOpacity={0.7}
+                    onPress={() => handleOptionPress(opt.value)}
+                    style={[
+                      st.modalOpt,
+                      isSelected && { backgroundColor: "rgba(218, 185, 255, 0.10)" },
+                    ]}
+                    activeOpacity={0.72}
                     delayPressIn={0}
                   >
-                    <View style={[st.modalOptIcon, { backgroundColor: sel ? `${PRIMARY}22` : "rgba(255,255,255,0.06)", borderColor: sel ? `${PRIMARY}40` : "rgba(255,255,255,0.08)" }]}>
-                      <MaterialIcons name={opt.icon as any} size={18} color={sel ? PRIMARY : "rgba(170,170,185,0.65)"} />
+                    <View
+                      style={[
+                        st.modalOptIcon,
+                        {
+                          backgroundColor: isSelected
+                            ? "rgba(218, 185, 255, 0.18)"
+                            : "rgba(255, 255, 255, 0.05)",
+                          borderColor: isSelected
+                            ? "rgba(218, 185, 255, 0.35)"
+                            : "rgba(255, 255, 255, 0.08)",
+                        },
+                      ]}
+                    >
+                      <MaterialIcons
+                        name={opt.icon as any}
+                        size={18}
+                        color={isSelected ? PRIMARY : "rgba(170, 170, 185, 0.65)"}
+                      />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={[st.modalOptLabel, sel && { color: PRIMARY, fontWeight: "700" }]}>{opt.label}</Text>
+                      <Text
+                        style={[
+                          st.modalOptLabel,
+                          isSelected && { color: "#FFFFFF", fontWeight: "700" },
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
                       <Text style={st.modalOptSub}>{opt.sub}</Text>
                     </View>
-                    {sel && (
-                      <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: PRIMARY, alignItems: "center", justifyContent: "center" }}>
-                        <Ionicons name="checkmark" size={13} color="#000" />
+                    {isSelected && (
+                      <View
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: 12,
+                          backgroundColor: PRIMARY,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Ionicons name="checkmark" size={14} color="#0B0B0F" />
                       </View>
                     )}
                   </TouchableOpacity>
@@ -391,6 +530,7 @@ const QualityModal = React.memo(({ visible, onClose, title, selectedOption, onSe
     </Modal>
   );
 });
+QualityModal.displayName = "QualityModal";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CACHE LIMIT PILLS  (2 GB / 5 GB / 10 GB / ∞)
@@ -417,6 +557,7 @@ const CachePills = React.memo(({ current, onSelect }: { current: number | "unlim
     })}
   </View>
 ));
+CachePills.displayName = "CachePills";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN SCREEN
@@ -444,9 +585,18 @@ export default function SettingsScreen() {
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTopOnTabPress(scrollRef);
   const downloadedTracks = useDownloadStore(s => s.downloadedTracks);
-
   // Cloud Sync selector
   const googleSyncEnabled = useSettingsStore(s => s.googleSyncEnabled);
+
+  // Update store selectors
+  const hasUpdate = useUpdateStore(s => s.hasUpdate);
+  const releaseInfo = useUpdateStore(s => s.releaseInfo);
+  const checkForUpdates = useUpdateStore(s => s.checkForUpdates);
+
+  // Background update check on settings view (cached, respects 4hr interval)
+  useEffect(() => {
+    checkForUpdates(false);
+  }, [checkForUpdates]);
 
   const [storageStats, setStorageStats] = useState<StorageStats | null>(null);
   const [modalType, setModalType] = useState<null | "streamingWifi" | "streamingCellular" | "downloadWifi" | "downloadCellular">(null);
@@ -535,22 +685,18 @@ export default function SettingsScreen() {
 
   // Quality label helpers
   const getQualityLabel = (type: string, val: AudioQuality) => {
-    if (type === "streamingWifi") {
-      if (val === "low") return "Normal (96kbps)";
-      if (val === "normal") return "High (160kbps)";
-      if (val === "high") return "Very High (320kbps)";
-      return "Automatic";
+    switch (val) {
+      case "low":
+        return "Low (96 kbps)";
+      case "normal":
+        return "Normal (128 kbps)";
+      case "high":
+        return "High (160 kbps)";
+      case "best":
+        return "Best (Original)";
+      default:
+        return "Normal (128 kbps)";
     }
-    if (type === "streamingCellular") {
-      if (val === "low") return "Data Saver";
-      if (val === "normal") return "Normal (96kbps)";
-      if (val === "high") return "High (160kbps)";
-      return "Automatic";
-    }
-    if (val === "low") return "Normal (96kbps)";
-    if (val === "normal") return "High (160kbps)";
-    if (val === "high") return "Very High (320kbps)";
-    return "Best (Lossless)";
   };
 
   // ── Storage ring maths ─────────────────────────────────────────────────────
@@ -850,6 +996,77 @@ export default function SettingsScreen() {
         <Section index={5}>
           <SectionLabel icon="info" title="Support & About" />
           <GlassCard r={32} style={{ overflow: "hidden" }}>
+            {/* Software Update (Matches Stitch Design) */}
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push('/software_update' as any);
+              }}
+              activeOpacity={0.7}
+              delayPressIn={0}
+              style={st.row}
+            >
+              <View style={st.rowInner}>
+                <View style={st.rowLeft}>
+                  <View style={[st.iconBadge, { backgroundColor: hasUpdate ? "rgba(218,185,255,0.15)" : "rgba(148,163,184,0.10)" }]}>
+                    <MaterialIcons
+                      name={hasUpdate ? "system-update" : "verified"}
+                      size={20}
+                      color={hasUpdate ? PRIMARY : "#cbc3d9"}
+                    />
+                    {hasUpdate && (
+                      <View
+                        style={{
+                          position: "absolute",
+                          top: -2,
+                          right: -2,
+                          width: 10,
+                          height: 10,
+                          borderRadius: 5,
+                          backgroundColor: "#ff5c6a",
+                          borderWidth: 2,
+                          borderColor: BG,
+                        }}
+                      />
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Text style={st.rowLabel}>Software Update</Text>
+                      {hasUpdate && releaseInfo?.version && (
+                        <View
+                          style={{
+                            paddingHorizontal: 7,
+                            paddingVertical: 1.5,
+                            borderRadius: 999,
+                            backgroundColor: "rgba(218,185,255,0.15)",
+                            borderWidth: 1,
+                            borderColor: "rgba(218,185,255,0.25)",
+                          }}
+                        >
+                          <Text style={{ fontSize: 10, fontWeight: "700", color: PRIMARY }}>
+                            {releaseInfo.version}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={st.rowSub}>
+                      {hasUpdate
+                        ? "New version available"
+                        : `AuraMusic is up to date (${APP_VERSION})`}
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  {hasUpdate && (
+                    <Text style={{ fontSize: 12, fontWeight: "700", color: PRIMARY }}>Update</Text>
+                  )}
+                  <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.28)" />
+                </View>
+              </View>
+            </TouchableOpacity>
+            <Divider />
+
             {/* FAQ */}
             <TouchableOpacity
               onPress={() => {
@@ -892,19 +1109,39 @@ export default function SettingsScreen() {
               </View>
             </TouchableOpacity>
             <Divider />
-            {/* Branding footer — matches HTML section exactly */}
-            <View style={{ alignItems: "center", paddingVertical: 32, paddingHorizontal: 20 }}>
-              <LinearGradient
-                colors={["#a855f7", "#22d3ee"]}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-                style={{ width: 64, height: 64, borderRadius: 16, alignItems: "center", justifyContent: "center", marginBottom: 12, shadowColor: "#22d3ee", shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 }}
+            {/* Branding footer */}
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push('/about_creator' as any);
+              }}
+              activeOpacity={0.85}
+              style={{ alignItems: "center", paddingVertical: 32, paddingHorizontal: 20 }}
+            >
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 16,
+                  marginBottom: 12,
+                  shadowColor: "#a855f7",
+                  shadowOpacity: 0.25,
+                  shadowRadius: 10,
+                  shadowOffset: { width: 0, height: 4 },
+                  elevation: 6,
+                }}
               >
-                <MaterialIcons name="blur-on" size={38} color="#FFF" />
-              </LinearGradient>
-              <Text style={{ fontSize: 20, fontWeight: "800", color: "#FFF", letterSpacing: -0.5, marginBottom: 4 }}>Aura Music</Text>
-              <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.40)" }}>Version 1.4.2 • Build 2024.05</Text>
+                <Image
+                  source={require("../../assets/images/icon.png")}
+                  style={{ width: 64, height: 64, borderRadius: 16 }}
+                  contentFit="cover"
+                />
+              </View>
+              <Text style={{ fontSize: 20, fontWeight: "800", color: "#FFF", letterSpacing: -0.5, marginBottom: 4 }}>AuraMusic</Text>
+              <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.60)", fontWeight: "600", marginBottom: 2 }}>Version {APP_VERSION}</Text>
+              <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.40)" }}>Updated September 2026</Text>
               <Text style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", fontStyle: "italic", marginTop: 14 }}>Made with ❤️ for music lovers</Text>
-            </View>
+            </TouchableOpacity>
           </GlassCard>
         </Section>
 

@@ -59,6 +59,7 @@ interface AuraPlayerModuleInterface {
   getState(): Promise<NativePlaybackState>;
   clearNativeCache(): Promise<{ success: boolean; deletedBytes: number }>;
   setStreamingQuality(quality: string): Promise<boolean>;
+  setStreamingQualityConfig(wifiQuality: string, cellularQuality: string): Promise<boolean>;
   setCacheLimit(bytes: number): Promise<boolean>;
   getAudioSessionId(): Promise<number>;
   setNormalizeVolume(enabled: boolean): Promise<boolean>;

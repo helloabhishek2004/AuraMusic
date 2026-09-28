@@ -234,6 +234,18 @@ class AuraPlayerModule(reactContext: ReactApplicationContext) : ReactContextBase
     }
 
     @ReactMethod
+    fun setStreamingQualityConfig(wifiQuality: String, cellularQuality: String, promise: Promise) {
+        mainHandler.post {
+            try {
+                player.setStreamingQualityConfig(wifiQuality, cellularQuality)
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.reject("SET_QUALITY_CONFIG_ERROR", e.message, e)
+            }
+        }
+    }
+
+    @ReactMethod
     fun setCacheLimit(bytes: Double, promise: Promise) {
         try {
             AuraPlayer.setCacheLimit(reactApplicationContext, bytes.toLong())

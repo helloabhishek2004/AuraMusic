@@ -30,7 +30,6 @@ import * as Haptics from 'expo-haptics';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { PressScale } from '@/src/components/ui/press-scale';
-import { glass, radius } from '@/src/design/tokens';
 import { minimumHitSlop } from '@/src/hooks/use-responsive-metrics';
 
 import { Dimensions } from 'react-native';
@@ -92,12 +91,14 @@ const Shimmer = memo(({ style }: { style?: any }) => {
   const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.28, 0.55] });
   return <Animated.View style={[{ backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 6, opacity }, style]} />;
 });
+Shimmer.displayName = 'Shimmer';
 
 const EdgeGlow = memo(({ color }: { color: string }) => (
   <View pointerEvents="none" style={[styles.edgeGlow, { backgroundColor: color }]}>
     <View style={[StyleSheet.absoluteFill, { backgroundColor: color, opacity: 0.5, borderRadius: 4 }]} />
   </View>
 ));
+EdgeGlow.displayName = 'EdgeGlow';
 
 interface MiniPlayerProps {
   expandProgress?: SharedValue<number>;
@@ -190,9 +191,22 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
     if (!track) {
       return (
         <View style={styles.skeletonShell}>
-          <BlurView intensity={52} tint="dark" style={StyleSheet.absoluteFill} />
-          <View style={[StyleSheet.absoluteFill, styles.glassBase]} />
-          <View style={[StyleSheet.absoluteFill, styles.glassBorder]} />
+          <BlurView
+            intensity={Platform.OS === 'ios' ? 70 : 45}
+            tint="dark"
+            experimentalBlurMethod="dimezisBlurView"
+            style={[StyleSheet.absoluteFill, { borderRadius: 28, overflow: 'hidden' }]}
+          />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.glassBase]} />
+          <LinearGradient
+            colors={['rgba(28, 22, 42, 0.76)', 'rgba(14, 11, 22, 0.90)']}
+            start={{ x: 0.5, y: 0.0 }}
+            end={{ x: 0.5, y: 1.0 }}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+          <View pointerEvents="none" style={styles.glassSpecularTop} />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.glassSpecularBorder]} />
           <View style={styles.skeletonContent}>
             <Shimmer style={styles.skeletonArt} />
             <View style={styles.skeletonMeta}>
@@ -242,14 +256,68 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
     );
 
     return (
-      <View style={styles.glassShell}>
-        <BlurView intensity={glass.denseBlur ?? 52} tint="dark" style={StyleSheet.absoluteFill} />
+      <View style={styles.glassContainer}>
+        {/* ── Layer 1: Native Backdrop Blur (iOS & Android) ── */}
+        <BlurView
+          intensity={Platform.OS === 'ios' ? 70 : 45}
+          tint="dark"
+          experimentalBlurMethod="dimezisBlurView"
+          style={[StyleSheet.absoluteFill, { borderRadius: 28, overflow: 'hidden' }]}
+        />
+
+        {/* ── Layer 2: Deep Obsidian Liquid Glass Base (Matches FloatingNavBar, No White-Wash) ── */}
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.glassBase]} />
-        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: h2r(accent, 0.07), borderRadius: radius.lg }]} />
-        <View pointerEvents="none" style={styles.specular} />
-        <View pointerEvents="none" style={styles.fresnel} />
-        <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.glassBorder]} />
+
+        {/* ── Layer 3: Natural Dark Tint Gradient (Matches FloatingNavBar / GlassSurface) ── */}
+        <LinearGradient
+          colors={['rgba(28, 22, 42, 0.76)', 'rgba(14, 11, 22, 0.90)']}
+          start={{ x: 0.5, y: 0.0 }}
+          end={{ x: 0.5, y: 1.0 }}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
+
+        {/* ── Layer 4: Ambient Dynamic Accent / Violet Glow Rim ── */}
+        <LinearGradient
+          colors={[h2r(accent, 0.14), 'transparent']}
+          start={{ x: 0.0, y: 0.0 }}
+          end={{ x: 1.0, y: 1.0 }}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
+
+        {/* ── Layer 5: Diagonal Caustic Refraction Sheen (Simulating Liquid Optical Distortion) ── */}
+        <LinearGradient
+          colors={[
+            'rgba(191, 90, 242, 0.18)',
+            'rgba(70, 245, 224, 0.09)',
+            'transparent',
+            'rgba(255, 255, 255, 0.06)',
+            'transparent',
+            'rgba(191, 90, 242, 0.06)',
+          ]}
+          locations={[0.0, 0.22, 0.42, 0.58, 0.78, 1.0]}
+          start={{ x: 0.0, y: 0.0 }}
+          end={{ x: 1.0, y: 1.0 }}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
+
+        {/* ── Layer 6: Subtle Top Specular Catch Line ── */}
+        <View pointerEvents="none" style={styles.glassSpecularTop} />
+
+        {/* ── Layer 7: Chromatic Caustic Glass Border ── */}
+        <View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFillObject,
+            styles.glassSpecularBorder,
+            { borderTopColor: h2r(accent, 0.35) },
+          ]}
+        />
         <EdgeGlow color={accent} />
+
+        {/* ── Layer 8: Interactive Player Content ── */}
         <View style={styles.content}>
           {panGesture ? (
             <GestureDetector gesture={panGesture}>
@@ -288,14 +356,48 @@ function MiniPlayer({ expandProgress, panGesture, bottomOffset }: MiniPlayerProp
 export default memo(MiniPlayer);
 
 const styles = StyleSheet.create({
-  container: { position: 'absolute', alignSelf: 'center', zIndex: 40, elevation: 18, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.45, shadowRadius: 22 },
+  container: {
+    position: 'absolute',
+    alignSelf: 'center',
+    zIndex: 40,
+    elevation: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.38,
+    shadowRadius: 20,
+  },
   pressArea: { width: '100%' },
-  glassShell: { minHeight: 68, borderRadius: radius.lg ?? 20, overflow: 'hidden' },
-  glassBase: { backgroundColor: 'rgba(14,12,22,0.72)', borderRadius: radius.lg ?? 20 },
-  glassBorder: { borderRadius: radius.lg ?? 20, borderWidth: 0.75, borderTopColor: 'rgba(255,255,255,0.28)', borderLeftColor: 'rgba(255,255,255,0.08)', borderRightColor: 'rgba(255,255,255,0.06)', borderBottomColor: 'rgba(255,255,255,0.04)', backgroundColor: 'transparent' },
-  specular: { position: 'absolute', top: 0, left: 28, right: 28, height: 1, backgroundColor: 'rgba(255,255,255,0.26)', zIndex: 9 },
-  fresnel: { position: 'absolute', left: 20, top: 12, bottom: 12, width: 1.5, backgroundColor: 'rgba(255,255,255,0.10)', transform: [{ skewX: '-8deg' }], zIndex: 9 },
-  edgeGlow: { position: 'absolute', left: 0, top: 10, bottom: 10, width: 3, borderRadius: 2, opacity: 0.82, zIndex: 10 },
+  glassContainer: {
+    minHeight: 68,
+    borderRadius: 28,
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
+  },
+  glassBase: {
+    backgroundColor: 'rgba(16, 12, 24, 0.72)',
+    borderRadius: 28,
+  },
+  glassSpecularTop: {
+    position: 'absolute',
+    top: 0.5,
+    left: 24,
+    right: 24,
+    height: 1.2,
+    backgroundColor: 'rgba(255, 255, 255, 0.28)',
+    borderRadius: 1,
+    zIndex: 10,
+  },
+  glassSpecularBorder: {
+    borderRadius: 28,
+    borderWidth: 1.2,
+    borderTopColor: 'rgba(191, 90, 242, 0.35)',
+    borderLeftColor: 'rgba(70, 245, 224, 0.22)',
+    borderRightColor: 'rgba(255, 255, 255, 0.10)',
+    borderBottomColor: 'rgba(0, 0, 0, 0.65)',
+    backgroundColor: 'transparent',
+    zIndex: 11,
+  },
+  edgeGlow: { position: 'absolute', left: 0, top: 12, bottom: 12, width: 3, borderRadius: 2, opacity: 0.82, zIndex: 10 },
   content: { minHeight: 68, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, gap: 11 },
   gestureActiveArea: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 48 },
   artWrap: { width: 48, height: 48, borderRadius: 13, overflow: 'hidden', backgroundColor: '#050507', elevation: 4 },
@@ -315,9 +417,9 @@ const styles = StyleSheet.create({
   playBtnSpec: { position: 'absolute', top: 3, left: 10, right: 10, height: 1, borderRadius: 0.5, backgroundColor: 'rgba(255,255,255,0.30)' },
   playIconOffset: { marginLeft: 2 },
   nextButton: { width: 34, height: 38, alignItems: 'center', justifyContent: 'center' },
-  underlightGradient: { borderRadius: radius.lg ?? 20, pointerEvents: 'none' },
+  underlightGradient: { borderRadius: 28, pointerEvents: 'none' },
   underlight: { position: 'absolute', left: 32, right: 32, bottom: -8, height: 16, opacity: 0.20, borderRadius: 8, elevation: 0 },
-  skeletonShell: { minHeight: 68, borderRadius: radius.lg ?? 20, overflow: 'hidden', width: '100%' },
+  skeletonShell: { minHeight: 68, borderRadius: 28, overflow: 'hidden', width: '100%' },
   skeletonContent: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, gap: 11, minHeight: 68 },
   skeletonArt: { width: 48, height: 48, borderRadius: 13 },
   skeletonMeta: { flex: 1, gap: 7 },

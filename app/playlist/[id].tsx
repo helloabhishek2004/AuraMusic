@@ -80,6 +80,7 @@ import { openArtistByName } from "@/src/navigation/music-navigation";
 import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
 import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
 import { AuraArtwork } from "@/src/components/ui/aura-artwork";
+import { ConnectedPlaylistView, useConnectedLibrariesStore } from "@/src/features/connected-libraries";
 import { useNetInfo } from "@react-native-community/netinfo";
 import { requestIdleTask } from "@/src/utils/idle-task";
 
@@ -478,9 +479,40 @@ const Materialise = ({
 
 // ─── MAIN ROUTER SCREEN SWITCHER ──────────────────────────────────────────────
 export default function PlaylistScreen() {
-  const { id } = useLocalSearchParams();
+  const router = useRouter();
+  const { id, provider } = useLocalSearchParams<{ id?: string; provider?: string }>();
   const playlistId =
     typeof id === "string" ? id : Array.isArray(id) ? id[0] : "";
+  const providerId =
+    typeof provider === "string" ? provider : Array.isArray(provider) ? (provider[0] as string) : undefined;
+
+  const connectedPlaylist = useConnectedLibrariesStore((s) => {
+    if (!playlistId) return null;
+    if (providerId && (s.services as Record<string, any>)[providerId]) {
+      const match = (s.services as Record<string, any>)[providerId].playlists.find((p: any) => p.externalId === playlistId);
+      if (match) return match;
+    }
+    for (const service of Object.values(s.services)) {
+      const found = service.playlists.find((p) => p.externalId === playlistId);
+      if (found) return found;
+    }
+    return null;
+  });
+
+  if (connectedPlaylist) {
+    return (
+      <ConnectedPlaylistView
+        playlist={connectedPlaylist}
+        onBack={() => {
+          if (router.canGoBack()) {
+            router.back();
+          } else {
+            router.replace('/(tabs)/library');
+          }
+        }}
+      />
+    );
+  }
 
   return <LocalPlaylistView playlistId={playlistId} />;
 }
@@ -618,6 +650,8 @@ const ListHeader = React.memo(
 
             <PlaylistArtwork
               playlist={playlist}
+              tracks={resolvedTracks}
+              isLikedCollection={isLikedPlaylist}
               size={width * 0.76}
               style={styles.heroArt}
               cachePolicy="memory-disk"

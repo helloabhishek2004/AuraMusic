@@ -95,7 +95,9 @@
           "isStandard": true
         }
       ],
-      "expo-build-properties"
+      "expo-build-properties",
+      "expo-secure-store",
+      "@react-native-google-signin/google-signin"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -6,9 +6,9 @@ import { useDeviceStateStore } from '../../device/store/device-state.store';
  * Note: Actual mapping depends on the backend source (YTMusic, etc.)
  */
 export const QUALITY_BITRATE_MAP = {
-  low: '64kbps',
-  normal: '128kbps',
-  high: '256kbps',
+  low: '~96kbps',
+  normal: '~128kbps',
+  high: '~160kbps',
   best: 'original'
 };
 

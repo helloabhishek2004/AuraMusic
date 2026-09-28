@@ -1,5 +1,0 @@
-Contact: mailto:abhishekdq2004@gmail.com
-Contact: https://github.com/helloabhishek2004/AuraMusic/security/advisories
-Preferred-Languages: en
-Canonical: https://listenwith-auramusic.vercel.app/.well-known/security.txt
-Policy: https://listenwith-auramusic.vercel.app/privacy

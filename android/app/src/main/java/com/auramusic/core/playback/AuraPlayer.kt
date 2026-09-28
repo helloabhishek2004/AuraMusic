@@ -3,6 +3,8 @@ package com.auramusic.core.playback
 import android.content.Context
 import android.content.Intent
 import android.media.audiofx.AudioEffect
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.util.Log
@@ -181,6 +183,8 @@ class AuraPlayer(
     private var resolutionRequestId: Long = 0L
 
     private var currentStreamingQuality: String = "high"
+    private var streamingQualityWifi: String = "high"
+    private var streamingQualityCellular: String = "normal"
 
     // --- Audio Intelligence: Loudness Normalization ---
     @Volatile
@@ -193,9 +197,56 @@ class AuraPlayer(
     // Audio Session tracking for system/OEM DSP (Dolby, Dirac, etc.)
     private var currentAudioSessionId: Int = 0
 
+    fun isWifiConnected(): Boolean {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val network = cm?.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(network) ?: return false
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        } catch (e: Exception) {
+            Log.w(TAG, "[QualityTrace] Failed to check wifi connectivity: ${e.message}")
+            false
+        }
+    }
+
+    fun getEffectiveStreamingQuality(): String {
+        val isWifi = isWifiConnected()
+        val configured = if (isWifi) streamingQualityWifi else streamingQualityCellular
+        val effective = if (configured.isNotBlank()) configured else currentStreamingQuality
+        Log.i(TAG, "[QualityTrace] Evaluated streaming quality: effective=$effective (isWifi=$isWifi, wifiCfg=$streamingQualityWifi, cellularCfg=$streamingQualityCellular)")
+        return effective
+    }
+
     fun setStreamingQuality(quality: String) {
         currentStreamingQuality = quality
+        streamingQualityWifi = quality
+        streamingQualityCellular = quality
         Log.i(TAG, "[QualityTrace] Streaming quality updated to $quality")
+        pruneAndRescheduleAot()
+    }
+
+    fun setStreamingQualityConfig(wifiQuality: String, cellularQuality: String) {
+        streamingQualityWifi = wifiQuality
+        streamingQualityCellular = cellularQuality
+        val isWifi = isWifiConnected()
+        currentStreamingQuality = if (isWifi) wifiQuality else cellularQuality
+        Log.i(TAG, "[QualityTrace] Streaming quality config updated: wifi=$wifiQuality cellular=$cellularQuality (active=$currentStreamingQuality, isWifi=$isWifi)")
+        pruneAndRescheduleAot()
+    }
+
+    private fun pruneAndRescheduleAot() {
+        scope.launch(Dispatchers.Main) {
+            val player = exoPlayer ?: return@launch
+            val curTimelineIdx = player.currentMediaItemIndex
+            if (curTimelineIdx >= 0 && player.mediaItemCount > curTimelineIdx + 1) {
+                Log.i(TAG, "[QualityTrace] Quality changed: pruning preloaded next item(s) from ExoPlayer timeline to re-resolve with new quality")
+                player.removeMediaItems(curTimelineIdx + 1, player.mediaItemCount)
+            }
+            currentState.currentTrackId?.let { currentTrackId ->
+                scheduleAotResolution(currentTrackId, resolutionRequestId)
+            }
+        }
     }
 
     fun getAudioSessionId(): Int {
@@ -886,20 +937,21 @@ class AuraPlayer(
             Log.i(TAG, "[AOT][Stream] track=$videoId source=local_url uri=$localUrl")
             Uri.parse(localUrl)
         } else {
-            // Check in-memory stream URL cache first
-            val cachedUrl = downloadUtil.getCachedStreamUrl(videoId)
+            val activeQuality = getEffectiveStreamingQuality()
+            // Check in-memory stream URL cache first (quality-aware)
+            val cachedUrl = downloadUtil.getCachedStreamUrl(videoId, activeQuality)
             if (cachedUrl != null) {
-                Log.i(TAG, "[AOT][Stream] track=$videoId source=cached_stream_url")
+                Log.i(TAG, "[QualityTrace] Reusing cached stream URL for track=$videoId quality=$activeQuality source=cached_stream_url")
                 Uri.parse(cachedUrl)
             } else {
                 // Online resolution via UnifiedStreamResolver (InnerTube -> AndroidVR)
                 val resolveStart = System.currentTimeMillis()
                 val result = withContext(Dispatchers.IO) {
-                    streamResolver.resolve(videoId, currentStreamingQuality)
+                    streamResolver.resolve(videoId, activeQuality)
                 }
                 val resolveElapsed = System.currentTimeMillis() - resolveStart
-                downloadUtil.cacheStreamUrl(videoId, result.url, result.format)
-                Log.i(TAG, "[AOT][Stream] track=$videoId source=online_resolved elapsed=${resolveElapsed}ms format=${result.format} bitrate=${result.bitrate} loudnessDb=${result.loudnessDb}")
+                downloadUtil.cacheStreamUrl(videoId, result.url, result.format, activeQuality)
+                Log.i(TAG, "[QualityTrace] Online resolved stream: track=$videoId quality=$activeQuality format=${result.format} itag=${result.itag} bitrate=${result.bitrate} resolver=${result.resolver} elapsed=${resolveElapsed}ms")
                 if (result.loudnessDb != null) {
                     val updatedMeta = meta.copy(loudnessDb = result.loudnessDb)
                     metadataCache[videoId] = updatedMeta

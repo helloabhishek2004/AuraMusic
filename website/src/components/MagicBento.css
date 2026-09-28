@@ -1,5 +1,0 @@
-.magic-bento-card { --magic-x: 50%; --magic-y: 50%; --magic-opacity: 0; --magic-rx: 0deg; --magic-ry: 0deg; isolation: isolate; transform: perspective(1100px) rotateX(var(--magic-rx)) rotateY(var(--magic-ry)); transform-style: preserve-3d; transition: transform .22s ease-out, border-color .3s ease-out, box-shadow .3s ease-out; }
-.magic-bento-card::after { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none; border-radius: inherit; opacity: var(--magic-opacity); background: radial-gradient(260px circle at var(--magic-x) var(--magic-y), rgb(191 90 242 / .20), transparent 46%); transition: opacity .25s ease-out; }
-.magic-bento-card > * { position: relative; z-index: 1; }
-.magic-bento-card:hover { border-color: rgb(218 185 255 / .28); box-shadow: 0 20px 50px -30px rgb(191 90 242 / .42), inset 0 1px 0 rgb(255 255 255 / .12); }
-@media (prefers-reduced-motion: reduce) { .magic-bento-card { transform: none !important; } }
