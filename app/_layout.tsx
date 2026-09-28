@@ -31,6 +31,16 @@ import { enableFreeze } from 'react-native-screens';
 import { PlaybackService } from '../src/features/player/services/playback.service';
 import { PlaybackController } from '../src/features/player/services/playback.controller';
 
+// Vercel Web Analytics - only imported on web platform
+let Analytics: React.ComponentType<any> | null = null;
+if (Platform.OS === 'web') {
+  try {
+    const analyticsModule = require('@vercel/analytics/react');
+    Analytics = analyticsModule.Analytics;
+  } catch (e) {
+    console.warn('Failed to load @vercel/analytics:', e);
+  }
+}
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 enableFreeze(true);
@@ -318,6 +328,7 @@ export default function RootLayout() {
           </GestureHandlerRootView>
         </MusicProvider>
       </NavigationThemeProvider>
+      {Analytics && <Analytics />}
     </ThemeProvider>
   );
 }
