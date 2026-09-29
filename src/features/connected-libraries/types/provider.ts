@@ -54,6 +54,45 @@ export interface ConnectedPlaylist {
 export const CONNECTED_PLAYLIST_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 /**
+ * Hard retention limit for cached YouTube API Data (30 calendar days).
+ * As mandated by YouTube API Services Developer Policies Section III.D:
+ * "You must not store YouTube API Data for more than 30 calendar days without refreshing..."
+ */
+export const YOUTUBE_API_DATA_MAX_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+export function isYouTubeDataExpired(cached: CachedConnectedPlaylist | null): boolean {
+  if (!cached || cached.providerId !== 'ytmusic') return false;
+  const timestamp = cached.lastHydratedAt || cached.fetchedAt || 0;
+  if (!timestamp) return true;
+  return Date.now() - timestamp >= YOUTUBE_API_DATA_MAX_CACHE_TTL_MS;
+}
+
+export function isYouTubePlaylistExpired(playlist: ConnectedPlaylist | null): boolean {
+  if (!playlist || playlist.providerId !== 'ytmusic') return false;
+  const timestamp = playlist.lastSyncedAt || 0;
+  if (!timestamp) return true;
+  return Date.now() - timestamp >= YOUTUBE_API_DATA_MAX_CACHE_TTL_MS;
+}
+
+export function isYouTubeServiceExpired(service: ConnectedServiceState | null): boolean {
+  if (!service || service.providerId !== 'ytmusic') return false;
+  const timestamp = service.lastSyncedAt || 0;
+  if (!timestamp) return false;
+  return Date.now() - timestamp >= YOUTUBE_API_DATA_MAX_CACHE_TTL_MS;
+}
+
+/**
+ * Result returned upon disconnecting a connected provider.
+ * Allows callers to distinguish genuine server-side revocation from local session sign-out.
+ */
+export interface DisconnectResult {
+  success: boolean;
+  remotelyRevoked: boolean;
+  localSessionCleared: boolean;
+  error?: string;
+}
+
+/**
  * Persisted and normalized playlist cache model.
  * Does NOT contain access tokens, credentials, or secrets.
  */
@@ -116,7 +155,7 @@ export interface ConnectedLibraryProvider {
   readonly meta: ProviderMeta;
 
   authenticate(): Promise<ProviderAuthResult>;
-  disconnect(): Promise<void>;
+  disconnect(): Promise<DisconnectResult>;
   refreshAuthentication(): Promise<ProviderAuthResult>;
   fetchPlaylists(): Promise<ConnectedPlaylist[]>;
   fetchPlaylistTracks(externalPlaylistId: string): Promise<ExternalTrack[]>;

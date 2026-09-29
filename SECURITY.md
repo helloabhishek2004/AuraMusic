@@ -1,4 +1,4 @@
-﻿# Security Policy
+# Security Policy
 
 The AuraMusic team takes the security and privacy of our users seriously. We appreciate responsible disclosure of security vulnerabilities.
 
@@ -10,8 +10,8 @@ Only the latest release/beta version is actively maintained with security update
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.0-beta.1 | :white_check_mark: |
-| < 0.1.0 | :x:                |
+| 3.0.0   | :white_check_mark: |
+| < 3.0.0 | :x:                |
 
 ---
 

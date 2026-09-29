@@ -3,6 +3,7 @@ import {
   ConnectedPlaylist,
   ConnectedProviderId,
   ConnectionStatus,
+  DisconnectResult,
   ExternalTrack,
   ProviderAuthResult,
   ProviderMeta,
@@ -31,8 +32,13 @@ export class AppleMusicProvider implements ConnectedLibraryProvider {
     };
   }
 
-  async disconnect(): Promise<void> {
+  async disconnect(): Promise<DisconnectResult> {
     // Clear Apple Music user tokens
+    return {
+      success: true,
+      remotelyRevoked: true,
+      localSessionCleared: true,
+    };
   }
 
   async refreshAuthentication(): Promise<ProviderAuthResult> {

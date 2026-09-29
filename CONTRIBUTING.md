@@ -1,4 +1,4 @@
-﻿# Contributing to AuraMusic
+# Contributing to AuraMusic
 
 Thank you for your interest in contributing to **AuraMusic**! 🎵
 
@@ -13,7 +13,7 @@ AuraMusic is built with a strong focus on on-device architectural purity, atmosp
 * **Java Development Kit**: **JDK 17** (Required for React Native 0.83+ and Gradle 9)
 * **Android SDK**:
   * Android SDK Build-Tools `35.0.0`
-  * Android Platform SDK `35` (Android 15)
+  * Android Platform SDK `35` / `36` (compileSdk & targetSdk 36)
   * Minimum device API target: Android 7.0 (API 24)
 * **Android Studio**: Configured with Android NDK and CMake 3.22.1+.
 * **Hardware**: Physical Android device with USB debugging enabled, or an Android Virtual Device (AVD).
@@ -38,10 +38,10 @@ npx expo run:android
 
 ## 2. Branch Workflow
 
-* Always branch off `main`:
+* Always branch off `master`:
   ```bash
-  git checkout main
-  git pull origin main
+  git checkout master
+  git pull origin master
   git checkout -b feat/your-feature-name
   # or
   git checkout -b fix/your-bug-fix
@@ -60,9 +60,10 @@ AuraMusic has strict architectural boundaries to preserve Media3 pipeline stabil
 
 1. **Native Authority for Audio**: Never place raw streaming, audio decoding, or timeline management logic in JavaScript. The Kotlin Native Core (`com.auramusic.core.playback`) is the single source of truth for audio playback.
 2. **On-Device Stream Resolution**: Never introduce middleman cloud proxy scrapers or external backend server dependencies. Stream resolution remains on-device inside Kotlin.
-3. **Zustand State Isolation**: JavaScript domain stores (`player.store.ts`, `download.store.ts`, etc.) must remain reactive consumers of native events, not state duplicators.
-4. **Liquid Glass UI Standards**: Preserve the visual depth and blur token hierarchy (38–54 blur radius, subtle borders, atmospheric gradients). Avoid flat or utilitarian UI regressions.
-5. **No Discarded Audio Features**: Do NOT attempt to reintroduce in-app software DSP equalizers, crossfade, or app-level gapless toggles without prior RFC discussion; native Media3 handles gapless timeline transitions naturally.
+3. **Decoupled Taste Profile Prior Layer**: Onboarding cold-start preferences live in `tasteProfileStore` as a prior layer; they must NEVER synthesize fake playback events into Room listening history. Recommendation hydration decays this prior gracefully (`decayFactor = max(0.1, 1.0 - H/40)`).
+4. **Zustand State Isolation**: JavaScript domain stores (`player.store.ts`, `download.store.ts`, etc.) must remain reactive consumers of native events, not state duplicators.
+5. **Liquid Glass UI Standards**: Preserve the visual depth and blur token hierarchy (38–54 blur radius, subtle borders, atmospheric gradients). Avoid flat or utilitarian UI regressions.
+6. **No Discarded Audio Features**: Do NOT attempt to reintroduce in-app software DSP equalizers, crossfade, or app-level gapless toggles without prior RFC discussion; native Media3 handles gapless timeline transitions naturally.
 
 ---
 

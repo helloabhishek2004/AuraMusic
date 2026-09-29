@@ -205,8 +205,8 @@ export class LocalMusicService {
    */
   static async getLocalTracks(): Promise<MusicTrack[]> {
     try {
-      // 1. Ensure permissions
-      const hasPerm = await this.requestPermissions();
+      // 1. Check permissions (do NOT prompt runtime permission dialog; only read if granted)
+      const hasPerm = await this.hasPermission();
       if (!hasPerm) return [];
 
       // 2. Fetch all audio assets on the device

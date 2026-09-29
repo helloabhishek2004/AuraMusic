@@ -455,6 +455,28 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             hiddenGems = [];
             forgottenFavorites = [];
 
+            // Dynamically tune cold-start discovery seeds from the user's taste profile
+            try {
+              const { buildDynamicDiscoverySeeds } = await import('../../taste-profile/services/preference-prior.service');
+              const dynamicSeeds = buildDynamicDiscoverySeeds();
+              if (dynamicSeeds.length > 0) {
+                set({
+                  trendingSeeds: dynamicSeeds,
+                  featuredHeroMix: state.featuredHeroMix || {
+                    type: 'playlist',
+                    id: dynamicSeeds[0].id,
+                    title: dynamicSeeds[0].title,
+                    image: dynamicSeeds[0].image,
+                    score: 10.0,
+                    reason: dynamicSeeds[0].reason,
+                    query: dynamicSeeds[0].query,
+                  },
+                });
+              }
+            } catch {
+              // ignore
+            }
+
             // Top Songs and Top Artists can be derived if any history exists
             if (historyLength > 0) {
               const rankedTracks = Object.keys(trackAffinities)
@@ -663,7 +685,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
 
           const rotIndex = state.discoveryRotationIndex || 0;
           const currentSlice = getDiscoverySlice(rotIndex, 4);
-          const trendingSeeds: TrendingSeed[] = currentSlice.map(item => ({
+          let trendingSeeds: TrendingSeed[] = currentSlice.map(item => ({
             type: 'playlist',
             id: item.id,
             title: item.title,
@@ -673,6 +695,21 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             query: item.query,
             reason: item.reason,
           }));
+
+          // Preserve & prioritize dynamic personalized seeds from the user's taste profile
+          try {
+            const { useTasteProfileStore } = await import('../../taste-profile/store/taste-profile.store');
+            const profile = useTasteProfileStore.getState();
+            if (profile.onboardingCompleted && (profile.favoriteArtists.length > 0 || profile.songLanguages.length > 0 || profile.genres.length > 0)) {
+              const { buildDynamicDiscoverySeeds } = await import('../../taste-profile/services/preference-prior.service');
+              const dynamicSeeds = buildDynamicDiscoverySeeds();
+              if (dynamicSeeds && dynamicSeeds.length > 0) {
+                trendingSeeds = dynamicSeeds;
+              }
+            }
+          } catch {
+            // fallback to default slice
+          }
 
           // Dynamic Artwork Resolution Priority
           const resolveListArtworks = async (list: RecommendationSeed[]) => {
@@ -713,6 +750,19 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             heroMix = onRepeatSeed;
           } else if (madeForYou[0] && madeForYou[0].tracks && madeForYou[0].tracks.length > 0) {
             heroMix = madeForYou[0];
+          }
+
+          // Cold-start fallback: if heroMix is still null, use the first dynamic discovery seed
+          if (!heroMix && trendingSeeds.length > 0) {
+            heroMix = {
+              type: 'playlist',
+              id: trendingSeeds[0].id,
+              title: trendingSeeds[0].title,
+              image: trendingSeeds[0].image,
+              score: 10.0,
+              reason: trendingSeeds[0].reason,
+              query: trendingSeeds[0].query,
+            };
           }
 
           // Fatigue Filter: Filter out fatigued seeds from sections
@@ -946,6 +996,22 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
 
       refreshDiscover: async (forceNext: boolean = false) => {
         const state = get();
+        try {
+          const { useTasteProfileStore } = await import('../../taste-profile/store/taste-profile.store');
+          const profile = useTasteProfileStore.getState();
+
+          if (profile.onboardingCompleted && (profile.favoriteArtists.length > 0 || profile.songLanguages.length > 0 || profile.genres.length > 0)) {
+            const { buildDynamicDiscoverySeeds } = await import('../../taste-profile/services/preference-prior.service');
+            const dynamicSeeds = buildDynamicDiscoverySeeds();
+            if (dynamicSeeds.length > 0) {
+              set({ trendingSeeds: dynamicSeeds });
+              return;
+            }
+          }
+        } catch {
+          // fallback to default rotation
+        }
+
         const nextIndex = forceNext
           ? (state.discoveryRotationIndex + 3) % DISCOVERY_CATALOGUE.length
           : (state.discoveryRotationIndex || 0);
@@ -1007,8 +1073,9 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           const state = get();
           const lastBuild = state.lastRecommendationBuild || 0;
           const fifteenMinutes = 15 * 60 * 1000;
-          if (Date.now() - lastBuild > fifteenMinutes) {
-            console.log('[RecommendationsStore] Preload trigger: recommendations stale (>15m). Refreshing...');
+          const isColdOrEmpty = !state.generatedAt || (!state.trendingSeeds || state.trendingSeeds.length === 0);
+          if (isColdOrEmpty || Date.now() - lastBuild > fifteenMinutes) {
+            console.log('[RecommendationsStore] Preload trigger: recommendations stale (>15m) or cold unhydrated. Refreshing...');
             await state.generateRecommendations();
             state.refreshTrendingIfNeeded();
           }
@@ -1034,8 +1101,6 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
       name: 'aura-recommendations-s12',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
-        // Durable signals only — generated cards/mixes (dailyMixes, madeForYou, rediscover, etc.)
-        // are excluded from backup and freshly regenerated from restored history & affinities
         listeningDNA: state.listeningDNA,
         tasteSnapshots: state.tasteSnapshots,
         tasteDriftLevel: state.tasteDriftLevel,
@@ -1044,6 +1109,12 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
         listeningEventsCountSinceBuild: state.listeningEventsCountSinceBuild,
         lastRecommendationBuild: state.lastRecommendationBuild,
         discoveryRotationIndex: state.discoveryRotationIndex,
+        trendingSeeds: state.trendingSeeds,
+        featuredHeroMix: state.featuredHeroMix,
+        dailyMixes: state.dailyMixes,
+        madeForYou: state.madeForYou,
+        becauseYouLike: state.becauseYouLike,
+        topArtists: state.topArtists,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {

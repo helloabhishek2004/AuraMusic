@@ -481,6 +481,7 @@ export const musicService = {
             artist: nData.artist || "",
             year: nData.year || "",
             thumbnail: nData.thumbnail || nData.art || "",
+            trackCount: (nData.tracks || nData.songs || []).length,
             tracks: (nData.tracks || nData.songs || []).map((s: any) => ({
               id: s.id,
               title: s.title,
@@ -498,6 +499,43 @@ export const musicService = {
       return null;
     } catch (error) {
       console.error('[Music Service] Error fetching album details:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Fetches detailed playlist information including tracklist and metadata.
+   */
+  getPlaylistDetails: async (playlistId: string): Promise<any | null> => {
+    try {
+      if (!playlistId) return null;
+      const actualId = playlistId.startsWith('VL') ? playlistId : (playlistId.startsWith('PL') || playlistId.startsWith('RD') ? `VL${playlistId}` : playlistId);
+      if (isNativeCoreAvailable() && AuraYouTube) {
+        const nData = await AuraYouTube.getAlbumDetails(actualId);
+        if (nData && (nData.tracks?.length > 0 || nData.title !== 'Unknown Album')) {
+          return {
+            id: playlistId,
+            title: nData.title !== 'Unknown Album' ? nData.title : 'Curated Mix',
+            artist: nData.artist !== 'Unknown Artist' ? nData.artist : 'YouTube Music',
+            year: nData.year || '',
+            thumbnail: nData.thumbnail || nData.art || '',
+            tracks: (nData.tracks || nData.songs || []).map((s: any) => ({
+              id: s.id,
+              title: s.title,
+              artist: s.artist || nData.artist || 'Unknown Artist',
+              artistId: s.artistId || undefined,
+              album: s.album || nData.title,
+              albumId: s.albumId || nData.id,
+              duration: s.duration || 240,
+              art: s.artworkUrl || s.art || nData.thumbnail || '',
+              source: 'ytmusic'
+            }))
+          };
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error('[Music Service] Error fetching playlist details:', error);
       return null;
     }
   },

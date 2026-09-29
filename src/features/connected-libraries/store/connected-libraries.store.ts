@@ -6,9 +6,14 @@ import {
   ConnectedProviderId,
   ConnectedServiceState,
   DevScenario,
+  DisconnectResult,
+  isYouTubeDataExpired,
+  isYouTubeServiceExpired,
 } from '../types/provider';
 import { providerRegistry } from '../providers/registry';
 import { getDevScenarioState } from '../providers/dev-mock.provider';
+import { YouTubeDataCleanupService } from '../services/youtube-data-cleanup.service';
+
 
 interface ConnectedLibrariesStoreState {
   services: Record<ConnectedProviderId, ConnectedServiceState>;
@@ -18,7 +23,7 @@ interface ConnectedLibrariesStoreState {
 
 interface ConnectedLibrariesStoreActions {
   connectService: (providerId: ConnectedProviderId) => Promise<{ success: boolean; cancelled?: boolean; error?: string }>;
-  disconnectService: (providerId: ConnectedProviderId) => Promise<void>;
+  disconnectService: (providerId: ConnectedProviderId) => Promise<DisconnectResult>;
   syncService: (providerId: ConnectedProviderId) => Promise<void>;
   reconnectService: (providerId: ConnectedProviderId) => Promise<{ success: boolean; error?: string }>;
   setDevScenario: (scenario: DevScenario) => void;
@@ -127,34 +132,54 @@ export const useConnectedLibrariesStore = create<
         }
       },
 
-      disconnectService: async (providerId: ConnectedProviderId) => {
+      disconnectService: async (providerId: ConnectedProviderId): Promise<DisconnectResult> => {
         const provider = providerRegistry.get(providerId);
+        let disconnectResult: DisconnectResult = {
+          success: true,
+          remotelyRevoked: true,
+          localSessionCleared: true,
+        };
+
         if (provider) {
           try {
-            await provider.disconnect();
-          } catch (err) {
+            disconnectResult = await provider.disconnect();
+          } catch (err: any) {
             console.warn('[ConnectedLibrariesStore] Provider disconnect error:', err);
+            disconnectResult = {
+              success: false,
+              remotelyRevoked: false,
+              localSessionCleared: true,
+              error: err?.message || 'Remote revocation could not be completed.',
+            };
           }
         }
 
-        // Clear only this provider's connection and cached playlists.
-        // Local content and other providers are untouched.
-        get().invalidateProviderPlaylistCache(providerId);
+        if (providerId === 'ytmusic') {
+          // Centralized authoritative purge for YouTube Authorized Data:
+          // Purges playlists, playlistCache, and decouples downstream provenance
+          YouTubeDataCleanupService.purgeAuthorizedData({ targetStatus: 'not_connected' });
+        } else {
+          // Clear only this provider's connection and cached playlists.
+          // Local content and other providers are untouched.
+          get().invalidateProviderPlaylistCache(providerId);
 
-        set((state) => ({
-          services: {
-            ...state.services,
-            [providerId]: {
-              providerId,
-              status: 'not_connected',
-              displayName: state.services[providerId]?.displayName || providerId,
-              playlists: [],
-              lastSyncedAt: undefined,
-              accountName: undefined,
-              error: undefined,
+          set((state) => ({
+            services: {
+              ...state.services,
+              [providerId]: {
+                providerId,
+                status: 'not_connected',
+                displayName: state.services[providerId]?.displayName || providerId,
+                playlists: [],
+                lastSyncedAt: undefined,
+                accountName: undefined,
+                error: undefined,
+              },
             },
-          },
-        }));
+          }));
+        }
+
+        return disconnectResult;
       },
 
       syncService: async (providerId: ConnectedProviderId) => {
@@ -187,7 +212,19 @@ export const useConnectedLibrariesStore = create<
           }));
         } catch (err: any) {
           const isAuthExpired = err?.message === 'AUTH_EXPIRED';
-          // Sync failure: preserve previously synced playlists, do not wipe
+          if (isAuthExpired && providerId === 'ytmusic') {
+            // Genuine Google OAuth revocation / session expiry:
+            // Under YouTube API Services Developer Policies (Section III.D & II),
+            // purge all YouTube Authorized Data immediately.
+            YouTubeDataCleanupService.purgeAuthorizedData({
+              targetStatus: 'auth_expired',
+              error: 'Google authorization expired or was revoked. Reconnect to restore your YouTube Music library.',
+            });
+            return;
+          }
+
+          // Non-revocation failures (network offline, HTTP 429, 5xx server errors):
+          // Preserve previously synced playlists; do NOT destructively purge.
           set((state) => ({
             services: {
               ...state.services,
@@ -262,6 +299,19 @@ export const useConnectedLibrariesStore = create<
       getCachedPlaylist: (providerId: ConnectedProviderId, playlistId: string) => {
         const cacheKey = `${providerId}:${playlistId}`;
         const cached = get().playlistCache?.[cacheKey];
+        if (providerId === 'ytmusic') {
+          if (cached && isYouTubeDataExpired(cached)) {
+            if (__DEV__) {
+              console.log(`[ConnectedLibrariesStore] Cache entry expired under 30-day limit: ${cacheKey}`);
+            }
+            get().invalidatePlaylistCache(providerId, playlistId);
+            return null;
+          }
+          const ytService = get().services?.ytmusic;
+          if (ytService && isYouTubeServiceExpired(ytService)) {
+            YouTubeDataCleanupService.pruneExpiredCacheEntries();
+          }
+        }
         return cached || null;
       },
 
@@ -326,6 +376,11 @@ export const useConnectedLibrariesStore = create<
         devScenario: 'REAL' as DevScenario,
         playlistCache: state.playlistCache || {},
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          YouTubeDataCleanupService.pruneExpiredCacheEntries();
+        }
+      },
     }
   )
 );

@@ -38,7 +38,20 @@ export function buildTasteClusters(
     .filter((a) => a.score > 0)
     .sort((a, b) => b.score - a.score || b.playCount - a.playCount);
 
-  const topArtists = sortedAffinities.slice(0, 3).map((a) => a.name);
+  let topArtists = sortedAffinities.slice(0, 3).map((a) => a.name);
+
+  // If no behavioral affinities exist yet, gracefully fall back to onboarding favorite artists
+  if (topArtists.length === 0) {
+    try {
+      const { useTasteProfileStore } = require('../../taste-profile/store/taste-profile.store');
+      const profileArtists = useTasteProfileStore.getState().favoriteArtists || [];
+      if (profileArtists.length > 0) {
+        topArtists = profileArtists.slice(0, 3).map((a: any) => a.name);
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   // Cluster 1: Most Played / Core Favorites
   const clusterA: TasteCluster = {

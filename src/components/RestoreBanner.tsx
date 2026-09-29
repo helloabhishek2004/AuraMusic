@@ -9,10 +9,12 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { RestoreValidatorService, RestoreNotice } from '../services/restore-validator.service';
+import { useTasteProfileStore } from '../features/taste-profile/store/taste-profile.store';
 import { LiquidGlass } from './ui/liquid-glass';
 
 export function RestoreBanner() {
   const insets = useSafeAreaInsets();
+  const onboardingCompleted = useTasteProfileStore(s => s.onboardingCompleted);
   const [notice, setNotice] = useState<RestoreNotice>({
     isRestored: false,
     missingDownloadsCount: 0,
@@ -42,7 +44,7 @@ export function RestoreBanner() {
     opacity: opacity.value,
   }));
 
-  if (!notice.message) return null;
+  if (!notice.message || !onboardingCompleted) return null;
 
   return (
     <Animated.View

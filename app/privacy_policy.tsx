@@ -14,7 +14,6 @@
 
 import React, { memo } from 'react';
 import {
-  Dimensions,
   Platform,
   ScrollView,
   StatusBar,
@@ -22,6 +21,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,8 +29,6 @@ import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
-
-const { width: SW } = Dimensions.get('window');
 
 const BG = '#0F0F13';
 const PRIMARY = '#BF5AF2';
@@ -75,6 +73,7 @@ const PolicySectionCard = memo(
     </View>
   )
 );
+PolicySectionCard.displayName = 'PolicySectionCard';
 
 export default function PrivacyPolicyScreen() {
   const router = useRouter();
@@ -134,8 +133,10 @@ export default function PrivacyPolicyScreen() {
         <PolicySectionCard icon="info" title="1. Overview">
           <Text style={styles.bodyText}>
             AuraMusic is a client-side Android music player providing high-fidelity streaming and offline
-            playback. You do not need to register, provide an email address, or link a personal account
-            to use any feature of AuraMusic.
+            playback. You do not need to create an account, register, or provide an email address to use
+            AuraMusic&apos;s core playback and local file management features. For users who wish to browse and
+            play their personal playlists from external platforms, AuraMusic offers an optional Connected
+            Libraries feature (including YouTube Music via official Google Sign-In and Spotify via PKCE OAuth).
           </Text>
         </PolicySectionCard>
 
@@ -156,7 +157,7 @@ export default function PrivacyPolicyScreen() {
             </Text>
             <Text style={styles.bulletItem}>
               • <Text style={styles.boldWhite}>Offline Media Sandbox (`documentDirectory/aura/`):</Text> Downloaded
-              audio files (`.mp3`) and album artwork (`.webp`) are stored directly in your app's isolated sandbox.
+              audio files (`.mp3`) and album artwork (`.webp`) are stored directly in your app&apos;s isolated sandbox.
             </Text>
             <Text style={styles.bulletItem}>
               • <Text style={styles.boldWhite}>Local Playback Telemetry:</Text> Affinity metrics (play counts, skip
@@ -177,7 +178,7 @@ export default function PrivacyPolicyScreen() {
             </Text>
             <Text style={styles.bulletItem}>
               • <Text style={styles.boldWhite}>LRCLIB API:</Text> Synchronized and unsynced lyrics are retrieved in
-              real-time using the song's canonical title, artist, and duration.
+              real-time using the song&apos;s canonical title, artist, and duration.
             </Text>
             <Text style={styles.bulletItem}>
               • <Text style={styles.boldWhite}>No Backend Intermediary:</Text> AuraMusic does not route your network
@@ -189,7 +190,7 @@ export default function PrivacyPolicyScreen() {
         {/* ── Section 4: Downloads and Storage Isolation ── */}
         <PolicySectionCard icon="folder-special" title="4. Downloads and Storage Isolation">
           <Text style={styles.bodyText}>
-            Downloaded tracks and cached artwork are stored in AuraMusic's private Android sandbox:
+            Downloaded tracks and cached artwork are stored in AuraMusic&apos;s private Android sandbox:
           </Text>
           <View style={styles.bulletList}>
             <Text style={styles.bulletItem}>
@@ -197,7 +198,7 @@ export default function PrivacyPolicyScreen() {
               <Text style={styles.codeText}>/files/aura/artwork/</Text>.
             </Text>
             <Text style={styles.bulletItem}>
-              • Android's application sandbox prevents other non-root applications from accessing your downloaded
+              • Android&apos;s application sandbox prevents other non-root applications from accessing your downloaded
               audio files.
             </Text>
             <Text style={styles.bulletItem}>
@@ -227,7 +228,7 @@ export default function PrivacyPolicyScreen() {
         {/* ── Section 6: Android Backup Rules ── */}
         <PolicySectionCard icon="cloud-sync" title="6. Android Auto Backup Configuration">
           <Text style={styles.bodyText}>
-            AuraMusic configures Android's official Auto Backup system via explicit XML rules:
+            AuraMusic configures Android&apos;s official Auto Backup system via explicit XML rules:
           </Text>
           <View style={styles.bulletList}>
             <Text style={styles.bulletItem}>
@@ -240,22 +241,93 @@ export default function PrivacyPolicyScreen() {
               media caches are strictly excluded, keeping the total backup footprint under 1 MB.
             </Text>
             <Text style={styles.bulletItem}>
-              • Cloud backup requires system-level encryption capabilities (`disableIfNoEncryptionCapabilities="true"`).
+              • Cloud backup requires system-level encryption capabilities (<Text style={styles.codeText}>disableIfNoEncryptionCapabilities=&quot;true&quot;</Text>).
             </Text>
           </View>
         </PolicySectionCard>
 
-        {/* ── Section 7: Third-Party Services ── */}
-        <PolicySectionCard icon="dns" title="7. Third-Party Services">
+        {/* ── Section 7: Optional Connected Services (YouTube Music & Google Sign-In) ── */}
+        <PolicySectionCard icon="vpn-key" title="7. Optional Connected Services — YouTube Music & Google Sign-In">
           <Text style={styles.bodyText}>
-            When connecting to external media sources (YouTube Music and LRCLIB), standard network transport
-            metadata (such as your IP address and device User-Agent) is transmitted as required by HTTP protocols.
-            Consult the respective privacy documentation of Google and LRCLIB for their connection policies.
+            AuraMusic includes an optional Connected Libraries feature that allows you to connect your Google
+            account to import and browse your personal YouTube Music playlists directly in your library:
+          </Text>
+          <View style={styles.bulletList}>
+            <Text style={styles.bulletItem}>
+              • <Text style={styles.boldWhite}>YouTube API Services:</Text> AuraMusic uses official Google Sign-In
+              and YouTube API Services. By connecting your account, you acknowledge and agree to be bound by the{' '}
+              <Text
+                style={styles.linkText}
+                onPress={() => Linking.openURL('https://www.youtube.com/t/terms').catch(() => {})}
+              >
+                YouTube Terms of Service
+              </Text>{' '}
+              and the{' '}
+              <Text
+                style={styles.linkText}
+                onPress={() => Linking.openURL('https://policies.google.com/privacy').catch(() => {})}
+              >
+                Google Privacy Policy
+              </Text>.
+            </Text>
+            <Text style={styles.bulletItem}>
+              • <Text style={styles.boldWhite}>Requested Scope:</Text> AuraMusic requests only the minimum read-only
+              OAuth scope required to display your playlists:{' '}
+              <Text style={styles.codeText}>https://www.googleapis.com/auth/youtube.readonly</Text>.
+            </Text>
+            <Text style={styles.bulletItem}>
+              • <Text style={styles.boldWhite}>Accessed Information:</Text> Only your Google account display name or
+              email (for identification in the Connected Apps UI), your personal playlist metadata (IDs, titles,
+              artwork URLs, and item counts), and constituent track details (video IDs, titles, thumbnails, and durations)
+              are accessed. AuraMusic never sees, handles, or stores your Google password.
+            </Text>
+            <Text style={styles.bulletItem}>
+              • <Text style={styles.boldWhite}>Token Handling & Storage:</Text> Google OAuth 2.0 access tokens are
+              managed natively in volatile memory by Google Play Services on your Android device. Tokens are NEVER
+              stored in AuraMusic&apos;s Room SQLite database, AsyncStorage, SecureStore, or any developer server. AuraMusic
+              explicitly sets offlineAccess to false, meaning no refresh tokens exist on your device.
+            </Text>
+            <Text style={styles.bulletItem}>
+              • <Text style={styles.boldWhite}>Local Caching & 30-Day Retention:</Text> In compliance with YouTube
+              API Services Developer Policies (Section III.D), cached playlist metadata and track references are
+              retained on-device for a maximum of 30 calendar days. Any cached data that cannot be verified or
+              refreshed within 30 days is deterministically purged.
+            </Text>
+            <Text style={styles.bulletItem}>
+              • <Text style={styles.boldWhite}>In-App Disconnect & Programmatic Revocation:</Text> You can disconnect
+              YouTube Music at any time via Settings → Connected Apps. Disconnecting attempts programmatic OAuth
+              revocation via Google Play Services, terminates the local authentication session, and permanently deletes all
+              imported YouTube playlists and cached track listings from your device. If device network connectivity prevents
+              immediate server-side revocation confirmation, AuraMusic alerts the user and provides a direct link to Google
+              Account Security Settings to verify or revoke access manually.
+            </Text>
+            <Text style={styles.bulletItem}>
+              • <Text style={styles.boldWhite}>Google Security Settings Revocation:</Text> You can also revoke
+              AuraMusic&apos;s access directly at any time from{' '}
+              <Text
+                style={styles.linkText}
+                onPress={() => Linking.openURL('https://myaccount.google.com/permissions').catch(() => {})}
+              >
+                Google Account Security Settings
+              </Text>.
+              When authorization is revoked externally, AuraMusic detects the revocation, transitions the service to
+              expired status, and immediately purges all cached YouTube Authorized Data.
+            </Text>
+          </View>
+        </PolicySectionCard>
+
+        {/* ── Section 8: General Outbound Network Requests ── */}
+        <PolicySectionCard icon="dns" title="8. General Outbound Network Requests">
+          <Text style={styles.bodyText}>
+            When streaming media or fetching lyrics, AuraMusic communicates directly with upstream endpoints (YouTube
+            content CDN and LRCLIB). Standard network transport metadata (such as your IP address and device User-Agent)
+            is transmitted as required by HTTP protocols. Consult the respective privacy documentation of Google and
+            LRCLIB for their connection policies.
           </Text>
         </PolicySectionCard>
 
-        {/* ── Section 8: Data Retention & User Controls ── */}
-        <PolicySectionCard icon="delete-sweep" title="8. Data Retention & User Controls">
+        {/* ── Section 9: Data Retention & User Controls ── */}
+        <PolicySectionCard icon="delete-sweep" title="9. Data Retention & User Controls">
           <Text style={styles.bodyText}>
             You have full control over your stored data directly inside AuraMusic:
           </Text>
@@ -272,30 +344,37 @@ export default function PrivacyPolicyScreen() {
               • <Text style={styles.boldWhite}>Delete Playlists:</Text> Custom playlists and liked tracks can be
               edited or removed at any time from the Library tab.
             </Text>
+            <Text style={styles.bulletItem}>
+              • <Text style={styles.boldWhite}>Disconnect Connected Libraries:</Text> Settings → Connected Apps.
+              Attempts to revoke OAuth authorization programmatically, clears locally stored connected-library data,
+              and provides a link to Google Account Security Settings if remote revocation cannot be confirmed because
+              the device is offline.
+            </Text>
           </View>
         </PolicySectionCard>
 
-        {/* ── Section 9: Children's Privacy ── */}
-        <PolicySectionCard icon="child-care" title="9. Children's Privacy">
+        {/* ── Section 10: Children's Privacy ── */}
+        <PolicySectionCard icon="child-care" title="10. Children's Privacy">
           <Text style={styles.bodyText}>
             AuraMusic is a general-audience audio utility. It does not solicit, collect, or store personal
             identifying information from any user, including children under 13 years of age.
           </Text>
         </PolicySectionCard>
 
-        {/* ── Section 10: Policy Updates ── */}
-        <PolicySectionCard icon="update" title="10. Changes to This Policy">
+        {/* ── Section 11: Policy Updates ── */}
+        <PolicySectionCard icon="update" title="11. Changes to This Policy">
           <Text style={styles.bodyText}>
             Any future adjustments reflecting architecture or feature changes will be published directly within
             application releases with an updated date.
           </Text>
         </PolicySectionCard>
 
-        {/* ── Section 11: Contact & Project Info ── */}
-        <PolicySectionCard icon="code" title="11. Project Information">
+        {/* ── Section 12: Contact & Project Info ── */}
+        <PolicySectionCard icon="code" title="12. Project Information">
           <Text style={styles.bodyText}>
-            AuraMusic is an open-source project. Source code, issue tracking, and technical inquiries are available
-            via the project's official GitHub repository.
+            AuraMusic is a source-available personal software project developed for technical research, education,
+            and Android audio experimentation. Source code, issue tracking, and technical inquiries are available
+            via the project&apos;s official GitHub repository.
           </Text>
         </PolicySectionCard>
 
@@ -434,6 +513,11 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     lineHeight: 18,
     color: TEXT_MUTED,
+  },
+  linkText: {
+    color: '#DAB9FF',
+    textDecorationLine: 'underline',
+    fontWeight: '700',
   },
 
   // ── Footer ──

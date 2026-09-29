@@ -22,6 +22,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
+import { LiquidAtmosphereBackground } from "@/src/components/ui/LiquidAtmosphereBackground";
 import * as Haptics from "expo-haptics";
 
 const { width: SW } = Dimensions.get("window");
@@ -62,84 +63,8 @@ function formatEta(seconds?: number): string {
 }
 
 // Ambient Background with pulse animations
-const AmbientBG = React.memo(() => {
-  const orb1 = useRef(new Animated.Value(0)).current;
-  const orb2 = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const pulse = (val: Animated.Value, dur: number, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(val, {
-            toValue: 1,
-            duration: dur,
-            delay,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-          Animated.timing(val, {
-            toValue: 0,
-            duration: dur,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-        ]),
-      ).start();
-    pulse(orb1, 6000, 0);
-    pulse(orb2, 8000, 2000);
-  }, []);
-
-  const scale1 = orb1.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 1.2],
-  });
-  const scale2 = orb2.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 1.15],
-  });
-  const op1 = orb1.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.06, 0.12],
-  });
-  const op2 = orb2.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.04, 0.09],
-  });
-
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <View style={{ flex: 1, backgroundColor: C.bg }} />
-      <LinearGradient
-        colors={["rgba(191,90,242,0.04)", "transparent"]}
-        style={StyleSheet.absoluteFill}
-      />
-      <Animated.View
-        style={[
-          styles.orb,
-          {
-            top: -100,
-            right: -60,
-            backgroundColor: C.primary,
-            opacity: op1,
-            transform: [{ scale: scale1 }],
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.orb,
-          {
-            bottom: 100,
-            left: -80,
-            backgroundColor: C.accent,
-            opacity: op2,
-            transform: [{ scale: scale2 }],
-          },
-        ]}
-      />
-    </View>
-  );
-});
+// ── Ambient background ────────────────────────────────────────────────────────
+const AmbientBG = React.memo(() => <LiquidAtmosphereBackground targetRoute="/download-queue" />);
 
 // Section Header with Collapse state and smooth rotation arrow
 interface SectionHeaderProps {

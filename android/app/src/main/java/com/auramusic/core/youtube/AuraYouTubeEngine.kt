@@ -940,9 +940,10 @@ class AuraYouTubeEngine(private val context: Context) {
 
     suspend fun getAlbumDetails(browseId: String): JSONObject {
         return suspendCancellableCoroutine { continuation ->
+            val actualBrowseId = if (browseId.startsWith("PL") || browseId.startsWith("RD") || browseId.startsWith("OLAK5uy_")) "VL$browseId" else browseId
             val json = JSONObject()
             json.put("context", getBaseContext())
-            json.put("browseId", browseId)
+            json.put("browseId", actualBrowseId)
 
             val request = Request.Builder()
                 .url("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false")
@@ -964,36 +965,87 @@ class AuraYouTubeEngine(private val context: Context) {
                         var artist = "Unknown Artist"
                         var artwork = ""
                         var year = ""
-                        
-                        val twoCol = root.optJSONObject("contents")?.optJSONObject("twoColumnBrowseResultsRenderer")
-                        if (twoCol != null) {
-                            val tabs = twoCol.optJSONArray("tabs")
-                            val headerSection = tabs?.optJSONObject(0)?.optJSONObject("tabRenderer")?.optJSONObject("content")?.optJSONObject("sectionListRenderer")?.optJSONArray("contents")?.optJSONObject(0)?.optJSONObject("musicResponsiveHeaderRenderer")
-                            
-                            if (headerSection != null) {
-                                title = headerSection.optJSONObject("title")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text") ?: title
-                                val straplineRuns = headerSection.optJSONObject("straplineTextOne")?.optJSONArray("runs")
-                                if (straplineRuns != null && straplineRuns.length() > 0) {
-                                    val artistSb = StringBuilder()
-                                    for (r in 0 until straplineRuns.length()) {
-                                        val runObj = straplineRuns.optJSONObject(r) ?: continue
-                                        artistSb.append(runObj.optString("text"))
-                                    }
-                                    val fullArtist = artistSb.toString().trim()
-                                    if (fullArtist.isNotEmpty()) {
-                                        artist = fullArtist
+
+                        // 1. Comprehensive Header Search
+                        var headerSection = root.optJSONObject("header")?.optJSONObject("musicResponsiveHeaderRenderer")
+                            ?: root.optJSONObject("header")?.optJSONObject("musicHeaderRenderer")
+
+                        if (headerSection == null) {
+                            val twoCol = root.optJSONObject("contents")?.optJSONObject("twoColumnBrowseResultsRenderer")
+                            headerSection = twoCol?.optJSONObject("header")?.optJSONObject("musicResponsiveHeaderRenderer")
+                                ?: twoCol?.optJSONArray("tabs")?.optJSONObject(0)?.optJSONObject("tabRenderer")?.optJSONObject("content")?.optJSONObject("sectionListRenderer")?.optJSONArray("contents")?.optJSONObject(0)?.optJSONObject("musicResponsiveHeaderRenderer")
+                        }
+
+                        if (headerSection == null) {
+                            val singleCol = root.optJSONObject("contents")?.optJSONObject("singleColumnBrowseResultsRenderer")
+                            headerSection = singleCol?.optJSONArray("tabs")?.optJSONObject(0)?.optJSONObject("tabRenderer")?.optJSONObject("content")?.optJSONObject("sectionListRenderer")?.optJSONArray("contents")?.optJSONObject(0)?.optJSONObject("musicResponsiveHeaderRenderer")
+                        }
+
+                        if (headerSection != null) {
+                            // Title extraction
+                            val titleRuns = headerSection.optJSONObject("title")?.optJSONArray("runs")
+                            if (titleRuns != null && titleRuns.length() > 0) {
+                                val sb = StringBuilder()
+                                for (r in 0 until titleRuns.length()) {
+                                    sb.append(titleRuns.optJSONObject(r)?.optString("text") ?: "")
+                                }
+                                val parsedTitle = sb.toString().trim()
+                                if (parsedTitle.isNotEmpty()) title = parsedTitle
+                            } else {
+                                val t = headerSection.optJSONObject("title")?.optString("text") ?: ""
+                                if (t.isNotEmpty()) title = t
+                            }
+
+                            // Primary Artist extraction
+                            val straplineRuns = headerSection.optJSONObject("straplineTextOne")?.optJSONArray("runs")
+                            if (straplineRuns != null && straplineRuns.length() > 0) {
+                                val artistSb = StringBuilder()
+                                for (r in 0 until straplineRuns.length()) {
+                                    val runObj = straplineRuns.optJSONObject(r) ?: continue
+                                    artistSb.append(runObj.optString("text"))
+                                }
+                                val fullArtist = artistSb.toString().trim()
+                                if (fullArtist.isNotEmpty()) {
+                                    artist = fullArtist
+                                }
+                            }
+
+                            // Fallback Artist from subtitle runs
+                            if (artist == "Unknown Artist") {
+                                val subtitleRuns = headerSection.optJSONObject("subtitle")?.optJSONArray("runs")
+                                if (subtitleRuns != null) {
+                                    for (r in 0 until subtitleRuns.length()) {
+                                        val runText = subtitleRuns.optJSONObject(r)?.optString("text")?.trim() ?: continue
+                                        val lower = runText.lowercase()
+                                        if (lower != "album" && lower != "ep" && lower != "single" && lower != "playlist" && 
+                                            lower != "•" && lower != "&" && lower != "," && !lower.contains("song") && 
+                                            !lower.contains("minute") && !lower.matches(Regex("^(19|20)\\d{2}$"))) {
+                                            artist = runText
+                                            break
+                                        }
                                     }
                                 }
-                                val thumbs = headerSection.optJSONObject("thumbnail")?.optJSONObject("musicThumbnailRenderer")?.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
-                                artwork = if (thumbs != null && thumbs.length() > 0) {
-                                    thumbs.optJSONObject(thumbs.length() - 1)?.optString("url") ?: ""
-                                } else ""
-                                
-                                val subtitleRuns = headerSection.optJSONObject("subtitle")?.optJSONArray("runs")
-                                if (subtitleRuns != null && subtitleRuns.length() > 2) {
-                                    year = subtitleRuns.optJSONObject(2)?.optString("text") ?: ""
-                                } else if (subtitleRuns != null && subtitleRuns.length() > 0) {
-                                    year = subtitleRuns.optJSONObject(0)?.optString("text") ?: ""
+                            }
+
+                            // Artwork extraction
+                            val thumbs = headerSection.optJSONObject("thumbnail")?.optJSONObject("musicThumbnailRenderer")?.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
+                                ?: headerSection.optJSONObject("thumbnail")?.optJSONObject("croppedSquareThumbnailRenderer")?.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
+                            artwork = if (thumbs != null && thumbs.length() > 0) {
+                                thumbs.optJSONObject(thumbs.length() - 1)?.optString("url") ?: ""
+                            } else ""
+                            if (artwork.isEmpty()) {
+                                artwork = extractThumbnail(headerSection)
+                            }
+                            
+                            // Year extraction
+                            val subtitleRuns = headerSection.optJSONObject("subtitle")?.optJSONArray("runs")
+                            if (subtitleRuns != null) {
+                                for (r in 0 until subtitleRuns.length()) {
+                                    val text = subtitleRuns.optJSONObject(r)?.optString("text")?.trim() ?: continue
+                                    if (text.matches(Regex("^(19|20)\\d{2}$"))) {
+                                        year = text
+                                        break
+                                    }
                                 }
                             }
                         }
@@ -1003,28 +1055,43 @@ class AuraYouTubeEngine(private val context: Context) {
                         result.put("title", title)
                         result.put("artist", artist)
                         result.put("thumbnail", artwork)
+                        result.put("art", artwork)
                         result.put("year", year)
                         
                         val tracksArray = JSONArray()
 
-                        val contents = root.optJSONObject("contents")?.optJSONObject("twoColumnBrowseResultsRenderer")?.optJSONObject("secondaryContents")?.optJSONObject("sectionListRenderer")?.optJSONArray("contents")?.optJSONObject(0)?.optJSONObject("musicShelfRenderer")?.optJSONArray("contents")
-                            ?: root.optJSONObject("contents")?.optJSONObject("singleColumnBrowseResultsRenderer")?.optJSONArray("tabs")?.optJSONObject(0)?.optJSONObject("tabRenderer")?.optJSONObject("content")?.optJSONObject("sectionListRenderer")?.optJSONArray("contents")?.optJSONObject(0)?.optJSONObject("musicShelfRenderer")?.optJSONArray("contents")
+                        // 2. Comprehensive Tracklist Extraction across all section shelves
+                        val sections = root.optJSONObject("contents")?.optJSONObject("twoColumnBrowseResultsRenderer")?.optJSONObject("secondaryContents")?.optJSONObject("sectionListRenderer")?.optJSONArray("contents")
+                            ?: root.optJSONObject("contents")?.optJSONObject("singleColumnBrowseResultsRenderer")?.optJSONArray("tabs")?.optJSONObject(0)?.optJSONObject("tabRenderer")?.optJSONObject("content")?.optJSONObject("sectionListRenderer")?.optJSONArray("contents")
+                            ?: root.optJSONObject("contents")?.optJSONObject("twoColumnBrowseResultsRenderer")?.optJSONArray("tabs")?.optJSONObject(0)?.optJSONObject("tabRenderer")?.optJSONObject("content")?.optJSONObject("sectionListRenderer")?.optJSONArray("contents")
                         
-                        if (contents != null) {
-                            for (i in 0 until contents.length()) {
-                                val item = contents.optJSONObject(i)?.optJSONObject("musicResponsiveListItemRenderer")
-                                if (item != null) {
+                        if (sections != null) {
+                            for (s in 0 until sections.length()) {
+                                val section = sections.optJSONObject(s) ?: continue
+                                val items = section.optJSONObject("musicShelfRenderer")?.optJSONArray("contents")
+                                    ?: section.optJSONObject("musicPlaylistShelfRenderer")?.optJSONArray("contents")
+                                    ?: continue
+
+                                for (i in 0 until items.length()) {
+                                    val item = items.optJSONObject(i)?.optJSONObject("musicResponsiveListItemRenderer") ?: continue
                                     val parsed = parseResponsiveItem(item, tracksArray.length())
                                     if (parsed != null) {
+                                        val trackId = parsed.optString("id")
+                                        if (trackId.isEmpty()) continue
+
                                         val tJson = JSONObject()
-                                        tJson.put("id", parsed.optString("id"))
+                                        tJson.put("id", trackId)
                                         tJson.put("title", parsed.optString("title"))
                                         tJson.put("artist", if (parsed.optString("artistName").isNotEmpty() && parsed.optString("artistName") != "Unknown Artist") parsed.optString("artistName") else artist)
                                         tJson.put("artistId", parsed.optString("artistId"))
-                                        tJson.put("album", title)
-                                        tJson.put("albumId", browseId)
-                                        tJson.put("duration", parsed.optInt("durationMs") / 1000)
-                                        tJson.put("artworkUrl", if (parsed.optString("thumbnail").isNotEmpty()) parsed.optString("thumbnail") else artwork)
+                                        tJson.put("album", if (parsed.optString("albumName").isNotEmpty()) parsed.optString("albumName") else title)
+                                        tJson.put("albumId", if (parsed.optString("albumId").isNotEmpty()) parsed.optString("albumId") else browseId)
+                                        val durationSec = parsed.optInt("durationMs") / 1000
+                                        tJson.put("duration", if (durationSec > 0) durationSec else 240)
+                                        val trackThumb = parsed.optString("thumbnail")
+                                        val finalArt = if (trackThumb.isNotEmpty()) trackThumb else artwork
+                                        tJson.put("artworkUrl", finalArt)
+                                        tJson.put("art", finalArt)
                                         tracksArray.put(tJson)
                                     }
                                 }

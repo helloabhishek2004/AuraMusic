@@ -250,14 +250,24 @@ class AuraAudioSessionPackage : ReactPackage {
         <!-- Allowlist: Only include the specific durable databases and preferences -->
         <!-- When <include> elements are present, Android excludes all other files by default -->
         <include domain="database" path="aura_music.db" />
+        <include domain="database" path="aura_music.db-wal" />
+        <include domain="database" path="aura_music.db-shm" />
         <include domain="database" path="RKStorage" />
+        <include domain="database" path="RKStorage.db" />
+        <include domain="database" path="AsyncStorage" />
+        <include domain="database" path="AsyncStorage.db" />
         <include domain="sharedpref" path="aura_player_prefs.xml" />
     </cloud-backup>
 
     <device-transfer>
         <!-- Allowlist: Only include durable user data for device-to-device transfer -->
         <include domain="database" path="aura_music.db" />
+        <include domain="database" path="aura_music.db-wal" />
+        <include domain="database" path="aura_music.db-shm" />
         <include domain="database" path="RKStorage" />
+        <include domain="database" path="RKStorage.db" />
+        <include domain="database" path="AsyncStorage" />
+        <include domain="database" path="AsyncStorage.db" />
         <include domain="sharedpref" path="aura_player_prefs.xml" />
     </device-transfer>
 </data-extraction-rules>`;
@@ -267,7 +277,12 @@ class AuraAudioSessionPackage : ReactPackage {
     <!-- Allowlist: Only include the specific durable databases and preferences -->
     <!-- When <include> elements are present, Android excludes all other files by default -->
     <include domain="database" path="aura_music.db" />
+    <include domain="database" path="aura_music.db-wal" />
+    <include domain="database" path="aura_music.db-shm" />
     <include domain="database" path="RKStorage" />
+    <include domain="database" path="RKStorage.db" />
+    <include domain="database" path="AsyncStorage" />
+    <include domain="database" path="AsyncStorage.db" />
     <include domain="sharedpref" path="aura_player_prefs.xml" />
 </full-backup-content>`;
 

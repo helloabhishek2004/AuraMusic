@@ -18,7 +18,8 @@ import {
   Animated,
   InteractionManager,
   Modal,
-  RefreshControl
+  RefreshControl,
+  StatusBar,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -46,6 +47,7 @@ import { useMusic, useNowPlayingTrack, useMusicActions } from '@/src/context/Mus
 import { usePlayerStore } from '@/src/features/player/store/player.store';
 import { useAnalyticsStore, getContinueListeningCandidates, getRecentlyPlayedCandidates } from '@/src/features/analytics/store/analytics.store';
 import { useRecommendationsStore } from '@/src/features/recommendations/store/recommendations.store';
+import { useTasteProfileStore } from '@/src/features/taste-profile/store/taste-profile.store';
 import { useLibraryHealthStore } from '@/src/features/library-health/store/library-health.store';
 import { useDownloadStore } from '@/src/features/download/store/download.store';
 import { DownloadManager } from '@/src/features/download/services/download.manager';
@@ -53,6 +55,7 @@ import { useLikesStore } from '@/src/features/likes/store/likes.store';
 import { useMusicNavigation } from '@/src/navigation/music-navigation';
 import { usePlaybackInsets } from '@/src/hooks/use-playback-insets';
 import { useScrollToTopOnTabPress } from '@/src/hooks/use-scroll-to-top';
+import { LiquidAtmosphereBackground } from '@/src/components/ui/LiquidAtmosphereBackground';
 import { LiquidGlass } from '@/src/components/ui/liquid-glass';
 import { PressScale } from '@/src/components/ui/press-scale';
 import { DownloadButton } from '@/src/components/ui/download-button';
@@ -1312,14 +1315,20 @@ export default function HomeScreen() {
   const { bottomPadding } = usePlaybackInsets();
   const { router, goAlbum, goPlaylist, goArtist } = useMusicNavigation('home');
   const [longPressTrack, setLongPressTrack] = useState<any>(null);
+  const tasteProfileName = useTasteProfileStore(s => s.name);
+  const profileFavoriteArtists = useTasteProfileStore(s => s.favoriteArtists);
+  const onboardingCompleted = useTasteProfileStore(s => s.onboardingCompleted);
 
   const greetingData = useMemo(() => {
     const hour = new Date().getHours();
-    if (hour >= 5 && hour < 12) return { title: 'Good morning', sub: 'Rise and shine for some morning beats.' };
-    if (hour >= 12 && hour < 17) return { title: 'Good afternoon', sub: 'Keep the energy up with some mid-day vibes.' };
-    if (hour >= 17 && hour < 21) return { title: 'Good evening', sub: 'Ready for some evening vibes?' };
-    return { title: 'Good night', sub: 'Wind down with some midnight melodies.' };
-  }, []);
+    const hasCustomName = tasteProfileName && tasteProfileName.trim().length > 0 && tasteProfileName.trim() !== 'Music Lover';
+    const nameSuffix = hasCustomName ? `, ${tasteProfileName.trim()}` : '';
+
+    if (hour >= 5 && hour < 12) return { title: `Good morning${nameSuffix}`, sub: 'Rise and shine for some morning beats.' };
+    if (hour >= 12 && hour < 17) return { title: `Good afternoon${nameSuffix}`, sub: 'Keep the energy up with some mid-day vibes.' };
+    if (hour >= 17 && hour < 21) return { title: `Good evening${nameSuffix}`, sub: 'Ready for some evening vibes?' };
+    return { title: `Good night${nameSuffix}`, sub: 'Wind down with some midnight melodies.' };
+  }, [tasteProfileName]);
 
   const { setQueue } = useMusicActions();
   const setActiveContext = usePlayerStore(s => s.setActiveContext);
@@ -1381,6 +1390,12 @@ export default function HomeScreen() {
 
   useEffect(() => {
     console.info('[HomeScreen] Mounted and interactive');
+    const recs = useRecommendationsStore.getState();
+    if (!recs.trendingSeeds || recs.trendingSeeds.length === 0) {
+      if (recs.refreshDiscover) {
+        recs.refreshDiscover(false).catch(() => undefined);
+      }
+    }
   }, []);
 
   const handlePlayTrack = useCallback((track: any) => {
@@ -1469,8 +1484,8 @@ export default function HomeScreen() {
       sections.push({ id: 'top_tracks', type: 'top_tracks', data: topTracks });
     }
 
-    // 6. Favorite Artists (Derived from real play counts & affinities)
-    const effectiveFavoriteArtists = (favoriteArtists.length > 0 ? favoriteArtists : topArtists).filter(Boolean);
+    // 6. Favorite Artists (Derived from real play counts & affinities or onboarding profile)
+    const effectiveFavoriteArtists = (favoriteArtists.length > 0 ? favoriteArtists : (profileFavoriteArtists.length > 0 ? profileFavoriteArtists : topArtists)).filter(Boolean);
     if (effectiveFavoriteArtists.length > 0) {
       sections.push({ id: 'favorite_artists', type: 'favorite_artists', data: effectiveFavoriteArtists });
     }
@@ -1486,7 +1501,7 @@ export default function HomeScreen() {
     sections.push({ id: 'cleanup', type: 'cleanup' });
 
     return sections;
-  }, [isAnalyticsHydrated, isRecommendationsHydrated, historyCount, featuredHeroMix, madeForYou, dailyMixes, topTracks, continueListening, becauseYouLike, favoriteArtists, favoriteAlbums, recentlyPlayed, trendingSeeds, topArtists, topAlbums]);
+  }, [isAnalyticsHydrated, isRecommendationsHydrated, historyCount, featuredHeroMix, madeForYou, dailyMixes, topTracks, continueListening, becauseYouLike, favoriteArtists, favoriteAlbums, recentlyPlayed, trendingSeeds, topArtists, topAlbums, profileFavoriteArtists]);
 
   const renderSectionItem = useCallback(({ item }: any) => {
     switch (item.type) {
@@ -1663,8 +1678,24 @@ export default function HomeScreen() {
     }
   }, [greetingData, handlePlayTrack, goPlaylist, goArtist, goAlbum, handleRefreshDiscoverOnly, isRotatingDiscover]);
 
+  useEffect(() => {
+    if (!onboardingCompleted) {
+      router.replace('/onboarding');
+    }
+  }, [onboardingCompleted, router]);
+
+  if (!onboardingCompleted) {
+    return null;
+  }
+
   return (
     <View style={s.container}>
+      <StatusBar
+        barStyle="light-content"
+        translucent
+        backgroundColor="transparent"
+      />
+      <LiquidAtmosphereBackground targetRoute={['/', '/(tabs)', '/(tabs)/']} />
       {sectionsData.length > 0 ? (
         <ScrollView
           ref={scrollRef}

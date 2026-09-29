@@ -39,6 +39,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
+import { LiquidAtmosphereBackground } from "@/src/components/ui/LiquidAtmosphereBackground";
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
 import { openAlbum, openArtistByName, openNowPlaying } from "@/src/navigation/music-navigation";
 import * as Haptics from "expo-haptics";
@@ -185,86 +186,8 @@ function useEntrance(delay = 0) {
   return animatedStyle;
 }
 
-// ── Ambient background orbs ────────────────────────────────────────────────────
-const AmbientBG = React.memo(() => {
-  const orb1 = useRef(new Animated.Value(0)).current;
-  const orb2 = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const pulse = (val: Animated.Value, dur: number, delay: number) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(val, {
-            toValue: 1,
-            duration: dur,
-            delay,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-          Animated.timing(val, {
-            toValue: 0,
-            duration: dur,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-        ]),
-      ).start();
-    pulse(orb1, 5000, 0);
-    pulse(orb2, 7000, 1500);
-  }, []);
-  const scale1 = orb1.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 1.15],
-  });
-  const scale2 = orb2.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 1.1],
-  });
-  const op1 = orb1.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.07, 0.13],
-  });
-  const op2 = orb2.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.05, 0.1],
-  });
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]} />
-      <LinearGradient
-        colors={["rgba(191,90,242,0.04)", "transparent"]}
-        style={StyleSheet.absoluteFill}
-      />
-      {/* Orb top-right */}
-      <Animated.View
-        style={{
-          position: "absolute",
-          top: -80,
-          right: -60,
-          width: 320,
-          height: 320,
-          borderRadius: 160,
-          backgroundColor: C.primary,
-          opacity: op1,
-          transform: [{ scale: scale1 }],
-        }}
-      />
-      {/* Orb bottom-left */}
-      <Animated.View
-        style={{
-          position: "absolute",
-          bottom: 120,
-          left: -80,
-          width: 260,
-          height: 260,
-          borderRadius: 130,
-          backgroundColor: C.accent,
-          opacity: op2,
-          transform: [{ scale: scale2 }],
-        }}
-      />
-    </View>
-  );
-});
+// ── Ambient background ────────────────────────────────────────────────────────
+const AmbientBG = React.memo(() => <LiquidAtmosphereBackground targetRoute="/downloads" />);
 
 // ── Glass surface ──────────────────────────────────────────────────────────────
 const Glass = ({

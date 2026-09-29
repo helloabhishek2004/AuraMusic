@@ -13,5 +13,11 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "website",
+    "website_vite_backup",
+    "website_nextjs_backup"
   ]
 }

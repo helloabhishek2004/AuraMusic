@@ -537,7 +537,6 @@ const ListHeader = React.memo(
     sharePress,
     glowPulse,
     glowScale,
-    showActionSheet,
     onAddSongsPress,
     isLikedPlaylist,
   }: any) => {
@@ -852,7 +851,7 @@ const TrackRowItem = React.memo(
     isActive,
     handlePlayTrack,
     index,
-    handleTrackOptions,
+    handleDeleteTrack,
     playlistId,
   }: any) => {
     const isTrackActive = usePlayerStore((s) => 
@@ -919,8 +918,16 @@ const TrackRowItem = React.memo(
           <Ionicons name={isLiked ? "heart" : "heart-outline"} size={18} color={isLiked ? COLORS.primary : "rgba(255,255,255,0.25)"} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.trackOptionsBtn} activeOpacity={0.7} onPress={() => handleTrackOptions(item)}>
-          <Ionicons name="ellipsis-horizontal" size={18} color="rgba(255,255,255,0.4)" />
+        <TouchableOpacity
+          style={styles.trackDeleteBtn}
+          activeOpacity={0.6}
+          hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
+          onPress={(e) => {
+            e.stopPropagation();
+            handleDeleteTrack(item);
+          }}
+        >
+          <Ionicons name="trash-outline" size={18} color="rgba(255,100,100,0.65)" />
         </TouchableOpacity>
       </TouchableOpacity>
     );
@@ -1130,6 +1137,30 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
 
   const [seedTracks, setSeedTracks] = useState<PlayerTrack[]>([]);
   const [isSeedLoading, setIsSeedLoading] = useState(false);
+  const [onlinePlaylist, setOnlinePlaylist] = useState<any | null>(null);
+  const [isOnlineLoading, setIsOnlineLoading] = useState(false);
+
+  useEffect(() => {
+    if (isLikedPlaylist || storePlaylist || seed || !playlistId) return;
+    let active = true;
+    setIsOnlineLoading(true);
+    (async () => {
+      try {
+        const { musicService } = await import("@/src/services/api/music");
+        const details = await musicService.getPlaylistDetails(playlistId);
+        if (active && details) {
+          setOnlinePlaylist(details);
+        }
+      } catch (e) {
+        console.warn("[PlaylistView] Error fetching online playlist:", e);
+      } finally {
+        if (active) setIsOnlineLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [isLikedPlaylist, storePlaylist, seed, playlistId]);
 
   useEffect(() => {
     if (!seed) return;
@@ -1191,8 +1222,20 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
         seedArtists: seed.seedArtists || [],
       };
     }
+    if (onlinePlaylist) {
+      return {
+        id: playlistId,
+        name: onlinePlaylist.title || "Playlist",
+        description: onlinePlaylist.artist || onlinePlaylist.year || "Curated playlist",
+        trackIds: (onlinePlaylist.tracks || []).map((t: any) => t.id),
+        gradientColors: ['#9B38DA', '#46f5e0'] as [string, string],
+        mood: "PLAYLIST",
+        coverArt: onlinePlaylist.thumbnail || onlinePlaylist.art || (onlinePlaylist.tracks?.[0]?.art),
+        isOnline: true,
+      };
+    }
     return storePlaylist;
-  }, [isLikedPlaylist, isSeedPlaylist, storePlaylist, seed, seedTracks, playlistId]);
+  }, [isLikedPlaylist, isSeedPlaylist, storePlaylist, seed, seedTracks, onlinePlaylist, playlistId]);
 
   const downloadedTracks = useDownloadStore((s) => s.downloadedTracks);
   const activeTasks = useDownloadStore((s) => s.activeTasks);
@@ -1207,15 +1250,26 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
   const [isResolving, setIsResolving] = useState(true);
 
   useEffect(() => {
-    if (!playlist) { setResolvedTracks([]); setIsResolving(false); return; }
+    if (!playlist) {
+      if (!isOnlineLoading && !isSeedLoading) {
+        setResolvedTracks([]);
+        setIsResolving(false);
+      }
+      return;
+    }
     const task = InteractionManager.runAfterInteractions(() => {
       if (isLikedPlaylist) { setResolvedTracks(getLikedTracks()); setIsResolving(false); return; }
-      if (isSeedPlaylist) { setResolvedTracks(seedTracks); setIsResolving(false); return; }
-      const resolved = playlist.trackIds.map((id: string) => downloadedTracks[id] || (playlist as any).trackSnapshots?.[id] || null).filter((t: any) => !!t) as any[];
+      if (isSeedPlaylist && seed) { setResolvedTracks(seedTracks); setIsResolving(false); return; }
+      if (onlinePlaylist && onlinePlaylist.tracks && onlinePlaylist.tracks.length > 0) {
+        setResolvedTracks(onlinePlaylist.tracks);
+        setIsResolving(false);
+        return;
+      }
+      const resolved = (playlist.trackIds || []).map((id: string) => downloadedTracks[id] || (playlist as any).trackSnapshots?.[id] || null).filter((t: any) => !!t) as any[];
       setResolvedTracks(resolved); setIsResolving(false);
     });
     return () => task.cancel();
-  }, [playlist?.id, playlist?.trackIds, seedTracks.length, downloadedTracks, isLikedPlaylist, likedTracks]);
+  }, [playlist?.id, playlist?.trackIds, seedTracks.length, onlinePlaylist, isOnlineLoading, isSeedLoading, downloadedTracks, isLikedPlaylist, likedTracks]);
 
   useEffect(() => {
     const isPlaylistActive = activeContextType === "playlist" && activeContextId === playlistId;
@@ -1320,20 +1374,84 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
     else { await setQueue(resolvedTracks, index, { sourceId: playlistId, sourceType: "playlist", generatedAt: Date.now() }); store.setActiveContext({ type: "playlist", id: playlistId, name: playlist?.name || "Playlist" } as any); }
   }, [isResolving, isPlaying, pause, play, setQueue, resolvedTracks, playlistId, playlist?.name, activeContextId]);
 
-  const [actionSheetVisible, setActionSheetVisible] = useState(false);
-  const [actionSheetConfig, setActionSheetConfig] = useState<any>(null);
-  const showActionSheet = useCallback((title: string, actions: any[], subtitle?: string) => { setActionSheetConfig({ title, actions, subtitle }); setActionSheetVisible(true); }, []);
+  const handleDeleteTrack = useCallback((track: PlayerTrack) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const trackId = track.id;
 
-  const handleTrackOptions = useCallback((track: PlayerTrack) => {
-    showActionSheet(track.title, [{ label: "Remove", icon: "trash", destructive: true, onPress: () => removeTrack(playlistId, track.id) }], `by ${track.artist}`);
-  }, [playlistId, removeTrack, showActionSheet]);
+    if (isLikedPlaylist) {
+      useLikesStore.getState().toggleLike(track);
+      setResolvedTracks((prev) => prev.filter((t) => t.id !== trackId));
+      return;
+    }
+
+    if (isSeedPlaylist) {
+      // Remove from local playlist view
+      setSeedTracks((prev) => prev.filter((t) => t.id !== trackId));
+      setResolvedTracks((prev) => prev.filter((t) => t.id !== trackId));
+
+      // Persist track removal in recommendation store
+      const recState = useRecommendationsStore.getState();
+      const removeTrackFromSeeds = (list: any[]) =>
+        (list || []).map((seedItem) => {
+          if (seedItem.id === playlistId) {
+            const updatedTracks = (seedItem.tracks || []).filter((t: any) => t.id !== trackId);
+            const updatedTrackIds = (seedItem.trackIds || []).filter((id: string) => id !== trackId);
+            return {
+              ...seedItem,
+              tracks: updatedTracks,
+              trackIds: updatedTrackIds,
+            };
+          }
+          return seedItem;
+        });
+
+      useRecommendationsStore.setState({
+        dailyMixes: removeTrackFromSeeds(recState.dailyMixes),
+        madeForYou: removeTrackFromSeeds(recState.madeForYou),
+        becauseYouLike: removeTrackFromSeeds(recState.becauseYouLike),
+        rediscover: removeTrackFromSeeds(recState.rediscover),
+        recentlyLoved: removeTrackFromSeeds(recState.recentlyLoved),
+        trendingSeeds: removeTrackFromSeeds(recState.trendingSeeds),
+      });
+
+      // Synchronize player queue if this playlist is currently active
+      const playerStore = usePlayerStore.getState();
+      if (playerStore.activeContext?.type === 'playlist' && playerStore.activeContext?.id === playlistId) {
+        const queueIdx = playerStore.queue.findIndex((t: PlayerTrack) => t.id === trackId);
+        if (queueIdx !== -1) {
+          playerStore.removeFromQueue(queueIdx);
+        }
+      }
+      return;
+    }
+
+    // Regular user-created playlist
+    removeTrack(playlistId, trackId);
+    setResolvedTracks((prev) => prev.filter((t: PlayerTrack) => t.id !== trackId));
+    const playerStore = usePlayerStore.getState();
+    if (playerStore.activeContext?.type === 'playlist' && playerStore.activeContext?.id === playlistId) {
+      const queueIdx = playerStore.queue.findIndex((t: PlayerTrack) => t.id === trackId);
+      if (queueIdx !== -1) {
+        playerStore.removeFromQueue(queueIdx);
+      }
+    }
+  }, [isLikedPlaylist, isSeedPlaylist, playlistId, removeTrack]);
 
   const gradientColors = useMemo(() => playlist?.gradientColors || [COLORS.primary, COLORS.primaryDeep] as [string, string], [playlist?.gradientColors]);
 
-  const renderFlashItem = useCallback(({ item, index }: any) => <TrackRowItem item={item} handlePlayTrack={handlePlayTrack} index={index} handleTrackOptions={handleTrackOptions} playlistId={playlistId} />, [handlePlayTrack, handleTrackOptions, playlistId]);
-  const renderDraggableItem = useCallback(({ item, drag, isActive }: any) => { const idx = resolvedTracks.findIndex(t => t.id === item.id); return <TrackRowItem item={item} drag={drag} isActive={isActive} handlePlayTrack={handlePlayTrack} index={idx} handleTrackOptions={handleTrackOptions} playlistId={playlistId} />; }, [resolvedTracks, handlePlayTrack, handleTrackOptions, playlistId]);
+  const renderFlashItem = useCallback(({ item, index }: any) => <TrackRowItem item={item} handlePlayTrack={handlePlayTrack} index={index} handleDeleteTrack={handleDeleteTrack} playlistId={playlistId} />, [handlePlayTrack, handleDeleteTrack, playlistId]);
+  const renderDraggableItem = useCallback(({ item, drag, isActive }: any) => { const idx = resolvedTracks.findIndex(t => t.id === item.id); return <TrackRowItem item={item} drag={drag} isActive={isActive} handlePlayTrack={handlePlayTrack} index={idx} handleDeleteTrack={handleDeleteTrack} playlistId={playlistId} />; }, [resolvedTracks, handlePlayTrack, handleDeleteTrack, playlistId]);
 
-  if (!playlist && !isResolving) {
+  if (isOnlineLoading || (isSeedPlaylist && isSeedLoading && resolvedTracks.length === 0)) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={{ color: '#fff', fontSize: 16, marginTop: 16, fontWeight: '600', fontFamily: 'Manrope-Bold' }}>Loading playlist...</Text>
+      </View>
+    );
+  }
+
+  if (!playlist && !isResolving && !isOnlineLoading) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <Ionicons name="albums-outline" size={48} color="#ffffff80" />
@@ -1370,7 +1488,7 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
 
       {isLikedPlaylist ? (
         <AnimatedFlashList data={resolvedTracks} keyExtractor={(t: any, i: number) => `${t.id}-${i}`} renderItem={renderFlashItem} estimatedItemSize={72} extraData={currentTrack?.id} onScroll={scrollHandler} {...ScrollPhysics.STANDARD} contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: bottomPadding, paddingHorizontal: 20 }}
-          ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={handleDownload} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} showActionSheet={showActionSheet} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
+          ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={handleDownload} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
           ListEmptyComponent={
             isSeedLoading ? (
               <View style={{ paddingVertical: 48, alignItems: 'center', justifyContent: 'center' }}>
@@ -1384,7 +1502,7 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
         />
       ) : (
         <AnimatedDraggableFlatList data={resolvedTracks} onDragEnd={({ from, to }) => { reorderTracks(playlistId, from, to); if (activeContextId === playlistId) usePlayerStore.getState().reorderQueue(from, to); }} keyExtractor={(t, i) => `${t.id}-${i}`} renderItem={renderDraggableItem} extraData={currentTrack?.id} onScroll={scrollHandler} {...ScrollPhysics.STANDARD} contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: bottomPadding, paddingHorizontal: 20 }}
-          ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={handleDownload} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} showActionSheet={showActionSheet} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
+          ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={handleDownload} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
           ListEmptyComponent={
             isSeedLoading ? (
               <View style={{ paddingVertical: 48, alignItems: 'center', justifyContent: 'center' }}>
@@ -1405,26 +1523,6 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
           <Ionicons name="chevron-back" size={22} color="#FFF" />
         </TouchableOpacity>
       </AnimatedReanimated.View>
-
-      <Modal visible={actionSheetVisible} transparent animationType="fade" onRequestClose={() => setActionSheetVisible(false)} statusBarTranslucent>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setActionSheetVisible(false)}><BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} /></TouchableOpacity>
-        <View style={styles.modalCardWrap} pointerEvents="box-none">
-          <LiquidGlassSurface style={styles.actionSheetCard} borderRadius={30} blurIntensity={70} showLeftGlow showTopSpecular showLeftSpecular>
-            {actionSheetConfig && (
-              <>
-                <Text style={styles.modalTitle}>{actionSheetConfig.title}</Text>
-                {actionSheetConfig.actions.map((act: any) => (
-                  <TouchableOpacity key={act.label} style={styles.modalActionRow} onPress={() => { act.onPress(); setActionSheetVisible(false); }}>
-                    <Ionicons name={act.icon} size={20} color={act.destructive ? "#ff453a" : "#FFF"} />
-                    <Text style={[styles.modalActionLabel, act.destructive && { color: "#ff453a" }]}>{act.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </>
-            )}
-            <TouchableOpacity onPress={() => setActionSheetVisible(false)} style={styles.modalDoneBtn}><LinearGradient colors={[COLORS.primary, COLORS.primaryDeep]} style={StyleSheet.absoluteFill} /><Text style={styles.modalDoneText}>DONE</Text></TouchableOpacity>
-          </LiquidGlassSurface>
-        </View>
-      </Modal>
 
       <AddSongsModal isVisible={isAddSongsVisible} onClose={() => setIsAddSongsVisible(false)} playlistId={playlistId} />
     </View>
@@ -1485,32 +1583,10 @@ const styles = StyleSheet.create({
   trackArtist: { color: "rgba(170,170,185,0.65)", fontSize: 13, marginTop: 2 },
   trackMeta: { flexDirection: "row", alignItems: "center", gap: 10 },
   trackDuration: { color: "rgba(170,170,185,0.65)", fontSize: 12, fontWeight: "600", width: 38, textAlign: "right" },
-  trackOptionsBtn: { paddingHorizontal: 8, paddingVertical: 12, marginLeft: 2 },
+  trackDeleteBtn: { paddingHorizontal: 8, paddingVertical: 12, marginLeft: 2 },
   trackLikeBtn: { paddingHorizontal: 8, paddingVertical: 12, marginLeft: 2 },
   addSongsBtn: { borderRadius: 20, overflow: "hidden" },
   emptyContainer: { alignItems: "center", justifyContent: "center", paddingVertical: 64, paddingHorizontal: 28 },
   emptyTitle: { fontSize: 22, fontWeight: "800", color: "#FFF", marginTop: 4, marginBottom: 8 },
   emptySubtitle: { fontSize: 14, color: "rgba(170,170,185,0.65)", textAlign: "center", lineHeight: 20, marginBottom: 28 },
-  modalOverlay: { flex: 1 },
-  modalCardWrap: { flex: 1, justifyContent: "center", alignItems: "center", paddingHorizontal: 20 },
-  renameCard: { width: width * 0.88, padding: 28 },
-  actionSheetCard: { width: width * 0.9, maxHeight: height * 0.8, paddingTop: 12, paddingBottom: 24, paddingHorizontal: 24 },
-  modalHandleWrap: { alignItems: "center", marginBottom: 20 },
-  modalHandle: { width: 36, height: 5, borderRadius: 2.5, backgroundColor: "rgba(255,255,255,0.22)" },
-  modalHeaderInfo: { alignItems: "center", marginBottom: 24 },
-  modalTitle: { fontSize: 22, fontWeight: "900", color: "#FFF", textAlign: "center", marginBottom: 6 },
-  modalSubtitle: { fontSize: 15, fontWeight: "600", color: "rgba(255,255,255,0.45)", textAlign: "center" },
-  modalDivider: { height: 1, backgroundColor: GLASS.borderSubtle, marginBottom: 8 },
-  modalActionsList: { maxHeight: height * 0.4 },
-  modalActionRow: { flexDirection: "row", alignItems: "center", paddingVertical: 12, gap: 14 },
-  modalActionLabel: { fontSize: 16, fontWeight: "700", color: "rgba(255,255,255,0.9)", flex: 1 },
-  inputWrap: { height: 54, borderRadius: 16, overflow: "hidden", marginBottom: 24, paddingHorizontal: 16, justifyContent: "center" },
-  renameInput: { color: "#FFF", fontSize: 16, fontWeight: "600" },
-  modalActions: { flexDirection: "row", gap: 12 },
-  modalBtn: { flex: 1, height: 50, borderRadius: 25, justifyContent: "center", alignItems: "center", overflow: "hidden", backgroundColor: "rgba(255,255,255,0.08)" },
-  modalSaveBtn: { elevation: 8 },
-  modalCancelText: { color: "rgba(255,255,255,0.6)", fontSize: 15, fontWeight: "700" },
-  modalSaveText: { color: "#FFF", fontSize: 15, fontWeight: "800" },
-  modalDoneBtn: { height: 54, borderRadius: 27, justifyContent: "center", alignItems: "center", overflow: "hidden", marginTop: 16 },
-  modalDoneText: { fontSize: 14, fontWeight: "900", color: "#FFF", letterSpacing: 1.5 },
 });

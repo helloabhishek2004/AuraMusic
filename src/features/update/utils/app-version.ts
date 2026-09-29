@@ -11,7 +11,7 @@ export function getInstalledAppVersion(): string {
     Constants.expoConfig?.version ??
     (Constants as any).nativeAppVersion ??
     packageJson.version ??
-    '2.0.0';
+    '3.0.0';
   return v;
 }
 
@@ -19,6 +19,6 @@ export function getAppBuildNumber(): string {
   const build =
     Constants.expoConfig?.android?.versionCode ??
     (Constants as any).nativeBuildVersion ??
-    '3';
+    '4';
   return String(build);
 }

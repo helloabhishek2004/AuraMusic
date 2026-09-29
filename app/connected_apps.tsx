@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePlaybackInsets } from '@/src/hooks/use-playback-insets';
+import { LiquidAtmosphereBackground } from '@/src/components/ui/LiquidAtmosphereBackground';
 import {
   ConnectedPlaylist,
   ConnectedProviderId,
@@ -230,11 +231,8 @@ export default function ConnectedAppsScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-      {/* Atmospheric background */}
-      <LinearGradient
-        colors={['#0F0C1B', '#08080D', '#08080D']}
-        style={StyleSheet.absoluteFillObject}
-      />
+      {/* Signature Liquid Atmospheric Background */}
+      <LiquidAtmosphereBackground targetRoute="/connected_apps" />
 
       {/* Sticky Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>

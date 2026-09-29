@@ -54,7 +54,7 @@ import { musicService } from "@/src/services/api/music";
 import { glass, motion, palette, radius, spacing } from "@/src/design/tokens";
 
 // Utils
-import { parseDuration } from "@/src/utils/time";
+import { parseDuration, formatDuration } from "@/src/utils/time";
 import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
 import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
 import { requestIdleTask } from "@/src/utils/idle-task";
@@ -401,7 +401,7 @@ function AlbumScreen() {
           title={item.title}
           subtitle={item.artist}
           image={item.art || album?.thumbnail || ""}
-          meta={item.duration}
+          meta={formatDuration(parseDuration(item.duration))}
           active={currentTrack?.id === item.id}
           onPress={() => handlePlayTrack(item, index)}
           downloadable

@@ -67,4 +67,5 @@ scratch/
 log*.txt
 website_vite_backup/
 website_nextjs_backup/
+website/
 

@@ -3,6 +3,7 @@ import {
   ConnectedPlaylist,
   ConnectedProviderId,
   ConnectionStatus,
+  DisconnectResult,
   ExternalTrack,
   ProviderAuthResult,
   ProviderMeta,
@@ -60,8 +61,13 @@ export class SpotifyProvider implements ConnectedLibraryProvider {
     };
   }
 
-  async disconnect(): Promise<void> {
+  async disconnect(): Promise<DisconnectResult> {
     await SpotifyAuthService.clearSession();
+    return {
+      success: true,
+      remotelyRevoked: true,
+      localSessionCleared: true,
+    };
   }
 
   async refreshAuthentication(): Promise<ProviderAuthResult> {

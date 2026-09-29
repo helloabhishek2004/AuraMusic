@@ -1,4 +1,5 @@
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import { DisconnectResult } from '../types/provider';
 
 export const YOUTUBE_READONLY_SCOPE = 'https://www.googleapis.com/auth/youtube.readonly';
 
@@ -133,6 +134,19 @@ export class GoogleAuthService {
         };
       }
 
+      const isDeveloperError =
+        err.code === '10' ||
+        err.code === 10 ||
+        (typeof err?.message === 'string' && err.message.includes('DEVELOPER_ERROR'));
+
+      if (isDeveloperError) {
+        return {
+          success: false,
+          error:
+            'Google Sign-In setup required: The Android OAuth Client ID for package "com.anonymous.AuraMusic" with your signing SHA-1 fingerprint must be added to Google Cloud Console (Project 304304144156), and your Google account added as a Test User.',
+        };
+      }
+
       if (__DEV__) {
         console.warn('[GoogleAuth] Native Sign-in error:', err?.message || err);
       }
@@ -180,7 +194,7 @@ export class GoogleAuthService {
     try {
       const tokens = await GoogleSignin.getTokens();
       return tokens?.accessToken || null;
-    } catch (err) {
+    } catch {
       // If no active session, attempt silent sign in first
       try {
         const silent = await GoogleSignin.signInSilently();
@@ -188,7 +202,7 @@ export class GoogleAuthService {
           const freshTokens = await GoogleSignin.getTokens();
           return freshTokens?.accessToken || null;
         }
-      } catch (_silentErr) {
+      } catch {
         // Expected when no active session exists
       }
       return null;
@@ -212,7 +226,56 @@ export class GoogleAuthService {
   }
 
   /**
-   * Signs out from Google Play Services without revoking user's Google Cloud consent grant.
+   * Programmatically revokes OAuth 2.0 access granted to the application
+   * via native Google Play Services, then clears the local session.
+   * Required by YouTube API Services Developer Policies (Section III.A.2).
+   */
+  static async revokeAccess(): Promise<DisconnectResult> {
+    this.configure();
+
+    let remotelyRevoked = false;
+    let localSessionCleared = false;
+    let revokeError: string | undefined;
+
+    try {
+      if (__DEV__) {
+        console.log('[GoogleAuth] Requesting GoogleSignin.revokeAccess()...');
+      }
+      await GoogleSignin.revokeAccess();
+      remotelyRevoked = true;
+      if (__DEV__) {
+        console.log('[GoogleAuth] Successfully revoked Google OAuth grant via Play Services');
+      }
+    } catch (err: any) {
+      revokeError = err?.message || 'Remote revocation could not be completed (device may be offline).';
+      if (__DEV__) {
+        console.warn('[GoogleAuth] GoogleSignin.revokeAccess encountered error:', revokeError);
+      }
+    }
+
+    // Always terminate the local Play Services session (idempotent cleanup)
+    try {
+      await GoogleSignin.signOut();
+      localSessionCleared = true;
+      if (__DEV__) {
+        console.log('[GoogleAuth] Terminated local Google Play Services session');
+      }
+    } catch (signOutErr) {
+      if (__DEV__) {
+        console.warn('[GoogleAuth] GoogleSignin.signOut error during revoke:', signOutErr);
+      }
+    }
+
+    return {
+      success: remotelyRevoked,
+      remotelyRevoked,
+      localSessionCleared,
+      error: revokeError,
+    };
+  }
+
+  /**
+   * Signs out from Google Play Services (local session cleanup only).
    */
   static async signOut(): Promise<void> {
     this.configure();

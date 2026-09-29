@@ -283,6 +283,7 @@ export interface AuraRestoreModuleInterface {
     hasDurableData: boolean;
   }>;
   markInstallInitialized(): Promise<boolean>;
+  clearInstallMarker(): Promise<boolean>;
   checkpointWal(): Promise<{
     success: boolean;
     busy?: number;
@@ -301,6 +302,15 @@ export interface AuraRestoreModuleInterface {
   isGoogleSyncEnabled(): Promise<boolean>;
   triggerCloudSync(): Promise<{
     success: boolean;
+    timestamp: number;
+  }>;
+  showBackupProgressNotification(title: String, text: String): Promise<boolean>;
+  showBackupSuccessNotification(title: String, text: String): Promise<boolean>;
+  showBackupFailureNotification(title: String, text: String): Promise<boolean>;
+  triggerManualRestore(): Promise<{
+    success: boolean;
+    dbBytes?: number;
+    rkStorageBytes?: number;
     timestamp: number;
   }>;
 }

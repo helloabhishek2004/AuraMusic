@@ -1,7 +1,6 @@
 import { AuraRestore, AuraDownload } from './native-core';
 import { ensureSettingsHydrated } from '../features/settings/store/settings.store';
 import { SettingsSyncService } from '../features/settings/services/settings-sync.service';
-import { PermissionPromptService } from './permission-prompt.service';
 import { useDownloadStore } from '../features/download/store/download.store';
 import { useAnalyticsStore } from '../features/analytics/store/analytics.store';
 import { useRecommendationsStore } from '../features/recommendations/store/recommendations.store';
@@ -88,13 +87,8 @@ export class RestoreValidatorService {
       console.warn('[AuraRestore] Settings hydration error:', e);
     }
 
-    // 3. Permission Reconciliation: Query OS directly
-    try {
-      await PermissionPromptService.requestInitialPermissionsIfNeeded();
-      console.info('[AuraRestore] Permissions verified against Android OS.');
-    } catch (e) {
-      console.warn('[AuraRestore] Permission check error:', e);
-    }
+    // 3. Permission Reconciliation: Permissions are requested strictly contextually when relevant features are accessed in Home
+    // Zero runtime permissions are prompted on startup or during onboarding
 
     // 4. Download State Reconciliation (Physical vs Logical)
     // ONLY executed on actual cloud restore to recover from missing physical media
@@ -157,16 +151,128 @@ export class RestoreValidatorService {
       }
     }
 
-    // 8. Mark installation initialized in context.noBackupFilesDir
-    if (AuraRestore && (isFresh || isRestored)) {
+    console.info('[AuraRestore] Startup validation & reconciliation complete.');
+  }
+
+  /**
+   * Manually trigger full restoration and validation pipeline from Settings.
+   * Can be invoked by the user at any time to re-synchronize local state with backup data.
+   */
+  static async triggerManualRestore(): Promise<{
+    success: boolean;
+    repairedCount: number;
+    dbBytes?: number;
+    message: string;
+  }> {
+    console.info('[AuraRestore] Manual restore initiated by user.');
+    let repairedCount = 0;
+    let dbBytes = 0;
+
+    // 1. Native restore sync & notification
+    if (AuraRestore && typeof AuraRestore.triggerManualRestore === 'function') {
       try {
-        await AuraRestore.markInstallInitialized();
-        console.info('[AuraRestore] Installation marker confirmed.');
+        const nativeRes = await AuraRestore.triggerManualRestore();
+        dbBytes = nativeRes.dbBytes || 0;
       } catch (e) {
-        console.warn('[AuraRestore] Failed to mark installation initialized:', e);
+        console.warn('[AuraRestore] Native manual restore notice:', e);
       }
     }
 
-    console.info('[AuraRestore] Startup validation & reconciliation complete.');
+    // 2. Hydrate & Sync Settings
+    try {
+      await ensureSettingsHydrated();
+      await SettingsSyncService.initialize();
+      console.info('[AuraRestore] Settings re-hydrated and synced to native engines.');
+    } catch (e) {
+      console.warn('[AuraRestore] Settings hydration error during manual restore:', e);
+    }
+
+    // 3. Re-initialize playlists from Room DB
+    try {
+      const { usePlaylistStore } = await import('../features/playlist/store/playlist.store');
+      await usePlaylistStore.getState().initialize();
+      console.info('[AuraRestore] Playlists re-synchronized from Room database.');
+    } catch (e) {
+      console.warn('[AuraRestore] Playlist store re-sync error:', e);
+    }
+
+    // 4. Download State Reconciliation (Physical vs Logical)
+    if (AuraDownload) {
+      try {
+        const reconcileResult = await AuraDownload.reconcileDownloads();
+        repairedCount = reconcileResult.repairedCount;
+        if (repairedCount > 0) {
+          console.info(`[AuraRestore] Manual restore repaired ${repairedCount} missing download tracks.`);
+          const currentTracks = { ...useDownloadStore.getState().downloadedTracks };
+          for (const trackId of reconcileResult.missingTrackIds) {
+            delete currentTracks[trackId];
+          }
+          useDownloadStore.setState({ downloadedTracks: currentTracks });
+        }
+      } catch (e) {
+        console.warn('[AuraRestore] Download reconciliation error during manual restore:', e);
+      }
+    }
+
+    // 5. Rebuild Analytics affinities and regenerate fresh recommendations
+    try {
+      await useAnalyticsStore.getState().initialize();
+      console.info('[AuraRestore] Analytics affinities refreshed.');
+    } catch (e) {
+      console.warn('[AuraRestore] Analytics refresh error during manual restore:', e);
+    }
+
+    try {
+      const recStore = useRecommendationsStore.getState();
+      if (typeof recStore.generateRecommendations === 'function') {
+        await recStore.generateRecommendations();
+        console.info('[AuraRestore] Fresh recommendations generated from restored signals.');
+      }
+    } catch (e) {
+      console.warn('[AuraRestore] Recommendations generation error during manual restore:', e);
+    }
+
+    // 5b. Re-synchronize Music Taste Profile & Preference Priors
+    try {
+      const { ensureTasteProfileHydrated, useTasteProfileStore } = await import('../features/taste-profile/store/taste-profile.store');
+      await ensureTasteProfileHydrated();
+      const tasteStore = useTasteProfileStore.getState();
+      if (tasteStore.favoriteArtists.length > 0 || tasteStore.songLanguages.length > 0) {
+        await tasteStore.markCompletedFromRestore();
+        console.info('[AuraRestore] Taste profile re-synchronized from backup.');
+      }
+    } catch (e) {
+      console.warn('[AuraRestore] Taste profile sync error during manual restore:', e);
+    }
+
+    // 6. Checkpoint SQLite WAL safely to guarantee durable persistence
+    if (AuraRestore) {
+      try {
+        await AuraRestore.checkpointWal();
+      } catch (e) {
+        console.warn('[AuraRestore] Post-restore WAL checkpoint notice:', e);
+      }
+    }
+
+    // 7. Update notice if any downloads were missing
+    if (repairedCount > 0) {
+      this.restoreNotice = {
+        isRestored: true,
+        missingDownloadsCount: repairedCount,
+        message: `Library re-synced. ${repairedCount} offline download${repairedCount > 1 ? 's' : ''} need to be downloaded again.`,
+      };
+      this.notifyListeners();
+    }
+
+    const message = repairedCount > 0
+      ? `Library, playlists, and settings re-synchronized. ${repairedCount} missing download${repairedCount > 1 ? 's were' : ' was'} reconciled.`
+      : 'Your library, playlists, listening history, and preferences are fully synchronized.';
+
+    return {
+      success: true,
+      repairedCount,
+      dbBytes,
+      message,
+    };
   }
 }

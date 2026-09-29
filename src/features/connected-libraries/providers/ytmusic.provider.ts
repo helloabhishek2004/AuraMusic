@@ -3,6 +3,7 @@ import {
   ConnectedPlaylist,
   ConnectedProviderId,
   ConnectionStatus,
+  DisconnectResult,
   ExternalTrack,
   ProviderAuthResult,
   ProviderMeta,
@@ -50,9 +51,9 @@ export class YouTubeMusicProvider implements ConnectedLibraryProvider {
     };
   }
 
-  async disconnect(): Promise<void> {
-    // Disconnects local Google Play Services session without revoking Google Cloud grant
-    await GoogleAuthService.signOut();
+  async disconnect(): Promise<DisconnectResult> {
+    // Revokes Google OAuth authorization on Google servers and terminates local session
+    return await GoogleAuthService.revokeAccess();
   }
 
   async refreshAuthentication(): Promise<ProviderAuthResult> {

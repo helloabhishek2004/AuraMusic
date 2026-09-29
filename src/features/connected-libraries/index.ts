@@ -13,3 +13,4 @@ export * from './services/google-auth.service';
 export * from './services/youtube-api.service';
 export * from './services/track-resolver.service';
 export * from './services/playlist-hydration.service';
+export * from './services/youtube-data-cleanup.service';

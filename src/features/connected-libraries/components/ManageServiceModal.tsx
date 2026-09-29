@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Modal,
   StyleSheet,
@@ -8,6 +8,7 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -63,19 +64,44 @@ export function ManageServiceModal({ providerId, visible, onClose }: ManageServi
     }
   };
 
+  const handleOpenGoogleSecurity = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Linking.openURL('https://myaccount.google.com/permissions').catch((err) => {
+      console.warn('[ManageServiceModal] Could not open Google permissions URL:', err);
+    });
+  };
+
   const handleConfirmDisconnect = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
     Alert.alert(
       `Disconnect ${meta.name}?`,
-      `This will remove imported ${meta.name} playlists from your Aura vault. Your local music, downloads, and playlists remain untouched.`,
+      providerId === 'ytmusic'
+        ? `This will revoke AuraMusic's access to your Google account and remove imported ${meta.name} playlists from your device. Your local music, downloads, and playlists remain untouched.`
+        : `This will remove imported ${meta.name} playlists from your Aura vault. Your local music, downloads, and playlists remain untouched.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Disconnect',
           style: 'destructive',
           onPress: async () => {
-            await disconnectService(providerId);
+            const result = await disconnectService(providerId);
             onClose();
+
+            if (providerId === 'ytmusic' && !result.remotelyRevoked) {
+              // Remote revocation could not be confirmed (device offline or network error).
+              // Local session and data were wiped, but Google server could not confirm revocation.
+              Alert.alert(
+                'Disconnected Locally',
+                "AuraMusic has cleared all local YouTube playlists and account data from this device. However, remote Google access revocation could not be confirmed (device may be offline or network unavailable).\n\nTo verify or revoke AuraMusic's access directly, visit Google Account Security Settings.",
+                [
+                  { text: 'OK' },
+                  {
+                    text: 'Open Google Settings',
+                    onPress: handleOpenGoogleSecurity,
+                  },
+                ]
+              );
+            }
           },
         },
       ]
@@ -171,6 +197,26 @@ export function ManageServiceModal({ providerId, visible, onClose }: ManageServi
                 <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.35)" />
               )}
             </TouchableOpacity>
+
+            {/* Google Security Settings Link (YouTube API Services Policy Requirement) */}
+            {providerId === 'ytmusic' && (
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={handleOpenGoogleSecurity}
+                style={styles.actionCard}
+              >
+                <View style={styles.actionLeft}>
+                  <Ionicons name="shield-checkmark-outline" size={20} color="#FFB800" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.actionTitle}>Google Account Permissions</Text>
+                    <Text style={styles.actionDesc}>
+                      Manage or revoke access in Google Security Settings
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons name="open-outline" size={16} color="rgba(255,255,255,0.35)" />
+              </TouchableOpacity>
+            )}
 
             {/* Disconnect Service */}
             <TouchableOpacity

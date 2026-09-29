@@ -1,4 +1,4 @@
-﻿---
+---
 name: Performance Issue
 about: Report a stutter, slow startup, dropped frames, or excessive latency
 title: '[PERF] <Short description of performance bottleneck>'
@@ -10,8 +10,8 @@ assignees: ''
 Describe the performance bottleneck, lag, dropped frames, or high latency you are experiencing.
 
 ## Environment
-- **AuraMusic Version**: [e.g., 0.1.0-beta.1]
-- **Device Model**: [e.g., Google Pixel 7, Samsung Galaxy A54]
+- **AuraMusic Version**: [e.g., 3.0.0]
+- **Device Model**: [e.g., Google Pixel 7, Samsung Galaxy A54, Vivo I2202]
 - **Android Version**: [e.g., Android 14, Android 12]
 - **Refresh Rate**: [e.g., 60Hz, 90Hz, 120Hz]
 

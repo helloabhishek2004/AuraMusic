@@ -11,7 +11,7 @@
 
   <!-- Badges -->
   <p align="center">
-    <a href="#-tech-stack"><img src="https://img.shields.io/badge/Version-v2.0.0-8A2BE2?style=for-the-badge&logo=android&logoColor=white" alt="Version" /></a>
+    <a href="#-tech-stack"><img src="https://img.shields.io/badge/Version-v3.0.0-8A2BE2?style=for-the-badge&logo=android&logoColor=white" alt="Version" /></a>
     <a href="#-tech-stack"><img src="https://img.shields.io/badge/Platform-Android%20First-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Platform" /></a>
     <a href="#-architecture"><img src="https://img.shields.io/badge/Core-Kotlin%20%7C%20Media3-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Native Core" /></a>
     <a href="#-tech-stack"><img src="https://img.shields.io/badge/Framework-Expo%20SDK%2055-000020?style=for-the-badge&logo=expo&logoColor=white" alt="Expo" /></a>
@@ -38,7 +38,7 @@
     <a href="#-ai-engineering-tooling"><b>AI Tools</b></a>
   </p>
 
-  <sub>🚀 <b>v2.0.0 — Official Release</b> | Distributed as source code & standalone signed APK builds.</sub>
+  <sub>🚀 <b>v3.0.0 — Official Release</b> | Distributed as source code & standalone signed APK builds.</sub>
 
 </div>
 
@@ -91,7 +91,7 @@ AuraMusic brings flagship polish directly to your Android device:
 * 💾 **Local-First SQLite Persistence:** Instantaneous state recovery, offline cataloging, and local history tracking via an on-device Room SQLite database.
 
 > [!NOTE]
-> *AuraMusic is an open-source, lightweight personal music player and audio explorer, not a commercial replacement for licensed subscription platforms.*
+> *AuraMusic is a source-available, lightweight personal music player and audio explorer, not a commercial replacement for licensed subscription platforms.*
 
 ---
 
@@ -114,19 +114,50 @@ AuraMusic includes only verified, actively implemented functionality:
 * 🧬 **Deduplication & Canonical Merging:** Deduplicates identical re-uploads while strictly preserving intentional variants (remixes, live tours, acoustic sets).
 * 🌊 **Vibe-Aware Dynamic Queue & Autoplay:** Generates 8–10 track continuation queues via mathematical scoring (`Score = Relational + Affinity + Session - Fatigue`) with strict diversity constraints (max 3 tracks per artist, max 2 per album, 4-position artist separation).
 
+### 🌟 First-Run Onboarding & Dynamic Music Taste
+* 🚀 **The Sonic Nebula Onboarding:** Cinematic 9-screen first-run experience (`app/onboarding.tsx`) featuring a living Grape Dusk atmospheric sky (`GrapeDuskAtmosphere.tsx`, optimized 77 KB WebP with smooth horizontal drift and organic scaling), scalable vector SVG logo (`AuraLogoSvg.tsx`), celestial constellation particles (`ConstellationParticles.tsx`), and Apple-grade micro-interactions.
+* ✍️ **CurvedNameInput & Signature Welcome Stroke:** Fluid curved capsule name input with dynamic dual-gradient focus ring (`#BF5AF2` to `#46F5E0`), clear action, smooth keyboard handling, and a signature animated "hello" vector stroke (`WelcomeStrokeSvg.tsx`).
+* 🎭 **Dynamic Artist Discovery & Avatars:** Live pill-shaped loading indicator (`ArtistDiscoveryLoader.tsx`) with rotating status phrases ("Finding best artists...", "Figuring out who is best for you...") while dynamically querying artist suggestions based on user language/genre selections. Features a 4-tier fallback hierarchy (Remote InnerTube CDN → Memory Cache → Deterministic Gradient with Initials → Icon Placeholder) with an interactive selected artist tray.
+* 🌱 **Decoupled Taste Profile Prior Layer:** Strictly separates explicit onboarding cold-start preferences (`src/features/taste-profile/store/taste-profile.store.ts`) from organic listening history. Seeds Home screen carousels (`trendingSeeds`, `featuredHeroMix`, and `favorite_artists`) immediately upon launch without synthesizing fake play/completion events.
+* 📉 **Mathematical Cold-Start Prior Decay:** Balances onboarding priors against organic listening history using an explicit decay formula:
+  $$\text{decayFactor} = \max\left(0.1, 1.0 - \frac{\text{totalHistoryCount}}{40}\right)$$
+  As organic listening signals accumulate, recommendation weighting seamlessly transitions from initial priors to verified user behavior.
+* 🔄 **Backup-First Entrypoint:** "Look for Backups" button on the welcome screen automatically inspects Google Cloud restore state to recover playlists, favorites, and settings, skipping manual onboarding when valid restore data is present.
+* 🛡️ **Zero-Flash Splash Gate:** Holds `SplashScreen` until fonts, taste profile, and Screen 01 mount and paint, completely eliminating the 1-frame Home screen flash on fresh installations.
+* 🎛️ **Taste Profile Editor & Safe Reset:** Dedicated Settings interface (`/music_taste`) enabling continuous refinement or safe resetting of musical preferences without touching listening history, downloads, or custom playlists.
+
 ### 📚 Library & Offline Support
 * 📥 **Native Download Engine:** Standalone background download manager powered by Media3 `DownloadManager` and `DownloadService` with parallel chunking and resume support.
 * ✈️ **100% Offline Playback:** Seamlessly plays downloaded tracks directly from the local file cache with zero network access.
 * 📜 **Synchronized Lyrics System:** Real-time synced LRC lyrics rendering powered by **LRCLIB** and **KuGou**, backed by local Room database caching and an LRU memory cache.
 * 📊 **Listening History & Analytics:** Tracks local play counts, completion rates, skip actions, and daily listening sessions for on-device taste profiling.
 * 📁 **Local Music Scanner:** Scans and indexes local audio tracks stored on device storage.
-* 🎴 **Custom Playlists:** Full playlist CRUD (create, reorder, add/remove, pin) backed by Room database entities and TypeScript Zustand state mirrors.
+* 🎴 **Custom Playlists:** Full playlist CRUD (create, reorder, add/remove, pin) backed by Room database entities and TypeScript Zustand state mirrors, with one-tap track deletion.
 
-### 🎨 Liquid Glass UI & Design System
+### 🔗 Connected Libraries & Cloud Sync (Personal Testing Capability)
+* 🔴 **Google / YouTube Library Sync:** Personal / manual testing capability backed by `@react-native-google-signin/google-signin` and native `play-services-auth:21.4.0` requesting minimal read-only scope (`youtube.readonly`).
+* 🔑 **Google Cloud Console Registration:** Designed for personal testing; connecting successfully on physical Android devices requires registering the application ID (`com.anonymous.AuraMusic`) and release/debug keystore SHA-1 fingerprint as an Android OAuth Client ID in Google Cloud Console project `304304144156`.
+* 🛡️ **Strict Google Data API Compliance:** Full automatic purge of local Authorized Data (collections, playlists, tokens) upon disconnect via `youtube-data-cleanup.service.ts`. Provides verified remote revocation signaling (`remotelyRevoked`) with direct fallback to Google Account Security Settings.
+* 🌐 **Multi-Provider Library Architecture:** Unified provider abstractions for Spotify, Apple Music, and YouTube Music with batch playlist hydration and metadata reconciliation.
+
+### ☁️ Android Auto Cloud Backup & Restore
+* 🔄 **Full SQLite & State Synchronization:** Complete allowlist configuration for Android 12+ `data_extraction_rules.xml` and legacy `backup_rules.xml`, covering Room DB (`aura_music.db`, `-wal`, `-shm`), `AsyncStorage`/`RKStorage`, and `aura_player_prefs.xml` for both Google Cloud Backup and Device-to-Device transfer.
+* 💾 **On-Demand Checkpointing:** "Back Up Now" action creates a local database/preferences checkpoint and dispatches `BackupManager.dataChanged()` to schedule Android Cloud Backup.
+* 📦 **Selective Cloud Inclusion:** Large offline media files are intentionally excluded from cloud backups to prevent quota saturation; download queue records are preserved and reconciled post-restore.
+* 📥 **Manual Cloud Restore:** Dedicated "Fetch Latest Backup" UI action in Settings allowing users to trigger restoration on demand.
+* 🔔 **Native Status Notifications:** Foreground notification indicators displaying backup and restore progress, completion, and failure states.
+* 🧪 **Post-Restore Integrity Validation:** Built-in `RestoreValidatorService` verifying database schema consistency, WAL journal reconciliation, and playlist integrity after fresh installation. *(Note: Local checkpointing and BackupManager scheduling are verified on-device; cross-device cloud round-trip testing is not physically verified.)*
+
+### 🎨 Liquid Glass UI & Display Fidelity
 * 🪟 **Atmospheric Glass Surfaces:** Refractive blur hierarchy (38–54 blur radius) with translucent borders and soft atmospheric lighting.
+* 🏎️ **120Hz Max Refresh Rate:** Hardware-synchronized display mode configuration ensuring fluid 120 FPS animations on supported AMOLED/OLED displays.
 * 🎨 **Dynamic Artwork Theming:** Real-time extraction of ambient gradient hues from album covers.
 * 💫 **Kinetic Gestures & Motion:** Reanimated v4 gesture-driven modals, collapsible now-playing sheets, and fluid spring animations.
 * ⚡ **High-Density Virtualized Lists:** Uses `@shopify/flash-list` for smooth 60–120 FPS scrolling across large playlists and search queries.
+
+### 🧠 On-Device AI Intelligence (Gemini Nano Ready)
+* ⚡ **2-Stage Recommendation Architecture:** Decouples candidate generation (30–60 track pools from Room history and online automix) from semantic ranking.
+* 🛡️ **Hardware-Gated Fallback:** Designed for Android AICore / Google ML Kit GenAI Prompt API with instant, zero-stutter fallback to deterministic heuristic scoring on non-AICore chipsets.
 
 *(Note: In-app software DSP equalizers, audio crossfade, and gapless playback toggles are intentionally excluded from the active codebase to preserve Media3 pipeline stability.)*
 
@@ -451,8 +482,8 @@ Contributions to AuraMusic are welcome. To maintain architectural stability and 
 If you encounter bugs, unexpected crashes, or playback errors, please open an issue on the [GitHub Issues](https://github.com/helloabhishek2004/AuraMusic/issues) page.
 
 Please include the following details in your report:
-* **AuraMusic Version:** (e.g., `v0.1.0-beta.1`)
-* **Device Model:** (e.g., `Google Pixel 7`, `Samsung Galaxy S22`)
+* **AuraMusic Version:** (e.g., `v3.0.0`)
+* **Device Model:** (e.g., `Google Pixel 7`, `Samsung Galaxy S22`, `Vivo I2202`)
 * **Android OS Version:** (e.g., `Android 14 / API 34`)
 * **Steps to Reproduce:** Clear, sequential steps leading to the issue.
 * **Expected vs Actual Behavior:** What should have happened versus what occurred.
@@ -462,18 +493,25 @@ Please include the following details in your report:
 
 ## 🗺 Roadmap
 
-### Current (v0.1.0-beta.1)
+### Current (v3.0.0)
 - [x] Complete migration to Kotlin Native Music Core & AndroidX Media3.
 - [x] Direct on-device stream resolution (InnerTube WEB_REMIX & AndroidVR fallback).
 - [x] On-device Room database persistence for history, lyrics, and playlists.
 - [x] Native offline download queue manager and cache reconciliation.
 - [x] Multi-provider synced lyrics system (LRCLIB & KuGou).
 - [x] Liquid Glass aesthetic and gesture-driven Now Playing interface.
+- [x] The Sonic Nebula Onboarding (9-step atmospheric flow with animated hello stroke SVG, curved name input, and dynamic artist discovery loader).
+- [x] Taste Profile prior layer with mathematical cold-start prior decay (`decayFactor = max(0.1, 1.0 - H/40)`).
+- [x] Dedicated Taste Profile Editor & Safe Reset screen (`/music_taste`).
+- [x] Personal connected libraries (YouTube Music, Spotify, Apple Music) with automated data purging on disconnect.
+- [x] Android Auto Cloud Backup allowlist, local database checkpointing, and post-restore integrity validator.
+- [x] Native Android backup & restore status notifications with manual restore trigger in Settings.
+- [x] 120Hz high refresh rate hardware render synchronization.
+- [x] On-device AI recommendation architecture audit & candidate generation foundation (Gemini Nano ready).
 
 ### Planned (Near-Term)
 - [ ] Enhanced local library tag editing and embedded ID3 artwork extraction.
 - [ ] Sleep timer integration directly linked to native playback service.
-- [ ] Backup and restore export files for playlists and listening history.
 - [ ] Custom playback speed and pitch controls via Media3 audio parameters.
 
 ### Long-Term Research
@@ -492,15 +530,15 @@ Please include the following details in your report:
 
 ---
 
-## 📄 License
+## 📄 License & Source-Available Notice
 
-> **Notice:** A formal open-source license has not yet been selected for the AuraMusic repository. A finalized open-source license will be committed prior to the formal public release. Until then, all rights are reserved by the original author and contributors.
+> **Notice:** AuraMusic is currently a **source-available** project. All rights are reserved by the original author. No formal open-source license (e.g., MIT or Apache 2.0) has been granted at this time. Redistribution, commercial exploitation, or republication of compiled binaries or source code without explicit permission is prohibited. A formal license may be considered for future public releases.
 
 ---
 
 ## ⚖️ Disclaimer
 
-AuraMusic is an independent open-source client application developed for personal study, technical research, and experimentation with modern Android audio architecture. AuraMusic does not host, store, or distribute copyrighted media files. All search results, stream pointers, and lyrics are retrieved from third-party public web APIs and user-specified endpoints. Use AuraMusic in compliance with your local laws and the terms of service of the content providers you access.
+AuraMusic is an independent source-available client application developed for personal study, technical research, and experimentation with modern Android audio architecture. AuraMusic does not host, store, or distribute copyrighted media files. All search results, stream pointers, and lyrics are retrieved from third-party public web APIs and user-specified endpoints. Use AuraMusic in compliance with your local laws and the terms of service of the content providers you access.
 
 ---
 

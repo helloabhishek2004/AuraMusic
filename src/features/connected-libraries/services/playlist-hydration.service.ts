@@ -3,7 +3,6 @@ import {
   ConnectedPlaylist,
   ConnectedProviderId,
   CONNECTED_PLAYLIST_CACHE_TTL_MS,
-  ExternalTrack,
 } from '../types/provider';
 import { providerRegistry } from '../providers/registry';
 import { trackResolverService } from './track-resolver.service';
@@ -117,7 +116,23 @@ export async function hydrateConnectedPlaylist(
       };
     } catch (err: any) {
       console.warn(`[PlaylistHydration] Failed to hydrate ${cacheKey}:`, err);
-      // Return existing cached data if available (graceful degradation)
+      const isAuthExpired = err?.message === 'AUTH_EXPIRED';
+      if (isAuthExpired && playlist.providerId === 'ytmusic') {
+        // Genuine Google OAuth revocation / expiry:
+        // Do NOT return stale Authorized Data. Purge immediately.
+        const { YouTubeDataCleanupService } = require('./youtube-data-cleanup.service');
+        YouTubeDataCleanupService.purgeAuthorizedData({
+          targetStatus: 'auth_expired',
+          error: 'Google authorization expired or was revoked. Reconnect to restore your YouTube Music library.',
+        });
+        return {
+          success: false,
+          cachedPlaylist: null,
+          fromCache: false,
+          error: 'AUTH_EXPIRED',
+        };
+      }
+      // Return existing cached data if available (graceful degradation for transient/network errors)
       return {
         success: false,
         cachedPlaylist: existingCached || null,

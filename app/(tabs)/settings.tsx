@@ -52,11 +52,11 @@ import Animated, {
 import { useSettingsStore, AudioQuality } from "../../src/features/settings/store/settings.store";
 import { CacheManager, StorageStats } from "../../src/features/cache/services/cache-manager.service";
 import { useDownloadStore } from "../../src/features/download/store/download.store";
-import { AudioSessionController } from "../../src/features/audio/native/audio-session";
 import { downloadCleanupService } from "../../src/features/download/services/download-cleanup.service";
 import { useScrollToTopOnTabPress } from "../../src/hooks/use-scroll-to-top";
 import { LiquidToggle } from "@/src/components/ui/liquid-toggle";
 import { useUpdateStore } from "../../src/features/update/store/update.store";
+import { useTasteProfileStore } from "../../src/features/taste-profile/store/taste-profile.store";
 
 const { width: SW } = Dimensions.get("window");
 const APP_VERSION =
@@ -592,6 +592,7 @@ export default function SettingsScreen() {
   const hasUpdate = useUpdateStore(s => s.hasUpdate);
   const releaseInfo = useUpdateStore(s => s.releaseInfo);
   const checkForUpdates = useUpdateStore(s => s.checkForUpdates);
+  const tasteProfile = useTasteProfileStore();
 
   // Background update check on settings view (cached, respects 4hr interval)
   useEffect(() => {
@@ -602,6 +603,7 @@ export default function SettingsScreen() {
   const [modalType, setModalType] = useState<null | "streamingWifi" | "streamingCellular" | "downloadWifi" | "downloadCellular">(null);
   const [isClearing, setIsClearing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   const refreshStats = async () => {
     const stats = await CacheManager.getCacheStats();
@@ -815,8 +817,25 @@ export default function SettingsScreen() {
           </GlassCard>
         </Section>
 
-        {/* ── PLAYBACK (section 2) ─────────────────────────────────────────── */}
+        {/* ── MUSIC TASTE PROFILE (section 1) ───────────────────────────────── */}
         <Section index={1}>
+          <SectionLabel icon="auto-awesome" title="Music Taste" />
+          <GlassCard r={32} style={{ overflow: "hidden" }}>
+            <Row
+              icon="palette" iconColor="#BF5AF2" iconBg="rgba(191,90,242,0.12)"
+              label="Music Taste Profile"
+              sub={`${tasteProfile.name} • ${tasteProfile.songLanguages?.length || 0} languages • ${tasteProfile.favoriteArtists?.length || 0} artists`}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push('/music_taste');
+              }}
+              chevron
+            />
+          </GlassCard>
+        </Section>
+
+        {/* ── PLAYBACK (section 2) ─────────────────────────────────────────── */}
+        <Section index={2}>
           <SectionLabel icon="music-note" title="Playback" />
           <GlassCard r={32} style={{ overflow: "hidden" }}>
             {/* Normalize */}
@@ -982,6 +1001,59 @@ export default function SettingsScreen() {
                       <View style={{ flex: 1 }}>
                         <Text style={st.rowLabel}>Back Up Now</Text>
                         <Text style={st.rowSub}>Commit pending data to Google Backup</Text>
+                      </View>
+                    </View>
+                    <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.28)" />
+                  </View>
+                </TouchableOpacity>
+
+                <Divider />
+                {/* Manual Fetch Latest Backup */}
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    Alert.alert(
+                      "Fetch Latest Backup",
+                      "Re-synchronize your library, playlists, listening history, and preferences with your stored backup data?",
+                      [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Fetch & Restore",
+                          onPress: async () => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                            setIsRestoring(true);
+                            try {
+                              const { RestoreValidatorService } = await import("@/src/services/restore-validator.service");
+                              const result = await RestoreValidatorService.triggerManualRestore();
+                              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                              Alert.alert("Restore Complete", result.message);
+                            } catch (e: any) {
+                              Alert.alert("Restore Notice", e?.message || "Failed to complete restore.");
+                            } finally {
+                              setIsRestoring(false);
+                            }
+                          },
+                        },
+                      ]
+                    );
+                  }}
+                  activeOpacity={0.7}
+                  delayPressIn={0}
+                  style={st.row}
+                  disabled={isRestoring || isSyncing}
+                >
+                  <View style={st.rowInner}>
+                    <View style={st.rowLeft}>
+                      <View style={[st.iconBadge, { backgroundColor: "rgba(52,211,153,0.10)" }]}>
+                        {isRestoring ? (
+                          <ActivityIndicator size="small" color="#34D399" />
+                        ) : (
+                          <MaterialIcons name="cloud-download" size={20} color="#34D399" />
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={st.rowLabel}>Fetch Latest Backup</Text>
+                        <Text style={st.rowSub}>Re-sync library, playlists & preferences</Text>
                       </View>
                     </View>
                     <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.28)" />

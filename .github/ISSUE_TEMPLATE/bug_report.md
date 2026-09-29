@@ -1,4 +1,4 @@
-﻿---
+---
 name: Bug Report
 about: Create a report to help us fix defects or unexpected behavior
 title: '[BUG] <Short description of problem>'
@@ -10,8 +10,8 @@ assignees: ''
 A clear and concise description of the bug.
 
 ## Environment
-- **AuraMusic Version**: [e.g., 0.1.0-beta.1]
-- **Device Model**: [e.g., Google Pixel 7, Samsung Galaxy S23, iQOO Neo6]
+- **AuraMusic Version**: [e.g., 3.0.0]
+- **Device Model**: [e.g., Google Pixel 7, Samsung Galaxy S23, iQOO Neo6, Vivo I2202]
 - **Android Version**: [e.g., Android 14, Android 13]
 - **Connection Type**: [e.g., Wi-Fi, 5G/LTE, Offline]
 

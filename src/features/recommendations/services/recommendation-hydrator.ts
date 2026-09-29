@@ -749,6 +749,20 @@ export async function hydrateRecommendationSeed(seed: RecommendationSeed): Promi
           } catch (e) {}
         }
 
+        // Hydrate external/YouTube playlist seeds
+        if (seed.id && (seed.id.startsWith('PL') || seed.id.startsWith('VL') || seed.id.startsWith('RD') || (seed as any).playlistId)) {
+          try {
+            const { musicService } = require('../../../services/api/music');
+            const targetPid = (seed as any).playlistId || seed.id;
+            const pDetails = await musicService.getPlaylistDetails(targetPid);
+            if (pDetails && pDetails.tracks && pDetails.tracks.length > 0) {
+              return pDetails.tracks;
+            }
+          } catch (e) {
+            console.warn('[RecommendationHydrator] Failed to fetch playlist details:', e);
+          }
+        }
+
         // Hydrate any discovery catalog or trending seed dynamically
         if (seed.id && (seed.id.startsWith('trending-') || seed.query)) {
           try {
