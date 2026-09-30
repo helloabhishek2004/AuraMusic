@@ -97,6 +97,15 @@ export interface SpecularButtonProps {
   'aria-label'?: string;
 }
 
+const isTouchOrMobileDevice = (): boolean => {
+  if (typeof window === 'undefined') return true;
+  return (
+    window.matchMedia('(pointer: coarse)').matches ||
+    window.matchMedia('(hover: none)').matches ||
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  );
+};
+
 export const SpecularButton: React.FC<SpecularButtonProps> = ({
   children = 'Get Started',
   size = 'lg',
@@ -162,10 +171,19 @@ export const SpecularButton: React.FC<SpecularButtonProps> = ({
     const fx = fxRef.current;
     if (!btn || !fx) return;
 
+    // Do NOT initialize WebGL on mobile/touch screens:
+    // 1. Mobile devices don't have mouse cursor tracking or proximity.
+    // 2. Mobile devices have strict WebGL context limits (causes crash & [x_x] broken canvas).
+    // 3. Fallback to clean, zero-overhead CSS glass rendering.
+    if (isTouchOrMobileDevice()) {
+      return;
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let renderer: any = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let gl: any = null;
+    let canvasEl: HTMLCanvasElement | null = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let program: any = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -174,9 +192,29 @@ export const SpecularButton: React.FC<SpecularButtonProps> = ({
     let ro: ResizeObserver | null = null;
 
     try {
-      const dpr = window.devicePixelRatio || 1;
+      // Test WebGL availability before creating full renderer
+      const testCanvas = document.createElement('canvas');
+      const testGl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl');
+      if (!testGl) return;
+
+      // Cap DPR to 2 on desktop to prevent excessive VRAM allocation
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       renderer = new Renderer({ alpha: true, premultipliedAlpha: true, antialias: true, dpr });
       gl = renderer.gl;
+      if (!gl) return;
+
+      canvasEl = gl.canvas as HTMLCanvasElement;
+      canvasEl.style.background = 'transparent';
+
+      const handleContextLost = (e: Event) => {
+        e.preventDefault();
+        if (raf) cancelAnimationFrame(raf);
+        if (canvasEl && canvasEl.parentNode === fx) {
+          fx.removeChild(canvasEl);
+        }
+      };
+      canvasEl.addEventListener('webglcontextlost', handleContextLost, false);
+
       gl.clearColor(0, 0, 0, 0);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -206,7 +244,7 @@ export const SpecularButton: React.FC<SpecularButtonProps> = ({
       });
 
       mesh = new Mesh(gl, { geometry, program });
-      fx.appendChild(gl.canvas as HTMLCanvasElement);
+      fx.appendChild(canvasEl);
 
       const sizeRef = { w: 1, h: 1 };
       const resize = () => {
@@ -327,16 +365,25 @@ export const SpecularButton: React.FC<SpecularButtonProps> = ({
         window.removeEventListener('pointerdown', onPointerDown);
         window.removeEventListener('pointerup', onPointerUp);
         document.removeEventListener('mouseleave', onMouseLeaveDoc);
-        const canvasEl = gl?.canvas as HTMLElement | undefined;
-        if (canvasEl && canvasEl.parentNode === fx) {
-          fx.removeChild(canvasEl);
+        if (canvasEl) {
+          canvasEl.removeEventListener('webglcontextlost', handleContextLost);
+          if (canvasEl.parentNode === fx) {
+            fx.removeChild(canvasEl);
+          }
         }
         if (gl) {
-          gl.getExtension('WEBGL_lose_context')?.loseContext();
+          try {
+            gl.getExtension('WEBGL_lose_context')?.loseContext();
+          } catch {
+            // Ignore context loss errors during cleanup
+          }
         }
       };
     } catch (err) {
-      console.warn('SpecularButton WebGL initialization failed:', err);
+      console.warn('SpecularButton WebGL initialization skipped/failed:', err);
+      if (canvasEl && canvasEl.parentNode === fx) {
+        fx.removeChild(canvasEl);
+      }
     }
   }, []);
 

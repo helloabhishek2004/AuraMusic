@@ -158,6 +158,17 @@ const GlassSurface: React.FC<GlassSurfaceProps> = ({
       return false;
     }
 
+    // Touch and mobile devices should use native CSS backdrop blur fallback
+    // to prevent SVG data URI / feImage rendering quirks and GPU overhead in mobile WebKit/Blink
+    const isMobileOrTouch =
+      window.matchMedia('(pointer: coarse)').matches ||
+      window.matchMedia('(hover: none)').matches ||
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+    if (isMobileOrTouch) {
+      return false;
+    }
+
     const isWebkit = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
     const isFirefox = /Firefox/.test(navigator.userAgent);
 

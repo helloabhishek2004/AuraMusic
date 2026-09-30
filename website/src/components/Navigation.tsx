@@ -193,7 +193,8 @@ export const Navigation: React.FC<NavigationProps> = ({ activeSection }) => {
               title={`Download Standalone APK (${release.apkSize})`}
             >
               <Download size={13} strokeWidth={1.8} />
-              <span>Get Aura ({release.version})</span>
+              <span className="hidden sm:inline">Get Aura ({release.version})</span>
+              <span className="sm:hidden">Get Aura</span>
             </SpecularButton>
 
             {/* Mobile Hamburger Button with 44px touch target */}
