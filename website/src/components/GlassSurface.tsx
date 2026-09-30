@@ -64,9 +64,9 @@ const GlassSurface: React.FC<GlassSurfaceProps> = ({
 
   const generateDisplacementMap = () => {
     const rect = containerRef.current?.getBoundingClientRect();
-    const actualWidth = rect?.width || 400;
-    const actualHeight = rect?.height || 200;
-    const edgeSize = Math.min(actualWidth, actualHeight) * (borderWidth * 0.5);
+    const actualWidth = Math.round(rect?.width || (typeof width === 'number' ? width : 400));
+    const actualHeight = Math.round(rect?.height || (typeof height === 'number' ? height : 60));
+    const edgeSize = Math.max(1, Math.min(actualWidth, actualHeight) * (borderWidth * 0.5));
 
     const svgContent = `
       <svg viewBox="0 0 ${actualWidth} ${actualHeight}" xmlns="http://www.w3.org/2000/svg">
@@ -150,22 +150,15 @@ const GlassSurface: React.FC<GlassSurfaceProps> = ({
   }, [width, height]);
 
   useEffect(() => {
-    setSvgSupported(supportsSVGFilters());
+    const supported = supportsSVGFilters();
+    setSvgSupported(supported);
+    if (supported) {
+      setTimeout(updateDisplacementMap, 0);
+    }
   }, []);
 
   const supportsSVGFilters = () => {
     if (typeof window === 'undefined' || typeof document === 'undefined') {
-      return false;
-    }
-
-    // Touch and mobile devices should use native CSS backdrop blur fallback
-    // to prevent SVG data URI / feImage rendering quirks and GPU overhead in mobile WebKit/Blink
-    const isMobileOrTouch =
-      window.matchMedia('(pointer: coarse)').matches ||
-      window.matchMedia('(hover: none)').matches ||
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-    if (isMobileOrTouch) {
       return false;
     }
 
