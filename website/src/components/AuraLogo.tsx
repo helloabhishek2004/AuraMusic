@@ -1,0 +1,80 @@
+import React from 'react';
+
+interface AuraLogoProps {
+  className?: string;
+  size?: number;
+  glow?: boolean;
+}
+
+export const AuraLogo: React.FC<AuraLogoProps> = ({
+  className = '',
+  size = 28,
+  glow = false,
+}) => {
+  return (
+    <div
+      className={`relative inline-flex items-center justify-center shrink-0 ${className}`}
+      style={{ width: size, height: size }}
+    >
+      {glow && (
+        <div
+          className="absolute inset-0 rounded-full blur-md opacity-70 pointer-events-none transition-opacity duration-700"
+          style={{
+            background: 'radial-gradient(circle, rgba(191,90,242,0.85) 0%, rgba(70,245,224,0.4) 70%, transparent 100%)',
+            transform: 'scale(1.4)',
+          }}
+        />
+      )}
+      <svg
+        width="100%"
+        height="100%"
+        viewBox="0 0 3000 3000"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        className="relative z-10"
+        style={{ filter: glow ? 'drop-shadow(0 0 8px rgba(191, 90, 242, 0.6))' : 'none' }}
+      >
+        <g transform="matrix(1.44,0,0,1.44,1500,1500)">
+          <g transform="matrix(1,0,0,1,-1041.666667,-1041.666667)">
+            <g transform="matrix(4.166667,0,0,4.166667,0,0)">
+              {/* Outer Apex Chevron Arch */}
+              <path
+                d="M250,85C260,85 270,92 276,102L401,328C409,342 403,358 388,363C380,365 370,363 363,352L250,152L137,352C130,363 120,365 112,363C97,358 91,342 99,328L224,102C230,92 240,85 250,85Z"
+                fill="currentColor"
+              />
+              {/* Frequency Spectrum Equalizer Bars */}
+              <path
+                d="M196,342L196,367C196,369.76 193.76,372 191,372C188.24,372 186,369.76 186,367L186,342C186,339.24 188.24,337 191,337C193.76,337 196,339.24 196,342Z"
+                fill="currentColor"
+              />
+              <path
+                d="M217,320L217,388C217,390.76 214.76,393 212,393C209.24,393 207,390.76 207,388L207,320C207,317.24 209.24,315 212,315C214.76,315 217,317.24 217,320Z"
+                fill="currentColor"
+              />
+              <path
+                d="M238,298L238,411C238,413.76 235.76,416 233,416C230.24,416 228,413.76 228,411L228,298C228,295.24 230.24,293 233,293C235.76,293 238,295.24 238,298Z"
+                fill="currentColor"
+              />
+              <path
+                d="M259,274L259,416C259,418.76 256.76,421 254,421C251.24,421 249,418.76 249,416L249,274C249,271.24 251.24,269 254,269C256.76,269 259,271.24 259,274Z"
+                fill="currentColor"
+              />
+              <path
+                d="M280,298L280,411C280,413.76 277.76,416 275,416C272.24,416 270,413.76 270,411L270,298C270,295.24 272.24,293 275,293C277.76,293 280,295.24 280,298Z"
+                fill="currentColor"
+              />
+              <path
+                d="M301,320L301,388C301,390.76 298.76,393 296,393C293.24,393 291,390.76 291,388L291,320C291,317.24 293.24,315 296,315C298.76,315 301,317.24 301,320Z"
+                fill="currentColor"
+              />
+              <path
+                d="M322,342L322,367C322,369.76 319.76,372 317,372C314.24,372 312,369.76 312,367L312,342C312,339.24 314.24,337 317,337C319.76,337 322,339.24 322,342Z"
+                fill="currentColor"
+              />
+            </g>
+          </g>
+        </g>
+      </svg>
+    </div>
+  );
+};

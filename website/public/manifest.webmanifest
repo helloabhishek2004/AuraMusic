@@ -1,0 +1,23 @@
+{
+  "name": "AuraMusic — Free, Ad-Free Offline Android Music Player",
+  "short_name": "AuraMusic",
+  "description": "AuraMusic is a free, ad-free Android music player featuring offline downloads, local audio playback, synced lyrics, and native Media3 sound fidelity.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07070C",
+  "theme_color": "#07070C",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "scope": "/"
+}
