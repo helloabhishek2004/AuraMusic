@@ -182,7 +182,9 @@ const GlassSurface: React.FC<GlassSurfaceProps> = ({
     borderRadius: `${borderRadius}px`,
     '--glass-frost': backgroundOpacity,
     '--glass-saturation': saturation,
-    '--filter-id': `url(#${filterId})`
+    '--filter-id': `url(#${filterId})`,
+    backdropFilter: svgSupported ? `url(#${filterId}) saturate(${saturation})` : undefined,
+    WebkitBackdropFilter: svgSupported ? `url(#${filterId}) saturate(${saturation})` : undefined,
   } as CSSProperties;
 
   return (
