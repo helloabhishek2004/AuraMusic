@@ -7,6 +7,7 @@ import { AuraChip } from './AuraChip';
 import { AuraIconButton } from './AuraIconButton';
 import { staggerContainerPreset, fadeUpItem } from '../lib/motion-tokens';
 import { fetchLatestRelease, FALLBACK_RELEASE, initiateApkDownload } from '../lib/release';
+import { trackGithubVisit, trackPageRedirect, trackTrackSkipped, trackAudioPlayback } from '../lib/analytics';
 
 export const Hero: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(true);
@@ -164,6 +165,7 @@ export const Hero: React.FC = () => {
               {/* Primary CTA */}
               <SpecularButton
                 href="#experience"
+                onClick={() => trackPageRedirect('#experience', 'internal_nav')}
                 size="md"
                 radius={999}
                 tint="#BF5AF2"
@@ -187,6 +189,7 @@ export const Hero: React.FC = () => {
               <SpecularButton
                 href="https://github.com/helloabhishek2004/AuraMusic"
                 target="_blank"
+                onClick={() => trackGithubVisit('hero_cta')}
                 size="md"
                 radius={999}
                 tint="#ffffff"
@@ -210,7 +213,7 @@ export const Hero: React.FC = () => {
                 download={release.apkName}
                 onClick={(e) => {
                   e.preventDefault();
-                  initiateApkDownload(release.apkUrl, release.apkName);
+                  initiateApkDownload(release.apkUrl, release.apkName, 'hero_cta');
                 }}
                 size="sm"
                 radius={999}
@@ -374,10 +377,15 @@ export const Hero: React.FC = () => {
                   aria-label="Previous track"
                   variant="ghost"
                   size="md"
+                  onClick={() => trackTrackSkipped('prev', 'Sonic Nebula (Original Mix)', 'hero_player')}
                 />
 
                 <SpecularButton
-                  onClick={() => setIsPlaying(!isPlaying)}
+                  onClick={() => {
+                    const nextState = !isPlaying;
+                    setIsPlaying(nextState);
+                    trackAudioPlayback(nextState ? 'play' : 'pause', 'Sonic Nebula (Original Mix)', 'hero_player');
+                  }}
                   size="sm"
                   radius={999}
                   tint="#BF5AF2"
@@ -399,6 +407,7 @@ export const Hero: React.FC = () => {
                   aria-label="Next track"
                   variant="ghost"
                   size="md"
+                  onClick={() => trackTrackSkipped('next', 'Sonic Nebula (Original Mix)', 'hero_player')}
                 />
               </div>
             </div>

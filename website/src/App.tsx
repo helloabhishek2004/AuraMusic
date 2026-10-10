@@ -15,6 +15,7 @@ import GradualBlur from './components/GradualBlur';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import { TermsOfService } from './pages/TermsOfService';
 import { Analytics } from '@vercel/analytics/react';
+import { initGA, trackPageView, trackPageRedirect, trackSoundProfileChange } from './lib/analytics';
 
 type Route = 'home' | 'privacy' | 'terms';
 
@@ -32,6 +33,20 @@ export function App() {
   const [activeSection, setActiveSection] = useState<string>('hero');
   const [showOptionWheel, setShowOptionWheel] = useState(false);
   const [currentMood, setCurrentMood] = useState('Ambient Drift');
+
+  useEffect(() => {
+    initGA();
+  }, []);
+
+  useEffect(() => {
+    const pageMap: Record<Route, { path: string; title: string }> = {
+      home: { path: '/', title: 'AuraMusic — Free, Ad-Free Offline Android Music Player' },
+      privacy: { path: '/privacy', title: 'AuraMusic — Privacy Policy' },
+      terms: { path: '/terms', title: 'AuraMusic — Terms of Service' },
+    };
+    const info = pageMap[currentRoute] || pageMap.home;
+    trackPageView(info.path, info.title);
+  }, [currentRoute]);
 
   useEffect(() => {
     const handleLocationChange = () => {
@@ -55,6 +70,7 @@ export function App() {
   }, []);
 
   const navigateTo = (route: Route) => {
+    trackPageRedirect(route === 'home' ? '/' : `/${route}`, 'route_change');
     setCurrentRoute(route);
     const path = route === 'home' ? '/' : `/${route}`;
     window.history.pushState({}, '', path);
@@ -199,7 +215,10 @@ export function App() {
                   smoothing={180}
                   loop={true}
                   draggable={true}
-                  onChange={(_idx, item) => setCurrentMood(item)}
+                  onChange={(_idx, item) => {
+                    setCurrentMood(item);
+                    trackSoundProfileChange(item);
+                  }}
                 />
               </div>
 

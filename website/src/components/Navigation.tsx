@@ -9,6 +9,8 @@ import { AuraChip } from './AuraChip';
 import { AuraIconButton } from './AuraIconButton';
 import { motion } from 'framer-motion';
 import { fetchLatestRelease, FALLBACK_RELEASE, initiateApkDownload } from '../lib/release';
+import { ShareButton } from './ShareButton';
+import { trackGithubVisit, trackPageRedirect } from '../lib/analytics';
 
 interface NavigationProps {
   activeSection: string;
@@ -136,6 +138,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeSection }) => {
                 <a
                   key={link.label}
                   href={link.href}
+                  onClick={() => trackPageRedirect(link.href, 'internal_nav')}
                   className={`relative px-4 py-1.5 text-xs font-medium tracking-tight transition-colors duration-200 rounded-full select-none ${
                     isActive
                       ? 'text-white font-semibold'
@@ -157,12 +160,16 @@ export const Navigation: React.FC<NavigationProps> = ({ activeSection }) => {
           </div>
 
           {/* Right Action Cluster */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Share Button */}
+            <ShareButton variant="pill" className="hidden lg:inline-flex" />
+
             {/* GitHub Link */}
             <a
               href="https://github.com/helloabhishek2004/AuraMusic"
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => trackGithubVisit('navbar')}
               className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white/70 hover:text-white transition-all duration-200 rounded-full hover:bg-white/[0.05] active:scale-[0.97]"
               title="AuraMusic on GitHub"
             >
@@ -177,7 +184,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeSection }) => {
               download={release.apkName}
               onClick={(e) => {
                 e.preventDefault();
-                initiateApkDownload(release.apkUrl, release.apkName);
+                initiateApkDownload(release.apkUrl, release.apkName, 'navbar');
               }}
               size="sm"
               radius={999}
@@ -218,7 +225,10 @@ export const Navigation: React.FC<NavigationProps> = ({ activeSection }) => {
                 <a
                   key={link.label}
                   href={link.href}
-                  onClick={() => setMobileMenuOpen(false)}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    trackPageRedirect(link.href, 'internal_nav');
+                  }}
                   className="px-4 py-2.5 rounded-xl text-sm font-medium text-white/80 hover:text-white hover:bg-white/[0.06] transition-colors flex items-center justify-between"
                 >
                   <span>{link.label}</span>
@@ -226,10 +236,20 @@ export const Navigation: React.FC<NavigationProps> = ({ activeSection }) => {
                 </a>
               ))}
               <div className="h-[1px] bg-white/[0.08] my-1" />
+              
+              {/* Mobile Share Action */}
+              <div className="px-1 py-1">
+                <ShareButton variant="pill" className="w-full justify-center py-2 text-sm" label="Share AuraMusic" />
+              </div>
+
               <a
                 href="https://github.com/helloabhishek2004/AuraMusic"
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  trackGithubVisit('mobile_nav');
+                }}
                 className="px-4 py-2.5 rounded-xl text-sm font-medium text-white/80 hover:text-white hover:bg-white/[0.06] transition-colors flex items-center gap-2"
               >
                 <GithubIcon size={15} />
@@ -242,7 +262,7 @@ export const Navigation: React.FC<NavigationProps> = ({ activeSection }) => {
                 onClick={(e) => {
                   e.preventDefault();
                   setMobileMenuOpen(false);
-                  initiateApkDownload(release.apkUrl, release.apkName);
+                  initiateApkDownload(release.apkUrl, release.apkName, 'mobile_nav');
                 }}
                 size="md"
                 radius={14}

@@ -4,6 +4,7 @@ import { GithubIcon } from './GithubIcon';
 import { SpecularButton } from './SpecularButton';
 import { AuraChip } from './AuraChip';
 import BlurText from './BlurText';
+import { trackGithubVisit, trackPortfolioVisit, trackSocialVisit } from '../lib/analytics';
 
 export const CreatorStory: React.FC = () => {
   return (
@@ -59,6 +60,7 @@ export const CreatorStory: React.FC = () => {
                 <SpecularButton
                   href="https://github.com/helloabhishek2004"
                   target="_blank"
+                  onClick={() => trackGithubVisit('creator_story', 'https://github.com/helloabhishek2004')}
                   size="sm"
                   radius={999}
                   tint="#ffffff"
@@ -77,6 +79,7 @@ export const CreatorStory: React.FC = () => {
                 <SpecularButton
                   href="https://about-abhishek.vercel.app"
                   target="_blank"
+                  onClick={() => trackPortfolioVisit('creator_story', 'https://about-abhishek.vercel.app')}
                   size="sm"
                   radius={999}
                   tint="#ffffff"
@@ -96,6 +99,7 @@ export const CreatorStory: React.FC = () => {
                 <SpecularButton
                   href="https://buymeacoffee.com/helloabhisy"
                   target="_blank"
+                  onClick={() => trackSocialVisit('buymeacoffee', 'https://buymeacoffee.com/helloabhisy', 'creator_story')}
                   size="sm"
                   radius={999}
                   tint="#FFDD00"

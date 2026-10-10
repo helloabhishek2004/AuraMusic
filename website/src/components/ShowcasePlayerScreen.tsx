@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Heart, Download, SkipBack, SkipForward, Play, Pause, Volume2, VolumeX, MessageSquare, ListMusic, MoreHorizontal, ChevronDown } from 'lucide-react';
+import { trackTrackSkipped, trackAudioPlayback, trackLyricsView, trackDownload } from '../lib/analytics';
 
 interface ShowcasePlayerScreenProps {
   onLyricsClick?: () => void;
@@ -121,7 +122,11 @@ export const ShowcasePlayerScreen: React.FC<ShowcasePlayerScreenProps> = ({ onLy
                 }`}
               />
             </button>
-            <button className="p-1 text-white/80 hover:text-white transition-colors" title="Download Offline">
+            <button
+              onClick={() => trackDownload('v3.0.0', 'asap_rocky_offline_sample.mp3', 'showcase_player')}
+              className="p-1 text-white/80 hover:text-white transition-colors"
+              title="Download Offline"
+            >
               <Download size={20} className="text-white/80" />
             </button>
           </div>
@@ -145,14 +150,22 @@ export const ShowcasePlayerScreen: React.FC<ShowcasePlayerScreenProps> = ({ onLy
       {/* ── Transport Controls ── */}
       <div className="relative z-10 flex items-center justify-between px-6 pt-1">
         <button
-          onClick={() => setProgress((p) => Math.max(0, p - 10))}
+          onClick={() => {
+            setProgress((p) => Math.max(0, p - 10));
+            trackTrackSkipped('prev', "I Smoked Away My Brain", 'showcase_player');
+          }}
           className="p-2 text-white/80 hover:text-white transition-colors active:scale-90"
+          title="Previous (10s back)"
         >
           <SkipBack size={26} className="fill-white/80" />
         </button>
 
         <button
-          onClick={() => setIsPlaying(!isPlaying)}
+          onClick={() => {
+            const nextState = !isPlaying;
+            setIsPlaying(nextState);
+            trackAudioPlayback(nextState ? 'play' : 'pause', "I Smoked Away My Brain", 'showcase_player');
+          }}
           className="w-16 h-16 rounded-full bg-white text-black flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.3)] hover:scale-105 active:scale-95 transition-all"
         >
           {isPlaying ? (
@@ -163,8 +176,12 @@ export const ShowcasePlayerScreen: React.FC<ShowcasePlayerScreenProps> = ({ onLy
         </button>
 
         <button
-          onClick={() => setProgress((p) => Math.min(totalDuration, p + 10))}
+          onClick={() => {
+            setProgress((p) => Math.min(totalDuration, p + 10));
+            trackTrackSkipped('next', "I Smoked Away My Brain", 'showcase_player');
+          }}
           className="p-2 text-white/80 hover:text-white transition-colors active:scale-90"
+          title="Skip Forward (10s)"
         >
           <SkipForward size={26} className="fill-white/80" />
         </button>
@@ -182,7 +199,10 @@ export const ShowcasePlayerScreen: React.FC<ShowcasePlayerScreenProps> = ({ onLy
       {/* ── Bottom Action Row (Lyrics, Queue, More) ── */}
       <div className="relative z-10 flex items-center justify-between px-6 pt-4 pb-1 text-white/65">
         <button
-          onClick={onLyricsClick}
+          onClick={() => {
+            onLyricsClick?.();
+            trackLyricsView("I Smoked Away My Brain");
+          }}
           className="p-2 hover:text-white transition-colors flex items-center gap-1 hover:bg-white/[0.08] rounded-xl"
           title="Open Synced Lyrics"
         >

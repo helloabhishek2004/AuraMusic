@@ -3,6 +3,8 @@ import { Coffee, ArrowUp } from 'lucide-react';
 import { GithubIcon } from './GithubIcon';
 import { AuraLogo } from './AuraLogo';
 import { AuraIconButton } from './AuraIconButton';
+import { ShareButton } from './ShareButton';
+import { trackGithubVisit, trackPortfolioVisit, trackSocialVisit, trackPageRedirect } from '../lib/analytics';
 
 interface FooterProps {
   onNavigatePrivacy?: () => void;
@@ -48,15 +50,16 @@ export const Footer: React.FC<FooterProps> = ({
 
         {/* Minimalist Nav Links Grid with Generous Whitespace (No Cards) */}
         <div className="mt-8 sm:mt-12 flex flex-wrap justify-center gap-x-5 sm:gap-x-10 gap-y-2.5 sm:gap-y-4 text-xs sm:text-sm font-medium text-white/60">
-          <a href="#features" className="hover:text-white transition-colors">Features</a>
-          <a href="#experience" className="hover:text-white transition-colors">Experience</a>
-          <a href="#architecture" className="hover:text-white transition-colors">Architecture</a>
-          <a href="#showcase" className="hover:text-white transition-colors">Showcase</a>
-          <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
-          <a href="#download" className="hover:text-white transition-colors">Download</a>
+          <a href="#features" onClick={() => trackPageRedirect('#features', 'internal_nav')} className="hover:text-white transition-colors">Features</a>
+          <a href="#experience" onClick={() => trackPageRedirect('#experience', 'internal_nav')} className="hover:text-white transition-colors">Experience</a>
+          <a href="#architecture" onClick={() => trackPageRedirect('#architecture', 'internal_nav')} className="hover:text-white transition-colors">Architecture</a>
+          <a href="#showcase" onClick={() => trackPageRedirect('#showcase', 'internal_nav')} className="hover:text-white transition-colors">Showcase</a>
+          <a href="#faq" onClick={() => trackPageRedirect('#faq', 'internal_nav')} className="hover:text-white transition-colors">FAQ</a>
+          <a href="#download" onClick={() => trackPageRedirect('#download', 'internal_nav')} className="hover:text-white transition-colors">Download</a>
           <a
             href="/privacy"
             onClick={(e) => {
+              trackPageRedirect('/privacy', 'internal_nav');
               if (onNavigatePrivacy) {
                 e.preventDefault();
                 onNavigatePrivacy();
@@ -69,6 +72,7 @@ export const Footer: React.FC<FooterProps> = ({
           <a
             href="/terms"
             onClick={(e) => {
+              trackPageRedirect('/terms', 'internal_nav');
               if (onNavigateTerms) {
                 e.preventDefault();
                 onNavigateTerms();
@@ -82,6 +86,7 @@ export const Footer: React.FC<FooterProps> = ({
             href="https://github.com/helloabhishek2004/AuraMusic"
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => trackGithubVisit('footer_links')}
             className="hover:text-white transition-colors"
           >
             GitHub
@@ -90,6 +95,7 @@ export const Footer: React.FC<FooterProps> = ({
             href="https://github.com/helloabhishek2004/AuraMusic/releases"
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => trackGithubVisit('footer_releases', 'https://github.com/helloabhishek2004/AuraMusic/releases')}
             className="hover:text-white transition-colors"
           >
             Releases
@@ -98,6 +104,7 @@ export const Footer: React.FC<FooterProps> = ({
             href="https://about-abhishek.vercel.app"
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => trackPortfolioVisit('footer_links')}
             className="hover:text-white transition-colors"
           >
             Portfolio
@@ -115,11 +122,13 @@ export const Footer: React.FC<FooterProps> = ({
             © 2026 Abhishek (@helloabhishek2004). Source-available on GitHub.
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 sm:gap-6">
+            <ShareButton variant="pill" label="Share" className="!py-1" />
             <a
               href="https://github.com/helloabhishek2004/AuraMusic"
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => trackGithubVisit('footer_bottom')}
               className="hover:text-white transition-colors flex items-center gap-1.5"
             >
               <GithubIcon size={14} />
@@ -129,6 +138,7 @@ export const Footer: React.FC<FooterProps> = ({
               href="https://buymeacoffee.com/helloabhisy"
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => trackSocialVisit('buymeacoffee', 'https://buymeacoffee.com/helloabhisy', 'footer_bottom')}
               className="hover:text-white transition-colors flex items-center gap-1.5"
             >
               <Coffee size={14} />

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, HelpCircle, ShieldCheck, Zap, Download, Music2, Smartphone, Radio } from 'lucide-react';
 import { AuraChip } from './AuraChip';
 import BlurText from './BlurText';
+import { trackFaqToggle } from '../lib/analytics';
 
 interface FaqItem {
   question: string;
@@ -57,7 +58,13 @@ export const FaqSection: React.FC = () => {
   const [openIndex, setOpenIndex] = useState<number | null>(0);
 
   const toggleIndex = (index: number) => {
-    setOpenIndex(prev => (prev === index ? null : index));
+    setOpenIndex(prev => {
+      const willOpen = prev !== index;
+      if (willOpen && FAQS[index]) {
+        trackFaqToggle(FAQS[index].question, true);
+      }
+      return willOpen ? index : null;
+    });
   };
 
   return (

@@ -6,6 +6,8 @@ import { SpecularButton } from './SpecularButton';
 import { AuraChip } from './AuraChip';
 import BlurText from './BlurText';
 import { fetchLatestRelease, FALLBACK_RELEASE, initiateApkDownload } from '../lib/release';
+import { trackGithubVisit } from '../lib/analytics';
+import { ShareButton } from './ShareButton';
 
 export const DownloadSection: React.FC = () => {
   const [downloadStarted, setDownloadStarted] = useState(false);
@@ -18,7 +20,7 @@ export const DownloadSection: React.FC = () => {
   const handleDownloadClick = (e: React.MouseEvent<HTMLElement>) => {
     e.preventDefault();
     setDownloadStarted(true);
-    initiateApkDownload(release.apkUrl, release.apkName);
+    initiateApkDownload(release.apkUrl, release.apkName, 'download_section');
     setTimeout(() => setDownloadStarted(false), 3500);
   };
 
@@ -98,6 +100,7 @@ export const DownloadSection: React.FC = () => {
           <SpecularButton
             href={release.releasesPage}
             target="_blank"
+            onClick={() => trackGithubVisit('download_section_releases', release.releasesPage)}
             size="lg"
             radius={999}
             tint="#ffffff"
@@ -115,6 +118,9 @@ export const DownloadSection: React.FC = () => {
             <span>GitHub Releases</span>
             <ArrowUpRight size={14} className="opacity-60" />
           </SpecularButton>
+
+          {/* Share Aura */}
+          <ShareButton variant="pill" className="w-full sm:w-auto !py-3.5 !px-5 !text-sm justify-center shadow-sm" label="Share with Friends" />
         </div>
 
         {/* Specifications Grid */}

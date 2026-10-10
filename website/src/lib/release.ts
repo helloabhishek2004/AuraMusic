@@ -29,11 +29,23 @@ export const FALLBACK_RELEASE: ReleaseInfo = {
   releasesPage: GITHUB_RELEASES_PAGE,
 };
 
+import { trackDownload } from "./analytics";
+
 /**
  * Triggers an immediate browser download of the APK file without opening
  * any GitHub web pages.
  */
-export function initiateApkDownload(url: string = DIRECT_APK_DOWNLOAD_URL, filename = "AuraMusic.apk") {
+export function initiateApkDownload(
+  url: string = DIRECT_APK_DOWNLOAD_URL,
+  filename = "AuraMusic.apk",
+  source = "direct_download"
+) {
+  try {
+    trackDownload(filename, filename, source);
+  } catch (err) {
+    console.warn("Analytics error during download:", err);
+  }
+
   try {
     const link = document.createElement("a");
     link.href = url;
