@@ -1,10 +1,10 @@
+import { ArrowUp, Coffee } from 'lucide-react';
 import React from 'react';
-import { Coffee, ArrowUp } from 'lucide-react';
-import { GithubIcon } from './GithubIcon';
-import { AuraLogo } from './AuraLogo';
+import { trackGithubVisit, trackPageRedirect, trackPortfolioVisit, trackSocialVisit } from '../lib/analytics';
 import { AuraIconButton } from './AuraIconButton';
+import { AuraLogo } from './AuraLogo';
+import { GithubIcon } from './GithubIcon';
 import { ShareButton } from './ShareButton';
-import { trackGithubVisit, trackPortfolioVisit, trackSocialVisit, trackPageRedirect } from '../lib/analytics';
 
 interface FooterProps {
   onNavigatePrivacy?: () => void;
@@ -21,7 +21,7 @@ export const Footer: React.FC<FooterProps> = ({
 
   return (
     <footer className="relative z-[140] pt-16 sm:pt-32 pb-12 sm:pb-16 px-4 sm:px-6 overflow-hidden">
-      
+
       {/* ── Nebula Dissolving Into Deep Darkness Void ── */}
       <div
         className="absolute top-0 left-1/2 -translate-x-1/2 w-[90vw] sm:w-[80vw] max-w-[1000px] h-[200px] sm:h-[260px] rounded-full opacity-20 blur-[60px] sm:blur-[130px] pointer-events-none"
@@ -34,7 +34,7 @@ export const Footer: React.FC<FooterProps> = ({
       <div className="max-w-[1200px] mx-auto h-[1px] bg-gradient-to-r from-transparent via-white/[0.12] to-transparent mb-12 sm:mb-20" />
 
       <div className="max-w-[1200px] mx-auto flex flex-col items-center text-center">
-        
+
         {/* Luminous Brand Emblem with Subtle Glow */}
         <div className="mb-4 sm:mb-6">
           <AuraLogo size={40} glow className="text-white" />
@@ -101,7 +101,7 @@ export const Footer: React.FC<FooterProps> = ({
             Releases
           </a>
           <a
-            href="https://about-abhishek.vercel.app"
+            href="https://aboutabhishek.runs-on.dev"
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => trackPortfolioVisit('footer_links')}

@@ -1,18 +1,18 @@
-import React from 'react';
 import { Coffee, ExternalLink, Globe, Sparkles } from 'lucide-react';
-import { GithubIcon } from './GithubIcon';
-import { SpecularButton } from './SpecularButton';
+import React from 'react';
+import { trackGithubVisit, trackPortfolioVisit, trackSocialVisit } from '../lib/analytics';
 import { AuraChip } from './AuraChip';
 import BlurText from './BlurText';
-import { trackGithubVisit, trackPortfolioVisit, trackSocialVisit } from '../lib/analytics';
+import { GithubIcon } from './GithubIcon';
+import { SpecularButton } from './SpecularButton';
 
 export const CreatorStory: React.FC = () => {
   return (
     <section className="relative py-12 sm:py-20 px-3 sm:px-6 md:px-12 max-w-[1200px] mx-auto">
-      
+
       {/* ── Container with Soft Tonal Depth ── */}
       <div className="rounded-[28px] sm:rounded-[36px] bg-[#0A0912]/75 border border-white/[0.08] p-5 sm:p-8 md:p-12 relative overflow-hidden backdrop-blur-xl">
-        
+
         {/* Subtle Violet Nebula Glow */}
         <div
           className="absolute -top-[20%] -left-[10%] w-[320px] sm:w-[450px] h-[320px] sm:h-[450px] rounded-full opacity-20 blur-[60px] sm:blur-[100px] pointer-events-none"
@@ -20,7 +20,7 @@ export const CreatorStory: React.FC = () => {
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 sm:gap-10 items-center">
-          
+
           {/* Creator Profile (5 cols) */}
           <div className="lg:col-span-5 flex flex-col sm:flex-row lg:flex-col items-center sm:items-start text-center sm:text-left gap-6">
             {/* Avatar with Symmetrical Glass Border */}
@@ -77,9 +77,9 @@ export const CreatorStory: React.FC = () => {
                 </SpecularButton>
 
                 <SpecularButton
-                  href="https://about-abhishek.vercel.app"
+                  href="https://aboutabhishek.runs-on.dev"
                   target="_blank"
-                  onClick={() => trackPortfolioVisit('creator_story', 'https://about-abhishek.vercel.app')}
+                  onClick={() => trackPortfolioVisit('creator_story', 'https://aboutabhishek.runs-on.dev')}
                   size="sm"
                   radius={999}
                   tint="#ffffff"

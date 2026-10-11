@@ -6,10 +6,18 @@
  *  - Symmetrically bordered avatar container with AVATAR.png
  *  - Display name: @bh!shek
  *  - iOS-style frosted glass cards with high contrast & specular sheen
- *  - Links: Website (about-abhishek.vercel.app), GitHub (helloabishek2004), LinkedIn (abhisheks20)
+ *  - Links: Website (aboutabhishek.runs-on.dev), GitHub (helloabishek2004), LinkedIn (abhisheks20)
  *  - Authentic "Buy me a coffee" button modeled precisely from the design reference
  */
 
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Linking from 'expo-linking';
+import { useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import React, { memo, useCallback, useEffect } from 'react';
 import {
   Alert,
@@ -22,24 +30,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import { Image } from 'expo-image';
-import * as Haptics from 'expo-haptics';
-import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
 import Animated, {
+  Easing as ReanimatedEasing,
   useAnimatedStyle,
   useSharedValue,
-  withRepeat,
-  withTiming,
   withDelay,
+  withRepeat,
   withSpring,
-  Easing as ReanimatedEasing,
+  withTiming,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -58,7 +58,7 @@ export const CREATOR_PROFILE = {
   subtitle: 'AuraMusic Architecture & Design',
   intro:
     'AuraMusic is an independent music player crafted by @bh!shek — combining a love for music, deep software engineering, and thoughtful Liquid Glass design.',
-  websiteUrl: 'https://about-abhishek.vercel.app',
+  websiteUrl: 'https://aboutabhishek.runs-on.dev',
   githubUrl: 'https://github.com/helloabishek2004',
   linkedInUrl: 'https://linkedin.com/in/abhisheks20',
   buyMeACoffeeUrl: 'https://buymeacoffee.com/helloabhisy',
