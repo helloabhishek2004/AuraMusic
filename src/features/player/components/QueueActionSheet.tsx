@@ -29,15 +29,17 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   FadeIn,
+  FadeOut,
   SlideInDown,
   SlideOutDown,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import { getArtworkUrl } from '@/src/features/player/utils/track-identity';
 import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
 import { AuraArtwork } from '@/src/components/ui/aura-artwork';
 import { PlayerTrack } from '../types/player';
+import { useReducedMotionPreference } from '@/src/hooks/use-accessibility-preferences';
 import { palette, radius, spacing } from '@/src/design/tokens';
 import { useDownloadStore } from '../../download/store/download.store';
 import { DownloadManager } from '../../download/services/download.manager';
@@ -200,6 +202,7 @@ export const QueueActionSheet = ({
   trackIndex,
 }: QueueActionSheetProps) => {
   const insets = useSafeAreaInsets();
+  const reduceMotion = useReducedMotionPreference();
 
   useBackHandler({
     id: 'queue-action-sheet',
@@ -262,8 +265,8 @@ export const QueueActionSheet = ({
 
       {/* Sheet */}
       <Animated.View
-        entering={SlideInDown.springify().damping(22).stiffness(200).mass(0.8)}
-        exiting={SlideOutDown.springify().damping(22).stiffness(200)}
+        entering={reduceMotion ? FadeIn.duration(150) : SlideInDown.springify().damping(24).stiffness(220).mass(0.85)}
+        exiting={reduceMotion ? FadeOut.duration(120) : SlideOutDown.springify().damping(24).stiffness(220)}
         style={[
           s.sheet,
           { paddingBottom: Math.max(insets.bottom + 16, 24) },

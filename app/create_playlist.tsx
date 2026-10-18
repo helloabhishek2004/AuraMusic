@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import { usePlaylistStore } from '@/src/features/playlist/store/playlist.store';
 import { useDownloadStore } from '@/src/features/download/store/download.store';
 import type { PlayerTrack } from '@/src/features/player/types/player';

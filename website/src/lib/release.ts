@@ -7,7 +7,7 @@ export const GITHUB_REPO = "AuraMusic";
 export const GITHUB_RELEASES_PAGE = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases`;
 
 // Verified direct download URL for the universal signed Android APK
-export const DIRECT_APK_DOWNLOAD_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/v3.0.0/AuraMusic-v3.0.0-universal.apk`;
+export const DIRECT_APK_DOWNLOAD_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/v3.1.0/AuraMusic-v3.1.0-universal.apk`;
 
 export interface ReleaseInfo {
   version: string;
@@ -20,12 +20,12 @@ export interface ReleaseInfo {
 }
 
 export const FALLBACK_RELEASE: ReleaseInfo = {
-  version: "v3.0.0",
-  tag: "v3.0.0",
+  version: "v3.1.0",
+  tag: "v3.1.0",
   apkUrl: DIRECT_APK_DOWNLOAD_URL,
-  apkName: "AuraMusic-v3.0.0-universal.apk",
+  apkName: "AuraMusic-v3.1.0-universal.apk",
   apkSize: "113.6 MB",
-  publishedDate: "September 30, 2026",
+  publishedDate: "October 18, 2026",
   releasesPage: GITHUB_RELEASES_PAGE,
 };
 
@@ -80,7 +80,7 @@ export async function fetchLatestRelease(): Promise<ReleaseInfo> {
     }
 
     const data = await res.json();
-    const tag = data.tag_name || "v3.0.0";
+    const tag = data.tag_name || "v3.1.0";
     const assets: Array<{ name: string; size: number; browser_download_url: string }> = data.assets || [];
 
     // Find the APK file

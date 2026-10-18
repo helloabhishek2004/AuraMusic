@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import * as Haptics from "expo-haptics";
+import * as Haptics from '@/src/utils/haptics';
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -41,6 +41,8 @@ import AddToPlaylistSheet from "@/src/features/playlist/components/AddToPlaylist
 import { getTrackArtwork, getArtworkUrl } from "@/src/features/player/utils/track-identity";
 import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
 import { AuraArtwork } from "@/src/components/ui/aura-artwork";
+import { useReducedMotionPreference } from "@/src/hooks/use-accessibility-preferences";
+import { MotionSpring } from "@/src/design/motion";
 
 type AnimatedPanGestureEvent = {
   nativeEvent: {
@@ -57,8 +59,8 @@ const isTablet = SW >= 768;
 const SHEET_H = SH * 0.88; // Slightly taller for better queue visibility
 const ROW_H = 76; 
 
-// Spring configs - Refined for "buttery smooth" feel
-const SPR_SHEET = { damping: 24, stiffness: 220, mass: 0.8 };
+// Spring configs - Refined for "buttery smooth" physical feel
+const SPR_SHEET = MotionSpring.QUEUE_SHEET;
 const SPR_ROW = { damping: 20, stiffness: 200 };
 
 // ─── Colour helpers ───────────────────────────────────────────────────────────
@@ -207,6 +209,7 @@ export const QueueSheet = ({
   const insets = useSafeAreaInsets();
   const queue = usePlayerStore((s) => s.queue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
+  const currentIndex = usePlayerStore((s) => s.currentIndex);
   const isShuffle = usePlayerStore((s) => s.isShuffle);
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
   const reorderQueue = usePlayerStore((s) => s.reorderQueue);
@@ -214,6 +217,10 @@ export const QueueSheet = ({
   const addToQueue = usePlayerStore((s) => s.addToQueue);
   const toggleShuffle = usePlayerStore((s) => s.toggleShuffle);
   const isReordering = usePlayerStore((s) => s.isReordering);
+
+  // FlatList ref for auto-scrolling
+  const flatListRef = useRef<any>(null);
+  const prevVisibleRef = useRef<boolean>(false);
 
   // Local copy for smooth dragging
   const [localQueue, setLocalQueue] = useState<PlayerTrack[]>([]);
@@ -224,31 +231,71 @@ export const QueueSheet = ({
     }
   }, [queue, isReordering]);
 
+  // Auto-scroll to active track when Queue sheet opens
+  useEffect(() => {
+    const wasVisible = prevVisibleRef.current;
+    prevVisibleRef.current = isVisible;
+
+    if (isVisible && !wasVisible) {
+      const activeIdx = usePlayerStore.getState().currentIndex;
+      if (activeIdx >= 0 && activeIdx < queue.length) {
+        // Allow sheet spring animation to start and layout to measure
+        const timer = setTimeout(() => {
+          try {
+            // Keep active track centered with surrounding tracks visible
+            // ROW_H (76) + gap (10) = 86px per item
+            const itemHeight = ROW_H + 10;
+            const targetOffset = Math.max(0, activeIdx * itemHeight - 120);
+            flatListRef.current?.scrollToOffset({
+              offset: targetOffset,
+              animated: true,
+            });
+          } catch (e) {
+            // Safe fallback: scrollToIndex if available
+            try {
+              flatListRef.current?.scrollToIndex({
+                index: activeIdx,
+                viewPosition: 0.3,
+                animated: true,
+              });
+            } catch (_) {}
+          }
+        }, 180);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isVisible, queue.length]);
+
   // Action sheet state
   const [actionTrack, setActionTrack] = useState<PlayerTrack | null>(null);
   const [actionIndex, setActionIndex] = useState<number>(-1);
   const [addToPlaylistTrack, setAddToPlaylistTrack] = useState<PlayerTrack | null>(null);
+  const reduceMotion = useReducedMotionPreference();
 
   // Sheet gesture-dismiss
   const handleY = useSharedValue(0);
   const sheetAnim = useSharedValue(SHEET_H);
 
   useEffect(() => {
+    if (reduceMotion) {
+      sheetAnim.value = withTiming(isVisible ? 0 : SHEET_H, { duration: 150 });
+      return;
+    }
     sheetAnim.value = withSpring(isVisible ? 0 : SHEET_H, SPR_SHEET);
-  }, [isVisible, sheetAnim]);
+  }, [isVisible, sheetAnim, reduceMotion]);
 
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: sheetAnim.value + Math.max(0, handleY.value) }],
-    opacity: withTiming(isVisible ? 1 : 0.9, { duration: 200 }),
+    opacity: withTiming(isVisible ? 1 : 0.9, { duration: reduceMotion ? 140 : 200 }),
   }));
 
   const backdropOpacity = useSharedValue(0);
   useEffect(() => {
     backdropOpacity.value = withTiming(isVisible ? 1 : 0, { 
-      duration: isVisible ? 240 : 300,
+      duration: reduceMotion ? 140 : (isVisible ? 240 : 280),
       easing: Easing.out(Easing.cubic)
     });
-  }, [isVisible, backdropOpacity]);
+  }, [isVisible, backdropOpacity, reduceMotion]);
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: backdropOpacity.value,
   }));
@@ -263,15 +310,26 @@ export const QueueSheet = ({
         state === GestureState.CANCELLED ||
         state === GestureState.FAILED
       ) {
-        if (translationY > 100 || velocityY > 800) {
-          handleY.value = withSpring(SHEET_H, SPR_SHEET);
-          onClose();
+        if (translationY > 90 || velocityY > 600) {
+          if (reduceMotion) {
+            handleY.value = withTiming(SHEET_H, { duration: 140 }, () => {
+              onClose();
+            });
+          } else {
+            handleY.value = withSpring(SHEET_H, { ...SPR_SHEET, velocity: velocityY }, () => {
+              onClose();
+            });
+          }
         } else {
-          handleY.value = withSpring(0, SPR_SHEET);
+          if (reduceMotion) {
+            handleY.value = withTiming(0, { duration: 140 });
+          } else {
+            handleY.value = withSpring(0, { ...SPR_SHEET, velocity: velocityY });
+          }
         }
       }
     },
-    [handleY, onClose],
+    [handleY, onClose, reduceMotion],
   );
 
   const onDragEnd = useCallback(
@@ -286,10 +344,9 @@ export const QueueSheet = ({
   );
 
   const handleTrackPress = useCallback(
-    async (trackId: string) => {
+    async (index: number) => {
       const state = usePlayerStore.getState();
-      const index = state.queue.findIndex((t: PlayerTrack) => t.id === trackId);
-      if (index === -1 || index === state.currentIndex) return;
+      if (index < 0 || index >= state.queue.length || index === state.currentIndex) return;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       await state.jumpToQueueIndex(index);
       onClose();
@@ -298,9 +355,7 @@ export const QueueSheet = ({
   );
 
   const handleMenuPress = useCallback(
-    (track: PlayerTrack) => {
-      const state = usePlayerStore.getState();
-      const index = state.queue.findIndex((t: PlayerTrack) => t.id === track.id);
+    (track: PlayerTrack, index: number) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setActionTrack(track);
       setActionIndex(index);
@@ -317,8 +372,9 @@ export const QueueSheet = ({
   );
 
   const renderItem = useCallback(
-    ({ item, drag, isActive }: RenderItemParams<PlayerTrack>) => {
-      const isPlaying = item.id === currentTrack?.id;
+    ({ item, getIndex, drag, isActive }: RenderItemParams<PlayerTrack>) => {
+      const itemIndex = getIndex?.() ?? -1;
+      const isPlaying = itemIndex !== -1 ? itemIndex === currentIndex : item.id === currentTrack?.id;
       
       return (
         <ScaleDecorator>
@@ -333,8 +389,8 @@ export const QueueSheet = ({
                 accentColor={accentColor}
                 isPlaying={isPlaying}
                 isActive={isActive}
-                onPress={() => handleTrackPress(item.id)}
-                onMenuPress={() => handleMenuPress(item)}
+                onPress={() => handleTrackPress(itemIndex)}
+                onMenuPress={() => handleMenuPress(item, itemIndex)}
                 onDrag={drag}
               />
             </TouchableOpacity>
@@ -342,7 +398,7 @@ export const QueueSheet = ({
         </ScaleDecorator>
       );
     },
-    [currentTrack, accentColor, handleTrackPress, handleMenuPress],
+    [currentIndex, currentTrack, accentColor, handleTrackPress, handleMenuPress],
   );
 
 
@@ -429,9 +485,10 @@ export const QueueSheet = ({
 
         <View style={s.listWrap}>
           <DraggableFlatList
+            ref={flatListRef}
             data={localQueue}
             onDragEnd={onDragEnd}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) => `${item.id}_${index}`}
             renderItem={renderItem}
             containerStyle={s.listContainer}
             contentContainerStyle={s.listContent}

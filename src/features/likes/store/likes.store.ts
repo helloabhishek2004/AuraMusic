@@ -20,6 +20,7 @@ interface LikesActions {
   isLiked: (trackId: string) => boolean;
   getLikedIds: () => string[];
   clearLikes: () => void;
+  restoreLikes: (likedTrackIds: Record<string, boolean>, likedAt: Record<string, number>, trackMetadata: Record<string, Partial<PlayerTrack>>) => void;
   backfillAutoDownloads: () => Promise<void>;
 }
 
@@ -113,6 +114,17 @@ export const useLikesStore = create<LikesState & LikesActions>()(
 
       clearLikes: () => {
         set({ likedTrackIds: {}, likedAt: {}, trackMetadata: {}, latestLikedTrackId: null });
+      },
+
+      restoreLikes: (likedTrackIds, likedAt, trackMetadata) => {
+        const ids = Object.keys(likedTrackIds || {});
+        const latestId = ids.length > 0 ? ids[ids.length - 1] : null;
+        set({
+          likedTrackIds: likedTrackIds || {},
+          likedAt: likedAt || {},
+          trackMetadata: trackMetadata || {},
+          latestLikedTrackId: latestId,
+        });
       },
 
       backfillAutoDownloads: async () => {

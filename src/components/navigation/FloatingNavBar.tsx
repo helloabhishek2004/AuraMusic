@@ -34,7 +34,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 import { palette } from '@/src/design/tokens';

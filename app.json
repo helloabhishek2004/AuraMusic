@@ -2,7 +2,7 @@
   "expo": {
     "name": "AuraMusic",
     "slug": "AuraMusic",
-    "version": "3.0.0",
+    "version": "3.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "auramusic",
@@ -17,7 +17,7 @@
     },
     "android": {
       "allowBackup": true,
-      "versionCode": 4,
+      "versionCode": 5,
       "adaptiveIcon": {
         "backgroundColor": "#57278A",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

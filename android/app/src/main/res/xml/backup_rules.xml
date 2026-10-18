@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Allowlist: Only include the specific durable databases and preferences -->
+    <!-- When <include> elements are present, Android excludes all other files by default -->
+    <include domain="database" path="aura_music.db" />
+    <include domain="database" path="aura_music.db-wal" />
+    <include domain="database" path="aura_music.db-shm" />
+    <include domain="database" path="RKStorage" />
+    <include domain="database" path="RKStorage.db" />
+    <include domain="database" path="AsyncStorage" />
+    <include domain="database" path="AsyncStorage.db" />
+    <include domain="sharedpref" path="aura_player_prefs.xml" />
+</full-backup-content>

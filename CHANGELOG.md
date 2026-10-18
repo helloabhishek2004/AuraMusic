@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [3.1.0] - 2026-10-18
+
+### The Autonomous Resilience & Daily Evolution Release
+
+AuraMusic v3.1.0 delivers a major leap in offline resilience, navigation ergonomics, and personalization. Highlights include an on-device **Scoped Storage Backup & Recovery Engine** (`Documents/AuraMusic/backup.json`) persisting libraries across complete uninstalls, **Forensic Download Engine** fixes with native Android progress/completion notifications, an **Evolving Daily Home Feed**, **In-Screen Library Search**, **Queue Auto-Scroll to Active Track**, and a **Unified 60 FPS Motion System**.
+
+### Added
+* **Offline Scoped Storage Backup & Recovery Engine (`Documents/AuraMusic/backup.json`):**
+  * Android MediaStore / Scoped Storage engine (`LocalBackupManager.kt`, `local-backup.service.ts`) enabling full user state persistence across complete app uninstalls and re-installs without user accounts or cloud servers.
+  * Cold-start backup detection on fresh installation: silently inspects public `Documents/AuraMusic/` on first launch and displays a clean modal ("Previous Library Found: Found a local backup with X songs and Y playlists...") with 1-tap restore or skip.
+  * Automated debounced background sync of `backup.json` whenever Room database entities change and when the app transitions to the background.
+  * Manual "Backup Now" and "Restore Backup" actions in Settings with SHA-256 integrity checksums, schema versioning, and atomic temporary writes.
+  * Disabled legacy Google Cloud Backup UI items with clear "Temporarily disabled" notice while preserving backend code intact.
+* **Forensic Download Engine & Native Download Notifications:**
+  * Native Media3 download event listener integration bridging native download state transitions directly to the React Native Zustand store.
+  * Lifecycle-safe concurrency slot recovery in `download-queue-manager.ts` ensuring failure, cancellation, network drop, and bridge timeouts release active slots to prevent permanent queue lockups.
+  * Genuine Android system notifications (`AuraDownloadService.kt`) with dedicated `FOREGROUND_SERVICE_DATA_SYNC` notification channels displaying active progress, bytes, completion, and failure states even when the app is backgrounded or killed.
+* **Evolving Daily Home Feed:**
+  * Deterministic recommendation and feed rotation engine (`daily-feed-evolution.service.ts`) synthesizing daily-seeded personal playlists ("Daily Mix 1: Flow", "Daily Energy Booster", "Late Night Atmospheric") from organic listening history, liked tracks, skips, and language affinities.
+  * Daily rotating hero visual assets and 0ms instantaneous cold-start via disk cache fallback.
+* **In-Screen Library & Downloads Search:**
+  * High-performance local search input added to `app/downloads.tsx` and `app/(tabs)/library.tsx` (Liked Songs) with instant substring filtering on track title, artist, and album.
+  * Preserves active sort criteria and renders responsive empty states when no items match.
+* **Universal Haptic Feedback Engine:**
+  * Persistent Haptics toggle in Settings (`src/features/settings/store/settings.store.ts`) governing all tactile interactions throughout the app.
+  * Subtle, consistent native Android haptic feedback on playback controls, like toggles, and sheet open/dismiss interactions.
+* **Fluid 60 FPS Motion System:**
+  * Centralized motion and physics tokens (`src/design/motion.ts`) providing consistent spring and ease transitions for page-entries, sheets, dialogs, and player expansion.
+  * System-wide reduced-motion preference detection and blur optimization guards preventing UI stutter during intensive animations.
+
+### Changed
+* **Queue Navigation Ergonomics:** Opening the Queue sheet from Now Playing automatically and smoothly scrolls to the currently active track based on unique item identity rather than simple track ID, without forcing Now Playing to close or resetting queue scroll state.
+* **Non-Intrusive Playback Selection:** Tapping any track from Home, Search, Downloads, or Liked Songs starts immediate playback while keeping the user on the current screen with mini-player synchronization, reserving full-screen Now Playing expansion for explicit user taps.
+* Upgraded Android build configuration: `versionCode 5`, `versionName 3.1.0`.
+* Upgraded web release configuration and documentation to `v3.1.0`.
+
+### Fixed
+* **Universal Haptics Enforcement:** Fully routed all tactile interactions across bottom navigation (`FloatingNavBar.tsx`), search (`search.tsx`), `press-scale.tsx`, library, and sheet components through `@/src/utils/haptics`. Completely eliminated direct `expo-haptics` calls to guarantee 100% vibration-free operation when haptics are disabled in Settings.
+* **Scoped Storage Restore Across Re-installs (`EACCES` Resolution):** Declared `MANAGE_EXTERNAL_STORAGE`, integrated MediaScanner indexing, and added Android Storage Access Framework (SAF) document picker fallback (`pickAndRestoreBackup()`) so users can restore `Documents/AuraMusic/backup.json` seamlessly without permission denials on Android 10+ / 14+.
+* **Artist Page Polish & Taste Profile Synchronization:** Removed the dummy 3-dots action button from `FloatingControlPanel` on `app/artist/[id].tsx`. Connected the Follow button directly to `useTasteProfileStore`, saving followed artists to user preferences and dynamically updating recommendation engine priors.
+
+---
+
 ## [3.0.0] - 2026-09-29
 
 ### The Sonic Nebula & Connected Experience Release

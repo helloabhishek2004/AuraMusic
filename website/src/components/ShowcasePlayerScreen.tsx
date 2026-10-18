@@ -123,7 +123,7 @@ export const ShowcasePlayerScreen: React.FC<ShowcasePlayerScreenProps> = ({ onLy
               />
             </button>
             <button
-              onClick={() => trackDownload('v3.0.0', 'asap_rocky_offline_sample.mp3', 'showcase_player')}
+              onClick={() => trackDownload('v3.1.0', 'asap_rocky_offline_sample.mp3', 'showcase_player')}
               className="p-1 text-white/80 hover:text-white transition-colors"
               title="Download Offline"
             >

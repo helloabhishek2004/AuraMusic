@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -14,9 +14,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import Animated, {
   useAnimatedStyle,
+  useSharedValue,
   withSpring,
+  withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MotionSpring, MotionTiming } from '@/src/design/motion';
+import { useReducedMotionPreference } from '@/src/hooks/use-accessibility-preferences';
 import { PlayerTrack } from '../types/player';
 import { getArtworkUrl } from "../../player/utils/track-identity";
 import { resolveArtwork } from "../../player/utils/artwork-resolver";
@@ -24,8 +28,6 @@ import { AuraArtwork } from "@/src/components/ui/aura-artwork";
 import { useArtistEnrichment } from "../../../hooks/use-artist-enrichment";
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
-
-const SPRING_CONFIG = { damping: 20, stiffness: 150, mass: 1 };
 
 interface InsightPanelProps {
   isVisible: boolean;
@@ -36,15 +38,39 @@ interface InsightPanelProps {
 
 export const InsightPanel = ({ isVisible, onClose, track, accentColor }: InsightPanelProps) => {
   const insets = useSafeAreaInsets();
-  
+  const reduceMotion = useReducedMotionPreference();
+  const panelY = useSharedValue(-SCREEN_HEIGHT);
+  const opacity = useSharedValue(0);
+
   // 1. Fetch Enriched Artist Metadata
   const { enrichedArtist, isLoading, hasEnrichment } = useArtistEnrichment(track.artist);
 
+  useEffect(() => {
+    if (isVisible) {
+      if (reduceMotion) {
+        panelY.value = 0;
+        opacity.value = withTiming(1, { duration: MotionTiming.REDUCED });
+      } else {
+        panelY.value = withSpring(0, MotionSpring.QUEUE_SHEET);
+        opacity.value = withTiming(1, { duration: MotionTiming.FAST });
+      }
+    } else {
+      if (reduceMotion) {
+        panelY.value = -SCREEN_HEIGHT;
+        opacity.value = withTiming(0, { duration: MotionTiming.FAST });
+      } else {
+        panelY.value = withSpring(-SCREEN_HEIGHT, MotionSpring.STANDARD);
+        opacity.value = withTiming(0, { duration: MotionTiming.FAST });
+      }
+    }
+  }, [isVisible, reduceMotion]);
+
   const panelStyle = useAnimatedStyle(() => {
     return {
+      opacity: opacity.value,
       transform: [
         {
-          translateY: withSpring(isVisible ? 0 : -SCREEN_HEIGHT, SPRING_CONFIG),
+          translateY: panelY.value,
         },
       ],
     };
@@ -56,7 +82,10 @@ export const InsightPanel = ({ isVisible, onClose, track, accentColor }: Insight
   const subscribers = hasEnrichment ? enrichedArtist?.subscribers : null;
 
   return (
-    <Animated.View style={[styles.panel, panelStyle, { paddingTop: insets.top + 20 }]}>
+    <Animated.View
+      style={[styles.panel, panelStyle, { paddingTop: insets.top + 20 }]}
+      pointerEvents={isVisible ? 'auto' : 'none'}
+    >
       {Platform.OS === 'ios' ? (
         <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
       ) : (

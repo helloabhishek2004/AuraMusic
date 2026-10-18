@@ -1,0 +1,12 @@
+<resources>
+  <string name="app_name">AuraMusic</string>
+  <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
+  <string name="expo_system_ui_user_interface_style" translatable="false">automatic</string>
+  <string name="download_channel_name">Downloads</string>
+  <string name="download_channel_description">Active and completed download notifications</string>
+  <string name="downloading">Downloading…</string>
+  <string name="download_completed">Download complete</string>
+  <string name="download_failed">Download failed</string>
+  <string name="playback_channel_name">Playback</string>
+  <string name="playback_channel_description">Active music playback and controls</string>
+</resources>

@@ -1,22 +1,22 @@
-import React, { useState, useEffect } from 'react';
 import {
-  Shield,
   ArrowLeft,
-  Lock,
-  Database,
-  Wifi,
-  EyeOff,
-  FolderLock,
-  CloudOff,
-  Trash2,
-  Users,
-  Scale,
-  FileText,
-  Mail,
   CheckCircle2,
+  CloudOff,
+  Database,
+  EyeOff,
+  FileText,
+  FolderLock,
   HardDrive,
   Key,
+  Lock,
+  Mail,
+  Scale,
+  Shield,
+  Trash2,
+  Users,
+  Wifi,
 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 import { AuraLogo } from '../components/AuraLogo';
 import { GithubIcon } from '../components/GithubIcon';
 
@@ -141,11 +141,11 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({
             Privacy Policy & Data Transparency
           </h1>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-4 text-xs font-mono text-white/50">
-            <span>Effective Date: September 26, 2026</span>
+            <span>Effective Date: October 26, 2026</span>
             <span>•</span>
-            <span>Last Updated: September 26, 2026</span>
+            <span>Last Updated: October 26, 2026</span>
             <span>•</span>
-            <span className="text-[#46F5E0]">Applies to AuraMusic v3.0.0+ & Web</span>
+            <span className="text-[#46F5E0]">Applies to AuraMusic v3.1.0+ & Web</span>
           </div>
 
           {/* Key Facts Summary Box */}
@@ -188,11 +188,10 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({
                   <button
                     key={sec.id}
                     onClick={() => scrollTo(sec.id)}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-colors leading-snug truncate block ${
-                      activeSection === sec.id
-                        ? 'bg-[#BF5AF2]/20 text-[#DAB9FF] font-semibold'
-                        : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
-                    }`}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-colors leading-snug truncate block ${activeSection === sec.id
+                      ? 'bg-[#BF5AF2]/20 text-[#DAB9FF] font-semibold'
+                      : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
+                      }`}
                   >
                     {sec.title}
                   </button>
@@ -676,7 +675,7 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({
                   <span className="text-white/50 uppercase font-mono tracking-wider text-[10px]">Maintainer Contact</span>
                   <div className="font-medium text-white flex items-center gap-1.5">
                     <Mail className="w-3.5 h-3.5 text-[#46F5E0]" />
-                    <span className="text-white">abhishekdq2004@gmail.com</span>
+                    <span className="text-white">helloabhisheks25@gmail.com</span>
                   </div>
                   <p className="text-white/60 text-[11px]">
                     [Grievance Officer / Maintainer Communication Channel]

@@ -34,7 +34,7 @@ const FAQS: FaqItem[] = [
   },
   {
     question: 'Where can I safely download the official AuraMusic APK?',
-    answer: 'The official signed release is distributed exclusively through the developer GitHub repository at github.com/helloabhishek2004/AuraMusic/releases. The primary build is AuraMusic-v3.0.0-universal.apk (113.6 MB). Never download AuraMusic APKs from untrusted third-party mirror portals.',
+    answer: 'The official signed release is distributed exclusively through the developer GitHub repository at github.com/helloabhishek2004/AuraMusic/releases. The primary build is AuraMusic-v3.1.0-universal.apk (114.2 MB). Never download AuraMusic APKs from untrusted third-party mirror portals.',
     icon: <Smartphone size={18} className="text-[#BF5AF2]" />
   },
   {

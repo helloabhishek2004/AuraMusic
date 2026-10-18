@@ -18,7 +18,7 @@ import { AuraArtwork } from '@/src/components/ui/aura-artwork';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 
 import { AtmosphericBackground } from '@/src/components/ui/atmospheric-background';
 import { LiquidGlass } from '@/src/components/ui/liquid-glass';

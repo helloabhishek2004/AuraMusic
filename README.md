@@ -11,7 +11,7 @@
 
   <!-- Badges -->
   <p align="center">
-    <a href="#-tech-stack"><img src="https://img.shields.io/badge/Version-v3.0.0-8A2BE2?style=for-the-badge&logo=android&logoColor=white" alt="Version" /></a>
+    <a href="#-tech-stack"><img src="https://img.shields.io/badge/Version-v3.1.0-8A2BE2?style=for-the-badge&logo=android&logoColor=white" alt="Version" /></a>
     <a href="#-tech-stack"><img src="https://img.shields.io/badge/Platform-Android%20First-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Platform" /></a>
     <a href="#-architecture"><img src="https://img.shields.io/badge/Core-Kotlin%20%7C%20Media3-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Native Core" /></a>
     <a href="#-tech-stack"><img src="https://img.shields.io/badge/Framework-Expo%20SDK%2055-000020?style=for-the-badge&logo=expo&logoColor=white" alt="Expo" /></a>
@@ -38,7 +38,7 @@
     <a href="#-ai-engineering-tooling"><b>AI Tools</b></a>
   </p>
 
-  <sub>🚀 <b>v3.0.0 — Official Release</b> | Distributed as source code & standalone signed APK builds.</sub>
+  <sub>🚀 <b>v3.1.0 — Official Release</b> | Distributed as source code & standalone signed APK builds.</sub>
 
 </div>
 
@@ -482,7 +482,7 @@ Contributions to AuraMusic are welcome. To maintain architectural stability and 
 If you encounter bugs, unexpected crashes, or playback errors, please open an issue on the [GitHub Issues](https://github.com/helloabhishek2004/AuraMusic/issues) page.
 
 Please include the following details in your report:
-* **AuraMusic Version:** (e.g., `v3.0.0`)
+* **AuraMusic Version:** (e.g., `v3.1.0`)
 * **Device Model:** (e.g., `Google Pixel 7`, `Samsung Galaxy S22`, `Vivo I2202`)
 * **Android OS Version:** (e.g., `Android 14 / API 34`)
 * **Steps to Reproduce:** Clear, sequential steps leading to the issue.
@@ -493,21 +493,25 @@ Please include the following details in your report:
 
 ## 🗺 Roadmap
 
-### Current (v3.0.0)
+### Current (v3.1.0)
+- [x] Offline Scoped Storage Backup & Recovery Engine (`Documents/AuraMusic/backup.json`) with cold-start detection and auto-sync.
+- [x] Forensic Download Engine: Media3 event listener integration and slot recovery preventing queue lockups.
+- [x] Genuine native Android download notifications with active progress, completion, and failure channels (`FOREGROUND_SERVICE_DATA_SYNC`).
+- [x] Evolving Daily Home Feed with deterministic personal mixes ("Flow", "Energy Booster", "Late Night Atmospheric") and daily rotating hero assets.
+- [x] In-Screen search filtering across Downloads and Liked Songs library.
+- [x] Persistent Universal Haptic Feedback preference and native Android tactile integration.
+- [x] Unified 60 FPS Motion System (`motion.ts`) with reduced-motion accessibility support.
+- [x] Queue auto-scroll to active track identity and non-intrusive background playback selection.
 - [x] Complete migration to Kotlin Native Music Core & AndroidX Media3.
 - [x] Direct on-device stream resolution (InnerTube WEB_REMIX & AndroidVR fallback).
 - [x] On-device Room database persistence for history, lyrics, and playlists.
-- [x] Native offline download queue manager and cache reconciliation.
 - [x] Multi-provider synced lyrics system (LRCLIB & KuGou).
 - [x] Liquid Glass aesthetic and gesture-driven Now Playing interface.
 - [x] The Sonic Nebula Onboarding (9-step atmospheric flow with animated hello stroke SVG, curved name input, and dynamic artist discovery loader).
 - [x] Taste Profile prior layer with mathematical cold-start prior decay (`decayFactor = max(0.1, 1.0 - H/40)`).
 - [x] Dedicated Taste Profile Editor & Safe Reset screen (`/music_taste`).
 - [x] Personal connected libraries (YouTube Music, Spotify, Apple Music) with automated data purging on disconnect.
-- [x] Android Auto Cloud Backup allowlist, local database checkpointing, and post-restore integrity validator.
-- [x] Native Android backup & restore status notifications with manual restore trigger in Settings.
 - [x] 120Hz high refresh rate hardware render synchronization.
-- [x] On-device AI recommendation architecture audit & candidate generation foundation (Gemini Nano ready).
 
 ### Planned (Near-Term)
 - [ ] Enhanced local library tag editing and embedded ID3 artwork extraction.

@@ -17,6 +17,12 @@ interface TrackDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(track: TrackEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(tracks: List<TrackEntity>)
+
+    @Query("SELECT * FROM tracks")
+    suspend fun getAllTracks(): List<TrackEntity>
+
     @Query("SELECT * FROM tracks WHERE id = :id")
     suspend fun getById(id: String): TrackEntity?
 
@@ -49,6 +55,12 @@ interface TrackDao {
 interface HistoryDao {
     @Insert
     suspend fun insert(entry: HistoryEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(entries: List<HistoryEntity>)
+
+    @Query("SELECT * FROM history ORDER BY timestamp DESC")
+    suspend fun getAllHistory(): List<HistoryEntity>
 
     @Transaction
     @Query("SELECT * FROM history ORDER BY timestamp DESC LIMIT :limit")

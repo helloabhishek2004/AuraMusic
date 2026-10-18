@@ -23,7 +23,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { LiquidAtmosphereBackground } from "@/src/components/ui/LiquidAtmosphereBackground";
-import * as Haptics from "expo-haptics";
+import * as Haptics from '@/src/utils/haptics';
 
 const { width: SW } = Dimensions.get("window");
 const isTablet = SW >= 768;

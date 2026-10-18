@@ -24,7 +24,7 @@ import {
 import { FlashList } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1355,6 +1355,7 @@ export default function HomeScreen() {
   const recsReadiness = useRecommendationsStore(s => s.readiness);
   const refreshDiscover = useRecommendationsStore(s => s.refreshDiscover);
   const generateRecommendations = useRecommendationsStore(s => s.generateRecommendations);
+  const evolveDailyFeedIfNeeded = useRecommendationsStore(s => s.evolveDailyFeedIfNeeded);
 
   const [refreshing, setRefreshing] = useState(false);
   const [isRotatingDiscover, setIsRotatingDiscover] = useState(false);
@@ -1380,22 +1381,30 @@ export default function HomeScreen() {
       if (refreshDiscover) {
         await refreshDiscover(true);
       }
-      await generateRecommendations();
+      if (evolveDailyFeedIfNeeded) {
+        await evolveDailyFeedIfNeeded(true);
+      } else {
+        await generateRecommendations();
+      }
     } catch (err) {
       console.warn('[HomeScreen] Refresh error:', err);
     } finally {
       setRefreshing(false);
     }
-  }, [refreshDiscover, generateRecommendations]);
+  }, [refreshDiscover, evolveDailyFeedIfNeeded, generateRecommendations]);
 
   useEffect(() => {
     console.info('[HomeScreen] Mounted and interactive');
-    const recs = useRecommendationsStore.getState();
-    if (!recs.trendingSeeds || recs.trendingSeeds.length === 0) {
-      if (recs.refreshDiscover) {
-        recs.refreshDiscover(false).catch(() => undefined);
+    requestIdleTask(() => {
+      const recs = useRecommendationsStore.getState();
+      if (recs.evolveDailyFeedIfNeeded) {
+        recs.evolveDailyFeedIfNeeded(false).catch(() => undefined);
+      } else if (!recs.trendingSeeds || recs.trendingSeeds.length === 0) {
+        if (recs.refreshDiscover) {
+          recs.refreshDiscover(false).catch(() => undefined);
+        }
       }
-    }
+    });
   }, []);
 
   const handlePlayTrack = useCallback((track: any) => {
@@ -1551,14 +1560,15 @@ export default function HomeScreen() {
             </View>
         );
       case 'hero': {
-        const heroTag = item.data.id === 'time-night' ? 'NIGHT VIBES' :
+        const heroTag = item.data.heroTag ||
+                        (item.data.id === 'time-night' ? 'NIGHT VIBES' :
                         item.data.id === 'time-morning' ? 'MORNING ENERGY' :
                         item.data.id === 'mix-on-repeat' ? 'ON REPEAT' :
                         item.data.id === 'mix-repeat-rewind' ? 'REPEAT REWIND' :
                         item.data.id === 'mix-discover-weekly' ? 'DISCOVER WEEKLY' :
                         item.data.id === 'mix-deep-cuts' ? 'DEEP CUTS' :
                         item.data.id === 'mix-made-for-you' ? 'MADE FOR YOU' :
-                        item.heroType === 'mix' ? 'FEATURED PLAYLIST' : 'FEATURED TRACK';
+                        item.heroType === 'mix' ? 'FEATURED PLAYLIST' : 'FEATURED TRACK');
         const heroSubtitle = item.data.reason || (item.heroType === 'mix' ? "A personalized mix crafted for your taste." : (item.data.artist || 'A track you might love.'));
         return (
             <MaterialEntrance delay={80}>

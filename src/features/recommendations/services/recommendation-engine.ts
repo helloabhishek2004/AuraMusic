@@ -227,7 +227,7 @@ export function generateMadeForYou(
 /**
  * Separates tracks so no artist is repeated within the separation window
  */
-function applyConsecutiveSeparation(tracks: PlayerTrack[], separation: number = 4): PlayerTrack[] {
+export function applyConsecutiveSeparation(tracks: PlayerTrack[], separation: number = 4): PlayerTrack[] {
   if (tracks.length <= 1) return tracks;
   const result: PlayerTrack[] = [];
   const pool = [...tracks];

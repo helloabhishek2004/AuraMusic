@@ -33,7 +33,7 @@ import { MusicTrack } from "@/src/types/music";
 import { DownloadButton } from "@/src/components/ui/download-button";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import * as Haptics from "expo-haptics";
+import * as Haptics from '@/src/utils/haptics';
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useNavigation } from "expo-router";
@@ -1566,7 +1566,6 @@ export default function SearchScreen() {
       if (contextList && contextList.length > 0) {
         const playerTracks = contextList.map((t) => createPlayerTrack(t));
         const startIndex = playerTracks.findIndex((t) => t.id === track.id);
-        goNowPlaying(track.id);
         setActiveContext({ type: "search", id: query });
         await setQueue(playerTracks, startIndex !== -1 ? startIndex : 0, {
           sourceId: query,
@@ -1578,7 +1577,6 @@ export default function SearchScreen() {
 
       // 2. Direct Search Play: Start the selected song immediately!
       // Do NOT dump the raw search results list into the queue.
-      goNowPlaying(track.id);
       setActiveContext({ type: "search", id: query });
       await setQueue([initialPlayerTrack], 0, {
         sourceId: query,
@@ -1609,7 +1607,7 @@ export default function SearchScreen() {
 
       return [track];
     },
-    [goNowPlaying, setQueue, createPlayerTrack, setActiveContext, query],
+    [setQueue, createPlayerTrack, setActiveContext, query],
   );
 
   const handlePlaySong = useCallback(

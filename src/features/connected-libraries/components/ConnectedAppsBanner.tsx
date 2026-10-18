@@ -2,7 +2,7 @@ import React, { memo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import { useConnectedLibrariesStore } from '../store/connected-libraries.store';
 import { SpotifyIcon, YouTubeMusicIcon, AppleMusicIcon } from './ServiceIcons';
 

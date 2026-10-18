@@ -1,6 +1,6 @@
 /* TEAM */
 Maintainer: Abhishek (@helloabhishek2004)
-Contact: abhishekdq2004@gmail.com
+Contact: helloabhisheks25@gmail.com
 Location: India
 
 /* SITE */

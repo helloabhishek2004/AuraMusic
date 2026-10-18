@@ -5,6 +5,7 @@ import {
   Text,
   TouchableOpacity,
   Dimensions,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
@@ -17,8 +18,10 @@ import Animated, {
 } from "react-native-reanimated";
 import { BlurView } from "expo-blur";
 import { palette, spacing, radius, typography } from "@/src/design/tokens";
+import { MotionSpring, MotionTiming } from "@/src/design/motion";
 import { LyricsDisplay } from "./LyricsDisplay";
 import { useLyricsIntegration } from "../hooks/useLyricsIntegration";
+import { useReducedMotionPreference } from "@/src/hooks/use-accessibility-preferences";
 
 const { width, height } = Dimensions.get("window");
 
@@ -34,6 +37,8 @@ export const LyricsSheet = React.memo(
     onClose,
     isExpanded = false,
   }: LyricsSheetProps) => {
+    const reduceMotion = useReducedMotionPreference();
+
     // Get performance-first lyrics integration
     const {
       lyrics,
@@ -46,22 +51,34 @@ export const LyricsSheet = React.memo(
     } = useLyricsIntegration(isVisible);
 
     // Animation values for sheet entry/exit
-    const scaleAnim = useSharedValue(0.95);
+    const scaleAnim = useSharedValue(0.96);
     const opacityAnim = useSharedValue(0);
     const bgOpacityAnim = useSharedValue(0);
 
     // Animate in/out
     useEffect(() => {
       if (isVisible) {
-        scaleAnim.value = withSpring(1.0, { damping: 15, stiffness: 100 });
-        opacityAnim.value = withSpring(1.0, { damping: 15, stiffness: 100 });
-        bgOpacityAnim.value = withSpring(1.0, { damping: 15, stiffness: 100 });
+        if (reduceMotion) {
+          scaleAnim.value = 1.0;
+          opacityAnim.value = withTiming(1, { duration: MotionTiming.REDUCED });
+          bgOpacityAnim.value = withTiming(1, { duration: MotionTiming.REDUCED });
+        } else {
+          scaleAnim.value = withSpring(1.0, MotionSpring.MODAL);
+          opacityAnim.value = withTiming(1, { duration: MotionTiming.MEDIUM });
+          bgOpacityAnim.value = withTiming(1, { duration: MotionTiming.MEDIUM });
+        }
       } else {
-        scaleAnim.value = withSpring(0.95);
-        opacityAnim.value = withSpring(0);
-        bgOpacityAnim.value = withSpring(0);
+        if (reduceMotion) {
+          scaleAnim.value = 1.0;
+          opacityAnim.value = withTiming(0, { duration: MotionTiming.FAST });
+          bgOpacityAnim.value = withTiming(0, { duration: MotionTiming.FAST });
+        } else {
+          scaleAnim.value = withSpring(0.96, MotionSpring.STANDARD);
+          opacityAnim.value = withTiming(0, { duration: MotionTiming.FAST });
+          bgOpacityAnim.value = withTiming(0, { duration: MotionTiming.FAST });
+        }
       }
-    }, [isVisible, scaleAnim, opacityAnim, bgOpacityAnim]);
+    }, [isVisible, reduceMotion, scaleAnim, opacityAnim, bgOpacityAnim]);
 
     const containerStyle = useAnimatedStyle(() => ({
       transform: [{ scale: scaleAnim.value }],
@@ -93,7 +110,11 @@ export const LyricsSheet = React.memo(
           style={[StyleSheet.absoluteFill, bgStyle, styles.backdrop]}
           pointerEvents={isVisible ? "auto" : "none"}
         >
-          <BlurView intensity={64} tint="dark" style={StyleSheet.absoluteFill} />
+          {Platform.OS === "ios" ? (
+            <BlurView intensity={64} tint="dark" style={StyleSheet.absoluteFill} />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(10, 10, 16, 0.75)" }]} />
+          )}
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}

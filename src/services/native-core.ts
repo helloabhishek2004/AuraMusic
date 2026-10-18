@@ -313,6 +313,48 @@ export interface AuraRestoreModuleInterface {
     rkStorageBytes?: number;
     timestamp: number;
   }>;
+  checkForLocalBackup(): Promise<{
+    exists: boolean;
+    schemaVersion?: number;
+    exportedAt?: string;
+    timestamp?: number;
+    appVersion?: string;
+    songCount?: number;
+    playlistCount?: number;
+    historyCount?: number;
+    hasSettings?: boolean;
+    fileSize?: number;
+    checksumValid?: boolean;
+    uriString?: string;
+    permissionRequired?: boolean;
+  }>;
+  exportLocalBackup(clientSettingsJson?: string | null): Promise<{
+    success: boolean;
+    exportedAt: string;
+    timestamp: number;
+    songCount: number;
+    playlistCount: number;
+    historyCount: number;
+    fileSize: number;
+    checksumValid: boolean;
+  }>;
+  importLocalBackup(): Promise<{
+    success: boolean;
+    message: string;
+    clientSettingsJson?: string;
+    permissionRequired?: boolean;
+    timestamp: number;
+  }>;
+  isStorageManagerGranted(): Promise<boolean>;
+  requestManageStoragePermission(): Promise<boolean>;
+  pickAndRestoreBackup(): Promise<{
+    success: boolean;
+    message: string;
+    clientSettingsJson?: string;
+    permissionRequired?: boolean;
+    timestamp?: number;
+    cancelled?: boolean;
+  }>;
 }
 
 export const AuraRestore: AuraRestoreModuleInterface | null = isAndroid

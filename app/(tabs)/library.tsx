@@ -29,7 +29,7 @@ import { useMusic } from "@/src/context/MusicContext";
 import { useMusicNavigation } from "@/src/navigation/music-navigation";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import * as Haptics from "expo-haptics";
+import * as Haptics from "@/src/utils/haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -735,7 +735,6 @@ const TrackRow = memo(({
     } catch (e) {
       console.error("[Player]", e);
     }
-    goNowPlaying(track.id);
   }, [track]);
 
   return (
@@ -1031,8 +1030,7 @@ const DownloadedTrackRow = memo(({
     } catch (e) {
       console.error("[Player]", e);
     }
-    goNowPlaying(track.id);
-  }, [track, recentDownloads, index, setQueue, goNowPlaying]);
+  }, [track, recentDownloads, index, setQueue]);
 
   return (
     <Animated.View style={{ transform: [{ scale: p.sc }] }}>

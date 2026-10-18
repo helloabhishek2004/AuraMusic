@@ -157,6 +157,9 @@ import { useMusicNavigation } from "@/src/navigation/music-navigation";
 import { requestIdleTask } from "@/src/utils/idle-task";
 import { musicService } from "@/src/services/api/music";
 import { useAnalyticsStore } from "@/src/features/analytics/store/analytics.store";
+import * as Haptics from '@/src/utils/haptics';
+import { useTasteProfileStore } from "@/src/features/taste-profile/store/taste-profile.store";
+import { OnboardingArtist } from "@/src/features/taste-profile/types/taste-profile";
 
 // ─── Design system (UNCHANGED) ───────────────────────────────────────────────
 import { glass, motion, palette, radius, spacing } from "@/src/design/tokens";
@@ -261,7 +264,52 @@ function ArtistPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isOfflineEmpty, setIsOfflineEmpty] = useState(false);
-  const [isFollowing, setIsFollowing] = useState(false);
+
+  const favoriteArtists = useTasteProfileStore((s) => s.favoriteArtists);
+  const updateProfile = useTasteProfileStore((s) => s.updateProfile);
+
+  const isFollowing = useMemo(() => {
+    const targetName = (artist?.name || '').trim().toLowerCase();
+    const targetId = (artistId || artist?.id || '').trim();
+    return favoriteArtists.some((a) => {
+      if (targetId && a.id === targetId) return true;
+      if (targetName && a.name.trim().toLowerCase() === targetName) return true;
+      return false;
+    });
+  }, [favoriteArtists, artist, artistId]);
+
+  const handleToggleFollow = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const currentFavorites = useTasteProfileStore.getState().favoriteArtists;
+    const targetName = (artist?.name || '').trim();
+    const targetId = (artistId || artist?.id || targetName).trim();
+    if (!targetName && !targetId) return;
+
+    const alreadyFollowing = currentFavorites.some((a) => {
+      if (targetId && a.id === targetId) return true;
+      if (targetName && a.name.trim().toLowerCase() === targetName.toLowerCase()) return true;
+      return false;
+    });
+
+    let updatedList: OnboardingArtist[];
+    if (alreadyFollowing) {
+      updatedList = currentFavorites.filter((a) => {
+        const matchId = targetId && a.id === targetId;
+        const matchName = targetName && a.name.trim().toLowerCase() === targetName.toLowerCase();
+        return !matchId && !matchName;
+      });
+    } else {
+      const newArtist: OnboardingArtist = {
+        id: targetId,
+        name: targetName || 'Unknown Artist',
+        artworkUrl: artist?.thumbnail || undefined,
+        source: 'dynamic',
+      };
+      updatedList = [...currentFavorites, newArtist];
+    }
+
+    await updateProfile({ favoriteArtists: updatedList });
+  }, [artist, artistId, updateProfile]);
 
   // Animation values
   const pageOpacity = useSharedValue(0);
@@ -990,7 +1038,7 @@ function ArtistPage() {
               onPlay={handlePlayArtist}
               onShuffle={handleShuffleArtist}
               isFollowing={isFollowing}
-              onFollow={() => setIsFollowing((v) => !v)}
+              onFollow={handleToggleFollow}
             />
           </MotionReveal>
 
@@ -1275,12 +1323,6 @@ const FloatingControlPanel = memo(
           onPress: animateFollow,
           animated: true,
           active: isFollowing,
-        },
-        {
-          icon: "ellipsis-horizontal",
-          label: "More",
-          onPress: () => { },
-          active: false,
         },
       ],
       [isFollowing, animateFollow],

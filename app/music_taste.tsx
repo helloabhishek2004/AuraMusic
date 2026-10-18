@@ -27,7 +27,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 
 import { palette } from '../src/design/tokens';
 import { LiquidGlass } from '../src/components/ui/liquid-glass';

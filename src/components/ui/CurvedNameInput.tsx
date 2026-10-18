@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import Svg, { Rect, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 
 const { width: SW } = Dimensions.get('window');
 const INPUT_WIDTH = Math.min(SW - 48, 360);

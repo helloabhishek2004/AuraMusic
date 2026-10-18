@@ -9,7 +9,7 @@ import {
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import { getDeterministicGradient, getInitials } from '@/src/features/player/utils/artwork-resolver';
 import { palette } from '@/src/design/tokens';
 import { OnboardingArtist } from '@/src/features/taste-profile/types/taste-profile';

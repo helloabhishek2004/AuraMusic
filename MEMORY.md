@@ -2,9 +2,9 @@
 
 **Repository:** `helloabhishek2004/AuraMusic`  
 **Branch:** `master`  
-**Version:** `3.0.0` (Android `versionCode 4`)  
+**Version:** `3.1.0` (Android `versionCode 5`)  
 **Package:** `com.anonymous.AuraMusic`  
-**Last Updated:** September 2026  
+**Last Updated:** October 2026  
 
 ---
 
@@ -176,15 +176,40 @@ This file preserves cross-session memory, verified forensic findings, hardware i
   - Aligned `README.md`, `CONTEXT.md`, `MEMORY.md`, `SECURITY.md`, `CONTRIBUTING.md`, and `.github/ISSUE_TEMPLATE/*`.
   - Documented web landing page deployment: `website_vite_backup` canonical source, `website` deployment mirror (`https://listenwith-auramusic.vercel.app/`).
 
+### 3.8. Forensic Download Remediation, Scoped Storage Backup & v3.1.0 Release
+* **Forensic Download Engine & Media3 Notification Integration:**
+  - Diagnosed bridge communication gap where download completion and failure states were not forwarded to the JS queue manager.
+  - Resolved concurrency slot lockups in `download-queue-manager.ts` by ensuring failure, cancellation, and bridge timeouts unconditionally release active slots.
+  - Registered native Media3 `DownloadManager.Listener` in `DownloadUtil.kt` propagating real-time terminal and progress events.
+  - Implemented genuine foreground download notifications in `AuraDownloadService.kt` (`FOREGROUND_SERVICE_DATA_SYNC`).
+* **Offline Scoped Storage Backup & Recovery Engine (`Documents/AuraMusic/backup.json`):**
+  - Architected `LocalBackupManager.kt` and `local-backup.service.ts` for account-free user state persistence across fresh installations.
+  - Added cold-start backup scan on first launch prompting returning users to restore previous libraries immediately.
+  - Added debounced auto-sync to public storage on database entity mutations and app backgrounding (`onStop`).
+  - Implemented manual "Backup Now" and "Restore Library" UI in Settings with SHA-256 integrity verification.
+  - Disabled legacy Google Cloud Backup in UI with "Temporarily disabled" notice while keeping backend code intact.
+* **Queue Navigation Ergonomics & Non-Intrusive Playback Selection:**
+  - Queue sheet opened from Now Playing automatically and smoothly scrolls to currently active track matching unique item identity.
+  - Tapping a track from Home, Search, Downloads, or Liked Songs starts background playback leaving user on current screen with mini-player sync.
+* **In-Screen Library Search, Universal Haptics & 60 FPS Motion System:**
+  - Added fast local substring search to `downloads.tsx` and Liked Songs (`library.tsx`).
+  - Added persistent Haptics toggle in Settings and standardized native tactile feedback across interactive surfaces.
+  - Standardized physics-based motion tokens (`motion.ts`) with reduced-motion accessibility support.
+  - Implemented `daily-feed-evolution.service.ts` synthesizing personalized daily mixes ("Flow", "Energy Booster", "Late Night Atmospheric") with 0ms cache cold start.
+* **v3.1.0 Release Metadata Synchronization:**
+  - Updated `package.json`, `app.json`, `android/app/build.gradle`, `app-version.ts`, `settings.tsx`, `LocalBackupManager.kt` to `3.1.0`, Android `versionCode 5`.
+  - Updated website release configuration (`release.ts`, `FaqSection.tsx`, `ShowcasePlayerScreen.tsx`, `PrivacyPolicy.tsx`, `llms.txt`).
+  - Updated all root documentation files (`CHANGELOG.md`, `README.md`, `RELEASE_NOTES.md`, `CONTEXT.md`, `MEMORY.md`).
+
 ---
 
 ## 4. Active Codebase State & Release Identifiers
 
-* **Release Version:** `3.0.0`
-* **Android Version Code:** `4`
+* **Release Version:** `3.1.0`
+* **Android Version Code:** `5`
 * **Target / Compile SDK:** `36` (Android 16 preview compatible)
 * **Min SDK:** `24` (Android 7.0)
 * **License Model:** Source-available (all rights reserved; no formal OSI license)
 * **Connected Libraries Status:** Personal / manual testing capability
-* **Backup/Restore Status:** Local checkpointing & BackupManager dispatch verified on-device; cross-device cloud round-trip testing is not physically verified.
+* **Backup/Restore Status:** Scoped Storage local backup engine (`Documents/AuraMusic/backup.json`) active and verified; Google Cloud Backup disabled in UI.
 * **Canonical Website:** `website_vite_backup` (mirror: `website`, deployment: `https://listenwith-auramusic.vercel.app/`)

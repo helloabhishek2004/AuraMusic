@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import { ConnectedProviderId } from '../types/provider';
 import { useConnectedLibrariesStore } from '../store/connected-libraries.store';
 import { PROVIDER_METAS } from '../providers/base';

@@ -1,17 +1,17 @@
-import React, { useState, useEffect } from 'react';
 import {
-  FileText,
-  ArrowLeft,
-  Scale,
-  ShieldCheck,
   AlertCircle,
+  ArrowLeft,
+  Ban,
+  CheckCircle2,
   Code2,
   Cpu,
+  FileText,
   Globe,
-  Ban,
   Mail,
-  CheckCircle2,
+  Scale,
+  ShieldCheck,
 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 import { AuraLogo } from '../components/AuraLogo';
 import { GithubIcon } from '../components/GithubIcon';
 
@@ -134,9 +134,9 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
             Terms of Service & Usage Conditions
           </h1>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-4 text-xs font-mono text-white/50">
-            <span>Effective Date: September 26, 2026</span>
+            <span>Effective Date: October 26, 2026</span>
             <span>•</span>
-            <span>Last Updated: September 26, 2026</span>
+            <span>Last Updated: October 26, 2026</span>
             <span>•</span>
             <span className="text-[#BF5AF2]">Applies to AuraMusic Application & Website</span>
           </div>
@@ -181,11 +181,10 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
                   <button
                     key={sec.id}
                     onClick={() => scrollTo(sec.id)}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-colors leading-snug truncate block ${
-                      activeSection === sec.id
-                        ? 'bg-[#BF5AF2]/20 text-[#DAB9FF] font-semibold'
-                        : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
-                    }`}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-colors leading-snug truncate block ${activeSection === sec.id
+                      ? 'bg-[#BF5AF2]/20 text-[#DAB9FF] font-semibold'
+                      : 'text-white/60 hover:text-white hover:bg-white/[0.04]'
+                      }`}
                   >
                     {sec.title}
                   </button>
@@ -455,7 +454,7 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
                   <span className="text-white/50 uppercase font-mono tracking-wider text-[10px]">Maintainer Communication</span>
                   <div className="font-medium text-white flex items-center gap-1.5">
                     <Mail className="w-3.5 h-3.5 text-[#46F5E0]" />
-                    <span className="text-white">abhishekdq2004@gmail.com</span>
+                    <span className="text-white">helloabhisheks25@gmail.com</span>
                   </div>
                   <p className="text-white/60 text-[11px]">
                     [Maintainer Contact — Inquiries & Responsible Notices]

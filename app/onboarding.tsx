@@ -35,7 +35,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import * as SplashScreen from 'expo-splash-screen';
 import Animated, {
   FadeIn,
@@ -70,6 +70,7 @@ import { useTasteProfileStore } from '@/src/features/taste-profile/store/taste-p
 import { OnboardingArtist } from '@/src/features/taste-profile/types/taste-profile';
 import { musicService } from '@/src/services/api/music';
 import { RestoreValidatorService } from '@/src/services/restore-validator.service';
+import { LocalBackupService, LocalBackupMetadata } from '@/src/services/local-backup.service';
 import { ArtistDiscoveryLoader } from '@/src/components/ui/ArtistDiscoveryLoader';
 import { WelcomeStrokeSvg } from '@/src/components/ui/WelcomeStrokeSvg';
 import { DynamicArtistDiscoveryService } from '@/src/features/taste-profile/services/dynamic-artist-discovery.service';
@@ -325,33 +326,183 @@ export default function OnboardingScreen() {
     });
   };
 
-  // Handle "Look for Backups"
+  // Cold-Start Local Backup Detection:
+  // On initial cold start, silently scan Documents/AuraMusic/backup.json.
+  // If found, prompt user with library details.
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function checkLocalBackupOnMount() {
+      try {
+        const metadata = await LocalBackupService.checkForBackup();
+        if (isCancelled || !metadata.exists) return;
+
+        const formattedDate = metadata.exportedAt
+          ? new Date(metadata.exportedAt).toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            })
+          : 'earlier';
+
+        const songText = `${metadata.songCount || 0} song${(metadata.songCount || 0) === 1 ? '' : 's'}`;
+        const playlistText = `${metadata.playlistCount || 0} playlist${(metadata.playlistCount || 0) === 1 ? '' : 's'}`;
+
+        Alert.alert(
+          'Previous Library Found',
+          `Found a local backup with ${songText} and ${playlistText} from ${formattedDate}. Would you like to restore it?`,
+          [
+            {
+              text: 'Skip',
+              style: 'cancel',
+              onPress: () => {
+                console.info('[Onboarding] User chose to skip restoring local backup');
+              },
+            },
+            {
+              text: 'Restore',
+              onPress: async () => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                setIsRestoring(true);
+                try {
+                  const restoreResult = await LocalBackupService.restoreBackup();
+                  if (restoreResult.permissionRequired) {
+                    Alert.alert(
+                      'Storage Permission Needed',
+                      'Android requires All Files Access to restore backups from Documents across fresh installs. Would you like to grant access or select the backup file directly?',
+                      [
+                        { text: 'Skip', style: 'cancel' },
+                        {
+                          text: 'Choose File',
+                          onPress: async () => {
+                            setIsRestoring(true);
+                            try {
+                              const pickRes = await LocalBackupService.pickAndRestoreBackup();
+                              if (pickRes.success) {
+                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                setStep('CREATING');
+                                setTimeout(() => router.replace('/(tabs)'), 1200);
+                              }
+                            } catch (e: any) {
+                              Alert.alert('Restore Failed', e?.message || 'Could not restore local backup.');
+                            } finally {
+                              setIsRestoring(false);
+                            }
+                          },
+                        },
+                        {
+                          text: 'Grant Access',
+                          onPress: async () => {
+                            await LocalBackupService.requestManageStoragePermission();
+                          },
+                        },
+                      ]
+                    );
+                    return;
+                  }
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  setStep('CREATING');
+                  setTimeout(() => {
+                    router.replace('/(tabs)');
+                  }, 1200);
+                } catch (err: any) {
+                  Alert.alert('Restore Failed', err?.message || 'Could not restore local backup.');
+                } finally {
+                  setIsRestoring(false);
+                }
+              },
+            },
+          ]
+        );
+      } catch (e) {
+        console.warn('[Onboarding] Error during cold start backup detection:', e);
+      }
+    }
+
+    checkLocalBackupOnMount();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  // Handle manual "Look for Backups" button in CHOICE step
   const handleLookForBackups = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setIsRestoring(true);
 
     try {
-      const result = await RestoreValidatorService.triggerManualRestore();
-      console.info('[Onboarding] Manual restore probe result:', result);
+      const metadata = await LocalBackupService.checkForBackup();
+      if (metadata.exists) {
+        const formattedDate = metadata.exportedAt
+          ? new Date(metadata.exportedAt).toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            })
+          : 'earlier';
 
-      const tasteStore = useTasteProfileStore.getState();
-      const hasRestoredProfile =
-        tasteStore.favoriteArtists.length > 0 || tasteStore.songLanguages.length > 0;
-      const hasLibraryData =
-        (result.dbBytes && result.dbBytes > 0) || (result.repairedCount && result.repairedCount > 0);
+        const songText = `${metadata.songCount || 0} song${(metadata.songCount || 0) === 1 ? '' : 's'}`;
+        const playlistText = `${metadata.playlistCount || 0} playlist${(metadata.playlistCount || 0) === 1 ? '' : 's'}`;
 
-      if (hasRestoredProfile || hasLibraryData) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        await tasteStore.markCompletedFromRestore();
-        setStep('CREATING');
-        setTimeout(() => {
-          router.replace('/(tabs)');
-        }, 1200);
+        Alert.alert(
+          'Previous Library Found',
+          `Found a local backup with ${songText} and ${playlistText} from ${formattedDate}. Would you like to restore it?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Restore',
+              onPress: async () => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                try {
+                  const res = await LocalBackupService.restoreBackup();
+                  if (res.permissionRequired) {
+                    Alert.alert(
+                      'Storage Permission Needed',
+                      'Android requires All Files Access to restore backups from Documents across fresh installs. Would you like to grant access or select the backup file directly?',
+                      [
+                        { text: 'Cancel', style: 'cancel' },
+                        {
+                          text: 'Choose File',
+                          onPress: async () => {
+                            try {
+                              const pickRes = await LocalBackupService.pickAndRestoreBackup();
+                              if (pickRes.success) {
+                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                setStep('CREATING');
+                                setTimeout(() => router.replace('/(tabs)'), 1200);
+                              }
+                            } catch (e: any) {
+                              Alert.alert('Restore Failed', e?.message || 'Could not restore local backup.');
+                            }
+                          },
+                        },
+                        {
+                          text: 'Grant Access',
+                          onPress: async () => {
+                            await LocalBackupService.requestManageStoragePermission();
+                          },
+                        },
+                      ]
+                    );
+                    return;
+                  }
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  setStep('CREATING');
+                  setTimeout(() => {
+                    router.replace('/(tabs)');
+                  }, 1200);
+                } catch (e: any) {
+                  Alert.alert('Restore Failed', e?.message || 'Could not restore local backup.');
+                }
+              },
+            },
+          ]
+        );
       } else {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         Alert.alert(
           'No Backup Found',
-          'No previous cloud or local backup was found for AuraMusic on this device. Would you like to get started fresh?',
+          'No previous local backup was found in your Documents/AuraMusic directory. Would you like to get started fresh?',
           [
             { text: 'Start Fresh', onPress: () => setStep('NAME') },
             { text: 'Cancel', style: 'cancel' },
@@ -362,7 +513,7 @@ export default function OnboardingScreen() {
       console.warn('[Onboarding] Restore error:', e);
       Alert.alert(
         'Restore Notice',
-        'Unable to check for backups. Please check your network connection or start fresh.'
+        e?.message || 'Unable to scan for local backup in Documents/AuraMusic.'
       );
     } finally {
       setIsRestoring(false);
@@ -592,7 +743,7 @@ export default function OnboardingScreen() {
             <Text style={styles.eyebrowText}>YOUR JOURNEY</Text>
             <Text style={styles.headingTitle}>Begin your experience.</Text>
             <Text style={styles.headingSub}>
-              Start with a clean slate or restore your previous library and preferences from Google Cloud.
+              Start with a clean slate or restore your previous library, playlists, and preferences from your device backup.
             </Text>
           </View>
 
@@ -662,17 +813,17 @@ export default function OnboardingScreen() {
                 <View style={styles.secondaryBackupContent}>
                   <View style={styles.secondaryBackupIconBox}>
                     <Ionicons
-                      name="cloud-download-outline"
+                      name="folder-open-outline"
                       size={16}
                       color="rgba(255, 255, 255, 0.65)"
                     />
                   </View>
                   <View style={styles.secondaryBackupTextCol}>
                     <Text style={styles.secondaryBackupTitle}>
-                      {isRestoring ? 'Inspecting Google Cloud backup...' : 'Restore from Cloud Backup'}
+                      {isRestoring ? 'Scanning for local backup...' : 'Restore Local Backup'}
                     </Text>
                     <Text style={styles.secondaryBackupSubtitle}>
-                      {isRestoring ? 'Please wait a moment' : 'Have a previous library? Bring back playlists & history'}
+                      {isRestoring ? 'Please wait a moment' : 'Have a previous library in Documents? Bring back playlists & history'}
                     </Text>
                   </View>
                   {isRestoring ? (

@@ -1,5 +1,11 @@
-import React, { memo, useEffect, useState, useCallback, useMemo } from 'react';
+import { MaterialIcons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import * as Haptics from '@/src/utils/haptics';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Dimensions,
   Platform,
   ScrollView,
@@ -7,22 +13,16 @@ import {
   Text,
   TouchableOpacity,
   View,
-  ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import Svg, { Circle, Defs, LinearGradient as SvgGradient, Stop } from 'react-native-svg';
-import * as Haptics from 'expo-haptics';
 import Animated, {
+  Easing as ReanimatedEasing,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withTiming,
-  Easing as ReanimatedEasing,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle, Defs, Stop, LinearGradient as SvgGradient } from 'react-native-svg';
 
 import { useUpdateStore } from '@/src/features/update/store/update.store';
 import { getInstalledAppVersion } from '@/src/features/update/utils/app-version';
@@ -390,7 +390,7 @@ export default function SoftwareUpdateScreen() {
   // Display version metadata
   const targetVersion = releaseInfo?.version || '3.1.0';
   const packageSize = releaseInfo?.apkAsset?.formattedSize || '44.2 MB';
-  const releaseDate = releaseInfo?.formattedDate || 'September 2026';
+  const releaseDate = releaseInfo?.formattedDate || 'October 2026';
   const summaryText =
     releaseInfo?.summary ||
     'A major refinement featuring polished Liquid Glass surfaces, improved playback cache, and enhanced library speed.';

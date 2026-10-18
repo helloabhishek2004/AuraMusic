@@ -8,7 +8,7 @@ import React, {
 } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import * as Haptics from "expo-haptics";
+import * as Haptics from '@/src/utils/haptics';
 import {
     Animated,
     Dimensions,

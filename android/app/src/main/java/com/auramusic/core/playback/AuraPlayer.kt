@@ -928,7 +928,11 @@ class AuraPlayer(
             .build()
 
         // Verify physical download asset exists on disk (do not rely on Room alone)
-        val isPhysicallyDownloaded = downloadUtil.isTrackDownloaded(videoId) && downloadUtil.downloadCache.isCached(videoId, 0, 1024)
+        val hasCachedSpans = try {
+            val spans = downloadUtil.downloadCache.getCachedSpans(videoId)
+            spans != null && !spans.isEmpty()
+        } catch (_: Exception) { false }
+        val isPhysicallyDownloaded = (downloadUtil.isTrackDownloaded(videoId) || hasCachedSpans) && hasCachedSpans
 
         val uri = if (isPhysicallyDownloaded && localUrl == null) {
             Log.i(TAG, "[AOT][Stream] track=$videoId source=downloaded_cache uri=auramusic://track/$videoId")

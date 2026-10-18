@@ -48,7 +48,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import * as Haptics from "expo-haptics";
+import * as Haptics from '@/src/utils/haptics';
 import { useRouter, useSegments } from "expo-router";
 import { playbackProgress } from "@/src/features/player/services/playback-progress";
 
@@ -70,6 +70,7 @@ import { getArtworkUrl } from "../features/player/utils/track-identity";
 import { resolveArtwork } from "@/src/features/player/utils/artwork-resolver";
 import { AuraArtwork } from "@/src/components/ui/aura-artwork";
 import { FlashList, ListRenderItem } from "@shopify/flash-list";
+import { useReducedMotionPreference } from "@/src/hooks/use-accessibility-preferences";
 
 const AnimatedFlashList = Animated.createAnimatedComponent(FlashList) as any;
 
@@ -79,7 +80,7 @@ import { getBottomOffset } from "@/src/constants/navigation";
 const { width: SW, height: SH } = Dimensions.get("window");
 const NAV_WIDTH = Math.min(SW - 32, SW >= 720 ? 620 : SW > SH ? 560 : SW - 32);
 
-const SPR_MAIN = MotionSpring.STANDARD;
+const SPR_MAIN = MotionSpring.PLAYER_EXPAND;
 const SPR_SWIPE = MotionSpring.MODAL;
 const SPR_REBOUND = MotionSpring.SNAPPY;
 const SPR_THUMB = MotionSpring.TAPPING;
@@ -724,7 +725,7 @@ const MoreMenuSurface = memo(({ visible, onClose, accentColor, currentTrack, onA
         </TouchableOpacity>
       </Animated.View>
       <Animated.View style={[st.menuModal, menuStyle]}>
-        <View style={StyleSheet.absoluteFill} pointerEvents="none"><BlurView intensity={65} tint="dark" style={StyleSheet.absoluteFill} /><View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(20, 20, 28, 0.85)" }]} /></View>
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">{Platform.OS === 'ios' && <BlurView intensity={65} tint="dark" style={StyleSheet.absoluteFill} />}<View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(20, 20, 28, 0.95)" }]} /></View>
         <View style={st.menuHeader}>
           <AuraArtwork 
             source={resolveArtwork(currentTrack, 'card')} 
@@ -827,6 +828,12 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   const router = useRouter();
   const segments = useSegments();
   const insets = useSafeAreaInsets();
+  const reduceMotion = useReducedMotionPreference();
+  const reduceMotionShared = useSharedValue(false);
+
+  useEffect(() => {
+    reduceMotionShared.value = reduceMotion;
+  }, [reduceMotion, reduceMotionShared]);
 
   const isExpanded = usePlayerUIStore(s => s.isExpanded);
   const expand = usePlayerUIStore(s => s.expand);
@@ -1027,12 +1034,25 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     })
     .onEnd((e) => {
       "worklet";
-      if (e.velocityY < -500 || expandProgress.value > 0.5) {
-        expandProgress.value = withSpring(1, SPR_MAIN, () => {
+      if (reduceMotionShared.value) {
+        if (e.translationY < -40 || expandProgress.value > 0.5) {
+          expandProgress.value = withTiming(1, { duration: 150 }, () => {
+            runOnJS(runExpand)();
+          });
+        } else {
+          expandProgress.value = withTiming(0, { duration: 150 }, () => {
+            runOnJS(runCollapse)();
+          });
+        }
+        return;
+      }
+      const relativeVelocity = -e.velocityY / (SH * 0.65);
+      if (e.velocityY < -400 || expandProgress.value > 0.45) {
+        expandProgress.value = withSpring(1, { ...SPR_MAIN, velocity: relativeVelocity }, () => {
           runOnJS(runExpand)();
         });
       } else {
-        expandProgress.value = withSpring(0, SPR_MAIN, () => {
+        expandProgress.value = withSpring(0, { ...SPR_MAIN, velocity: relativeVelocity }, () => {
           runOnJS(runCollapse)();
         });
       }
@@ -1072,14 +1092,26 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     .onEnd((e) => {
       "worklet";
       if (!isGestureEnabledShared.value) return;
-      const threshold = SH * 0.22;
-      if (e.translationY > threshold || e.velocityY > 500) {
-        expandProgress.value = withSpring(0, SPR_MAIN, () => {
+      if (reduceMotionShared.value) {
+        if (e.translationY > 60) {
+          expandProgress.value = withTiming(0, { duration: 150 }, () => {
+            runOnJS(runCollapse)();
+            artDismissY.value = 0;
+          });
+        } else {
+          expandProgress.value = withTiming(1, { duration: 150 });
+        }
+        return;
+      }
+      const threshold = SH * 0.20;
+      const relativeVelocity = e.velocityY / (SH * 0.85);
+      if (e.translationY > threshold || e.velocityY > 450) {
+        expandProgress.value = withSpring(0, { ...SPR_MAIN, velocity: relativeVelocity }, () => {
           runOnJS(runCollapse)();
           artDismissY.value = 0;
         });
       } else {
-        expandProgress.value = withSpring(1, SPR_MAIN);
+        expandProgress.value = withSpring(1, { ...SPR_MAIN, velocity: -relativeVelocity });
         artDismissY.value = withSpring(0, SPR_REBOUND);
       }
     }), []);
@@ -1150,15 +1182,27 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
           artScale.value = withSpring(1, SPR_REBOUND);
         }
       } else if (dragDirection.value === 'vertical') {
-        const threshold = SH * 0.22;
-        if (e.translationY > threshold || e.velocityY > 500) {
-          expandProgress.value = withSpring(0, SPR_MAIN, () => {
-            runOnJS(runCollapse)();
-            artDismissY.value = 0;
-          });
+        if (reduceMotionShared.value) {
+          if (e.translationY > 60) {
+            expandProgress.value = withTiming(0, { duration: 150 }, () => {
+              runOnJS(runCollapse)();
+              artDismissY.value = 0;
+            });
+          } else {
+            expandProgress.value = withTiming(1, { duration: 150 });
+          }
         } else {
-          expandProgress.value = withSpring(1, SPR_MAIN);
-          artDismissY.value = withSpring(0, SPR_REBOUND);
+          const threshold = SH * 0.20;
+          const relativeVelocity = e.velocityY / (SH * 0.85);
+          if (e.translationY > threshold || e.velocityY > 450) {
+            expandProgress.value = withSpring(0, { ...SPR_MAIN, velocity: relativeVelocity }, () => {
+              runOnJS(runCollapse)();
+              artDismissY.value = 0;
+            });
+          } else {
+            expandProgress.value = withSpring(1, { ...SPR_MAIN, velocity: -relativeVelocity });
+            artDismissY.value = withSpring(0, SPR_REBOUND);
+          }
         }
       }
       dragDirection.value = 'none';
@@ -1182,6 +1226,12 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
     enabled: isExpanded && activeSurface === 'controls',
     priority: BackPriority.EXPANDED_PLAYER,
     onBack: () => {
+      if (reduceMotion) {
+        expandProgress.value = withTiming(0, { duration: 140 }, () => {
+          runOnJS(collapse)();
+        });
+        return true;
+      }
       expandProgress.value = withSpring(0, SPR_MAIN, () => {
         runOnJS(collapse)();
       });
@@ -1190,11 +1240,21 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
   });
 
   useEffect(() => {
+    if (reduceMotion) {
+      uiPhase.value = isExpanded ? 2 : 0;
+      controlsOpacity.value = withTiming(isExpanded ? 1 : 0, { duration: 140 });
+      expandProgress.value = withTiming(isExpanded ? 1 : 0, { duration: 140 }, () => {
+        uiPhase.value = 2;
+        runOnJS(setIsLocked)(false);
+      });
+      return;
+    }
+
     if (isExpanded) {
       uiPhase.value = 0;
       runOnJS(setIsLocked)(true);
       controlsOpacity.value = 0;
-      controlsOpacity.value = withTiming(1, { duration: 380, easing: REasing.out(REasing.quad) });
+      controlsOpacity.value = withTiming(1, { duration: 320, easing: REasing.out(REasing.quad) });
       expandProgress.value = withSpring(1, SPR_MAIN, () => {
         uiPhase.value = 2;
         runOnJS(setIsLocked)(false);
@@ -1208,7 +1268,7 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
         runOnJS(setIsLocked)(false);
       });
     }
-  }, [isExpanded]);
+  }, [isExpanded, reduceMotion]);
 
   const atmosphereStyle = useAnimatedStyle(() => ({ 
     opacity: 0.4 * surfaceOpenProgress.value
@@ -1226,6 +1286,13 @@ function PlayerOverlay({ expandProgress }: PlayerOverlayProps) {
 
   const overlayStyle = useAnimatedStyle(() => {
     const p = expandProgress.value;
+    if (reduceMotionShared.value) {
+      return {
+        opacity: p,
+        transform: [{ translateY: 0 }, { scale: 1 }],
+        display: p <= 0.01 ? 'none' : 'flex',
+      };
+    }
     const translateY = interpolate(p, [0, 1], [SH * 0.8, 0], Extrapolate.CLAMP);
     const scale = interpolate(p, [0, 1], [0.95, 1], Extrapolate.CLAMP);
     const isHidden = p <= 0.01;

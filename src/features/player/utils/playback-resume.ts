@@ -2,7 +2,7 @@ import { usePlayerStore } from '../store/player.store';
 import { useDownloadStore } from '../../download/store/download.store';
 import { getCanonicalTrackId, verifyTrackIdentity } from './track-identity';
 import { PlayerTrack } from '../types/player';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import { Platform } from 'react-native';
 
 /**

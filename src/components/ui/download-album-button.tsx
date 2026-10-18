@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useMemo } from 'react';
 import { StyleSheet, TouchableOpacity, View, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import { useDownloadStore } from '@/src/features/download/store/download.store';
 import { palette, radius } from '@/src/design/tokens';
 import { PlayerTrack } from '@/src/features/player/types/player';

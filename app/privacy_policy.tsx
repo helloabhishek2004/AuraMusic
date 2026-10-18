@@ -12,8 +12,14 @@
  *  - Full user data controls (cache clearing, download deletion, library purging).
  */
 
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import * as Haptics from '@/src/utils/haptics';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import React, { memo } from 'react';
 import {
+  Linking,
   Platform,
   ScrollView,
   StatusBar,
@@ -21,14 +27,8 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Linking,
 } from 'react-native';
-import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import * as Haptics from 'expo-haptics';
 
 const BG = '#0F0F13';
 const PRIMARY = '#BF5AF2';
@@ -120,7 +120,7 @@ export default function PrivacyPolicyScreen() {
         {/* ── Header Intro ── */}
         <View style={styles.headerBlock}>
           <Text style={styles.mainTitle}>Privacy & Data Transparency</Text>
-          <Text style={styles.lastUpdated}>Last Updated: September 2026 • v0.1.0-beta</Text>
+          <Text style={styles.lastUpdated}>Last Updated: October 2026 • v0.1.0-beta</Text>
           <Text style={styles.introParagraph}>
             AuraMusic is built on a <Text style={styles.boldWhite}>local-first, account-free</Text> architecture.
             Your privacy is respected by design: no user accounts, no tracking profiles, and no intermediary
@@ -258,14 +258,14 @@ export default function PrivacyPolicyScreen() {
               and YouTube API Services. By connecting your account, you acknowledge and agree to be bound by the{' '}
               <Text
                 style={styles.linkText}
-                onPress={() => Linking.openURL('https://www.youtube.com/t/terms').catch(() => {})}
+                onPress={() => Linking.openURL('https://www.youtube.com/t/terms').catch(() => { })}
               >
                 YouTube Terms of Service
               </Text>{' '}
               and the{' '}
               <Text
                 style={styles.linkText}
-                onPress={() => Linking.openURL('https://policies.google.com/privacy').catch(() => {})}
+                onPress={() => Linking.openURL('https://policies.google.com/privacy').catch(() => { })}
               >
                 Google Privacy Policy
               </Text>.
@@ -306,7 +306,7 @@ export default function PrivacyPolicyScreen() {
               AuraMusic&apos;s access directly at any time from{' '}
               <Text
                 style={styles.linkText}
-                onPress={() => Linking.openURL('https://myaccount.google.com/permissions').catch(() => {})}
+                onPress={() => Linking.openURL('https://myaccount.google.com/permissions').catch(() => { })}
               >
                 Google Account Security Settings
               </Text>.

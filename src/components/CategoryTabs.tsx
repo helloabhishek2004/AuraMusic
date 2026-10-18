@@ -1,4 +1,4 @@
-import * as Haptics from "expo-haptics";
+import * as Haptics from '@/src/utils/haptics';
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {

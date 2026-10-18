@@ -81,6 +81,17 @@ export class DownloadManager {
       : (task.track.artist ? `Single — ${task.track.artist}` : "Single");
     task.track.album = safeAlbum;
 
+    // Ensure notifications permission dynamically before starting download
+    try {
+      const Notifications = require('expo-notifications');
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== 'granted') {
+        await Notifications.requestPermissionsAsync();
+      }
+    } catch (e) {
+      console.warn("[DownloadManager] Failed to request notification permission:", e);
+    }
+
     const { AuraDownload } = await import("@/src/services/native-core");
     if (AuraDownload) {
       try {
@@ -102,17 +113,6 @@ export class DownloadManager {
         store.updateStatus(trackId, "failed", e.message || "Native download failed");
         return;
       }
-    }
-
-    // Ensure notifications permission dynamically when starting download
-    try {
-      const Notifications = require('expo-notifications');
-      const { status } = await Notifications.getPermissionsAsync();
-      if (status !== 'granted') {
-        await Notifications.requestPermissionsAsync();
-      }
-    } catch (e) {
-      console.warn("[DownloadManager] Failed to request notification permission:", e);
     }
 
     store.updateStatus(trackId, "downloading");

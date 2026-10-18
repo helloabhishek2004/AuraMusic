@@ -44,7 +44,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { requestIdleTask } from '../src/utils/idle-task';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
+import { useReducedMotionPreference } from '../src/hooks/use-accessibility-preferences';
+import { MotionTiming } from '../src/design/motion';
 
 
 
@@ -99,6 +101,11 @@ export default function RootLayout() {
     // Initialize Library Health Center (Startup Fast Scan with 8s Delay)
     import('../src/services/library-health.service').then(({ LibraryHealthService }) => {
       LibraryHealthService.scheduleStartupScan();
+    });
+
+    // Initialize Local Scoped Storage Backup Engine
+    import('../src/services/local-backup.service').then(({ LocalBackupService }) => {
+      LocalBackupService.initialize();
     });
 
     // Deferred heavy store hydration to preserve startup frame budget
@@ -246,10 +253,20 @@ export default function RootLayout() {
     []
   );
 
+  const reduceMotion = useReducedMotionPreference();
   const expandProgress = useSharedValue(0);
 
   const stackStyle = useAnimatedStyle(() => {
     const p = expandProgress.value;
+    if (reduceMotion) {
+      return {
+        flex: 1,
+        backgroundColor: palette.background,
+        transform: [{ scale: 1 }],
+        opacity: 1,
+        borderRadius: 0,
+      };
+    }
     const scale = interpolate(p, [0, 1], [1, 0.96], Extrapolate.CLAMP);
     const opacity = interpolate(p, [0, 1], [1, 0.85], Extrapolate.CLAMP);
     const borderRadius = interpolate(p, [0, 1], [0, 24], Extrapolate.CLAMP);
@@ -283,23 +300,23 @@ export default function RootLayout() {
                 initialRouteName={initialRoute}
                 screenOptions={{
                   headerShown: false,
-                  contentStyle: { backgroundColor: 'transparent' },
-                  animation: 'slide_from_right',
-                  animationDuration: 260, // Optimized for premium ease-out decay (Apple Music style)
+                  contentStyle: { backgroundColor: palette.background },
+                  animation: reduceMotion ? 'fade' : 'slide_from_right',
+                  animationDuration: reduceMotion ? MotionTiming.REDUCED : MotionTiming.NAV_SLIDE,
                   gestureEnabled: true,
                 }}
               >
-                <Stack.Screen name="onboarding" options={{ headerShown: false, animation: 'fade' }} />
+                <Stack.Screen name="onboarding" options={{ headerShown: false, animation: 'fade', animationDuration: reduceMotion ? MotionTiming.REDUCED : MotionTiming.STANDARD }} />
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen name="music_taste" options={{ headerShown: false, animation: 'slide_from_right' }} />
+                <Stack.Screen name="music_taste" options={{ headerShown: false, animation: reduceMotion ? 'fade' : 'slide_from_right' }} />
                 <Stack.Screen name="artist/[id]" />
                 <Stack.Screen name="album/[id]" />
                 <Stack.Screen name="playlist/[id]" />
                 <Stack.Screen 
                   name="create_playlist" 
                   options={{ 
-                    animation: 'slide_from_bottom',
-                    animationDuration: 280 
+                    animation: reduceMotion ? 'fade' : 'slide_from_bottom',
+                    animationDuration: reduceMotion ? MotionTiming.REDUCED : MotionTiming.MEDIUM,
                   }} 
                 />
                 <Stack.Screen name="downloads" />
@@ -310,6 +327,7 @@ export default function RootLayout() {
                   name="auth/spotify" 
                   options={{ 
                     animation: 'fade',
+                    animationDuration: reduceMotion ? MotionTiming.REDUCED : MotionTiming.STANDARD,
                     headerShown: false 
                   }} 
                 />

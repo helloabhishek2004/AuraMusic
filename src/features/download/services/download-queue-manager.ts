@@ -203,8 +203,34 @@ export class DownloadQueueManager {
 
     this.isInitialized = true;
 
+    // Start watchdog to recover stuck downloads (inactive for >60s in preparing/downloading/verifying)
+    if (!this.watchdogInterval) {
+      this.watchdogInterval = setInterval(() => {
+        this.runWatchdog();
+      }, 15000);
+    }
+
     // Run scheduler immediately after startup
     this.processQueue();
+  }
+
+  private static watchdogInterval: any = null;
+
+  static runWatchdog() {
+    const store = useDownloadStore.getState();
+    const now = Date.now();
+    const TIMEOUT_MS = 60000; // 60 seconds of inactivity
+
+    const stuckItems = store.queue.filter((item) => {
+      if (!["preparing", "downloading", "verifying"].includes(item.status)) return false;
+      const lastActivity = item.updatedAt || item.startedAt || item.queuedAt;
+      return now - lastActivity > TIMEOUT_MS;
+    });
+
+    for (const item of stuckItems) {
+      console.warn(`[QueueManager][Watchdog] Track ${item.trackId} stuck in status '${item.status}' for >60s. Recovering...`);
+      this.handleDownloadFailure(item.trackId, "Download timed out / connection stalled");
+    }
   }
 
   static async processQueue() {
@@ -250,6 +276,7 @@ export class DownloadQueueManager {
           status: "preparing" as const,
         }).catch((err) => {
           console.error(`[QueueManager] Error starting download for ${item.trackId}:`, err);
+          this.handleDownloadFailure(item.trackId, err?.message || "Failed to start download");
         });
       }
     }

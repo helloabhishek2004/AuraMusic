@@ -40,6 +40,7 @@ import { HistoryEntry } from '../../analytics/store/analytics.store';
 
 import { getArtworkUrl } from '../../player/utils/track-identity';
 import { resolveArtwork } from '../../player/utils/artwork-resolver';
+import { DailyFeedEvolutionService, getTodayDateString } from '../services/daily-feed-evolution.service';
 
 let preloadSubscriptionInitialized = false;
 
@@ -289,6 +290,8 @@ export interface RecommendationsState {
 
   generatedAt: number | null;
   lastRecommendationBuild: number | null;
+  lastEvolvedDate: string | null;
+  lastEvolvedSeed: number | null;
   analyticsVersion: number;
   
   isHydrated: boolean;
@@ -296,6 +299,7 @@ export interface RecommendationsState {
 
 export interface RecommendationsActions {
   generateRecommendations: () => Promise<void>;
+  evolveDailyFeedIfNeeded: (force?: boolean) => Promise<boolean>;
   resetRecommendations: () => void;
   refreshTrendingIfNeeded: () => Promise<void>;
   refreshDiscover: (forceNext?: boolean) => Promise<void>;
@@ -353,6 +357,8 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
 
       generatedAt: null,
       lastRecommendationBuild: null,
+      lastEvolvedDate: null,
+      lastEvolvedSeed: null,
       analyticsVersion: 0,
       
       isHydrated: true,
@@ -366,8 +372,12 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
         const historyLength = history.length;
 
         try {
-          // 1. Build Taste Clusters first
-          const clusters = buildTasteClusters(artistAffinities, history, artistCache);
+          // Initialize daily evolution context and personalized signals
+          const context = DailyFeedEvolutionService.getContext();
+          const signals = DailyFeedEvolutionService.collectPersonalizedSignals(context);
+
+          // 1. Build Taste Clusters with boosted affinities (incorporating likes & favorite artists)
+          const clusters = buildTasteClusters(signals.boostedArtistAffinities, history, artistCache);
           const primaryCluster = clusters[0]?.name || 'My Favorites';
           const secondaryCluster = clusters[1]?.name || null;
 
@@ -603,8 +613,13 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               };
             });
 
-            // Generate personalized Daily Mixes
-            const personalDaily = generateDailyMixes(artistAffinities, history, artistCache, topSongs);
+            // 1. Generate Daily Evolved Mixes (Deterministic track rotation, language awareness, likes & skip penalties)
+            const personalDaily = DailyFeedEvolutionService.generateEvolvedDailyMixes(
+              context,
+              signals,
+              clusters,
+              globalTrackPool
+            );
             dailyMixes = personalDaily;
             
             // Loop Protection: add top Daily Mix's seed artists to the artist pool
@@ -613,7 +628,7 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               firstDaily.seedArtists.forEach(art => globalArtistPool.add(art.toLowerCase().trim()));
             }
 
-            const rawBYL = generateBecauseYouLike(artistAffinities, history, artistCache, topSongs);
+            const rawBYL = generateBecauseYouLike(signals.boostedArtistAffinities, history, artistCache, topSongs);
             becauseYouLike = rawBYL.filter(s => {
               const artName = s.title.toLowerCase().trim();
               if (globalArtistPool.has(artName)) return false;
@@ -622,11 +637,11 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             });
 
             // Generate 7 Specialized Recommendation Models
-            const madeForYouSeed = generateMadeForYou(trackAffinities, history, artistAffinities, artistCache);
+            const madeForYouSeed = generateMadeForYou(trackAffinities, history, signals.boostedArtistAffinities, artistCache);
             const onRepeatSeed = generateOnRepeat(history, trackAffinities);
             const repeatRewindSeed = generateRepeatRewind(history, trackAffinities);
-            const discoverWeeklySeed = generateDiscoverWeekly(history, artistAffinities);
-            const deepCutsSeed = generateDeepCuts(history, artistAffinities, artistCache);
+            const discoverWeeklySeed = generateDiscoverWeekly(history, signals.boostedArtistAffinities);
+            const deepCutsSeed = generateDeepCuts(history, signals.boostedArtistAffinities, artistCache);
             const timeMixSeed = generateContextualTimeMix(history, analytics.activeHoursMap);
 
             madeForYou = [
@@ -638,18 +653,13 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
               timeMixSeed,
             ];
 
-            // Determine Featured Hero Mix based on context and listening intensity
-            const hour = new Date().getHours();
-            let heroMixCandidate: RecommendationSeed = timeMixSeed;
-            if (hour >= 22 || hour < 4) {
-              heroMixCandidate = timeMixSeed;
-            } else if (onRepeatSeed && onRepeatSeed.tracks && onRepeatSeed.tracks.length > 0) {
-              heroMixCandidate = onRepeatSeed;
-            } else if (madeForYouSeed && madeForYouSeed.tracks && madeForYouSeed.tracks.length > 0) {
-              heroMixCandidate = madeForYouSeed;
-            } else if (personalDaily.length > 0) {
-              heroMixCandidate = personalDaily[0];
-            }
+            // 2. Generate Daily Evolving Featured Hero Mix (Day-of-Week Themed)
+            const dailyHero = DailyFeedEvolutionService.generateDailyHero(
+              context,
+              signals,
+              clusters,
+              globalTrackPool
+            );
 
             // Track Deduplication Loops protection
             const rawRecentlyLoved = generateRecentlyLoved(history, trackAffinities);
@@ -672,44 +682,11 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             forgottenFavorites = generateForgottenFavorites(trackAffinities, history, state.forgottenFavoritesShownAt || {});
           }
 
-          // Caching trending playlist seeds with real artwork preservation and catalogue rotation
-          const prevTrending = state.trendingSeeds || [];
-          const findPrevArt = (id: string, title: string) => {
-            const match = prevTrending.find(t => t.id === id);
-            if (match?.image && !match.image.startsWith('aura://') && !match.image.includes('placeholder')) {
-              return match.image;
-            }
-            const catItem = DISCOVERY_CATALOGUE.find(d => d.id === id);
-            return catItem?.defaultArtwork || resolveArtwork({ type: 'playlist', id, title } as any, 'album');
-          };
-
-          const rotIndex = state.discoveryRotationIndex || 0;
-          const currentSlice = getDiscoverySlice(rotIndex, 4);
-          let trendingSeeds: TrendingSeed[] = currentSlice.map(item => ({
-            type: 'playlist',
-            id: item.id,
-            title: item.title,
-            image: findPrevArt(item.id, item.title),
-            source: item.source,
-            fetchedAt: Date.now(),
-            query: item.query,
-            reason: item.reason,
-          }));
-
-          // Preserve & prioritize dynamic personalized seeds from the user's taste profile
-          try {
-            const { useTasteProfileStore } = await import('../../taste-profile/store/taste-profile.store');
-            const profile = useTasteProfileStore.getState();
-            if (profile.onboardingCompleted && (profile.favoriteArtists.length > 0 || profile.songLanguages.length > 0 || profile.genres.length > 0)) {
-              const { buildDynamicDiscoverySeeds } = await import('../../taste-profile/services/preference-prior.service');
-              const dynamicSeeds = buildDynamicDiscoverySeeds();
-              if (dynamicSeeds && dynamicSeeds.length > 0) {
-                trendingSeeds = dynamicSeeds;
-              }
-            }
-          } catch {
-            // fallback to default slice
-          }
+          // 3. Rotate Discovery & Language Seeds Deterministically by Day
+          let trendingSeeds: TrendingSeed[] = DailyFeedEvolutionService.rotateDailyDiscovery(
+            context,
+            signals.preferredLanguages
+          );
 
           // Dynamic Artwork Resolution Priority
           const resolveListArtworks = async (list: RecommendationSeed[]) => {
@@ -741,28 +718,23 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
           const deepCutsSeed = madeForYou.find(s => s.id === 'mix-deep-cuts') || null;
           const timeMixSeed = madeForYou.find(s => s.id.startsWith('time-')) || null;
 
-          // Resolve Hero Mix
-          let heroMix = timeMixSeed || (madeForYou.length > 0 ? madeForYou[0] : (dailyMixes.length > 0 ? dailyMixes[0] : null));
-          const currentHour = new Date().getHours();
+          // 4. Resolve Hero Mix with Daily Rotation
+          const dailyHero = DailyFeedEvolutionService.generateDailyHero(
+            context,
+            signals,
+            clusters,
+            globalTrackPool
+          );
+          let heroMix: RecommendationSeed = dailyHero;
+          const currentHour = context.hour;
           if (currentHour >= 22 || currentHour < 4) {
-            heroMix = timeMixSeed || heroMix;
-          } else if (onRepeatSeed && onRepeatSeed.tracks && onRepeatSeed.tracks.length > 0) {
-            heroMix = onRepeatSeed;
-          } else if (madeForYou[0] && madeForYou[0].tracks && madeForYou[0].tracks.length > 0) {
-            heroMix = madeForYou[0];
-          }
-
-          // Cold-start fallback: if heroMix is still null, use the first dynamic discovery seed
-          if (!heroMix && trendingSeeds.length > 0) {
             heroMix = {
-              type: 'playlist',
-              id: trendingSeeds[0].id,
-              title: trendingSeeds[0].title,
-              image: trendingSeeds[0].image,
-              score: 10.0,
-              reason: trendingSeeds[0].reason,
-              query: trendingSeeds[0].query,
-            };
+              ...dailyHero,
+              id: 'time-night',
+              heroTag: 'NIGHT ATMOSPHERE',
+              title: 'Late Night Atmosphere',
+              reason: `Midnight stillness and soothing rhythms featuring ${clusters[0]?.artists?.[0] || 'your favorites'}.`,
+            } as any;
           }
 
           // Fatigue Filter: Filter out fatigued seeds from sections
@@ -799,11 +771,28 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
             listeningEventsCountSinceBuild: 0,
             generatedAt: Date.now(),
             lastRecommendationBuild: Date.now(),
+            lastEvolvedDate: context.dateString,
+            lastEvolvedSeed: context.daySeed,
             analyticsVersion: analyticsVersion,
           }));
         } catch (error) {
           console.error('[RecommendationsStore] Error generating telemetry recommendations:', error);
         }
+      },
+
+      evolveDailyFeedIfNeeded: async (force: boolean = false) => {
+        const state = get();
+        const todayKey = getTodayDateString();
+        const isDateChanged = state.lastEvolvedDate !== todayKey;
+        const isStale = !state.generatedAt || Date.now() - (state.generatedAt || 0) > 12 * 3600 * 1000;
+        const isCold = !state.dailyMixes || state.dailyMixes.length === 0;
+
+        if (force || isDateChanged || isStale || isCold) {
+          console.info(`[RecommendationsStore] Evolving daily feed (dateChanged=${isDateChanged}, isStale=${isStale}, isCold=${isCold}, force=${force})`);
+          await state.generateRecommendations();
+          return true;
+        }
+        return false;
       },
 
       resetRecommendations: () => {
@@ -1108,6 +1097,8 @@ export const useRecommendationsStore = create<RecommendationsState & Recommendat
         fatigueTracker: state.fatigueTracker,
         listeningEventsCountSinceBuild: state.listeningEventsCountSinceBuild,
         lastRecommendationBuild: state.lastRecommendationBuild,
+        lastEvolvedDate: state.lastEvolvedDate,
+        lastEvolvedSeed: state.lastEvolvedSeed,
         discoveryRotationIndex: state.discoveryRotationIndex,
         trendingSeeds: state.trendingSeeds,
         featuredHeroMix: state.featuredHeroMix,

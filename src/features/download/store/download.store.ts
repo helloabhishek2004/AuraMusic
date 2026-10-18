@@ -155,30 +155,136 @@ export const useDownloadStore = create<DownloadStore>()(
         return newItem;
       },
 
+      enqueueDownloads: (tracks: PlayerTrack[], priority: 'HIGH' | 'NORMAL' | 'LOW' = 'NORMAL') => {
+        const { downloadedTracks, queue } = get();
+        if (!tracks || tracks.length === 0) return [];
+
+        let currentQueue = [...queue];
+        let currentDownloadQueue = [...get().downloadQueue];
+        const newActiveTasks: Record<string, DownloadTask> = { ...get().activeTasks };
+        const resultItems: DownloadQueueItem[] = [];
+
+        let MetadataCache: any = null;
+        try {
+          MetadataCache = require('@/src/features/cache/services/metadata-cache.service').MetadataCache;
+        } catch {}
+
+        for (const track of tracks) {
+          let enrichedTrack = { ...track };
+          if (MetadataCache) {
+            try {
+              const hotCache = MetadataCache.getHotEntry(track);
+              if (hotCache?.album && hotCache.album !== "Unknown Album") {
+                enrichedTrack.album = hotCache.album;
+                if (hotCache.albumId) enrichedTrack.albumId = hotCache.albumId;
+                if (hotCache.artistId && !enrichedTrack.artistId) enrichedTrack.artistId = hotCache.artistId;
+              }
+            } catch {}
+          }
+
+          if (!enrichedTrack.album || enrichedTrack.album === "Unknown Album" || enrichedTrack.album.trim().length === 0) {
+            enrichedTrack.album = enrichedTrack.artist ? `Single — ${enrichedTrack.artist}` : "Single";
+          }
+
+          // Check duplicates: Queued, Preparing, Downloading, Verifying, or Completed
+          const existingItem = currentQueue.find(
+            (item) =>
+              (item.trackId === enrichedTrack.id || (item.downloadUrl && enrichedTrack.url && item.downloadUrl === enrichedTrack.url)) &&
+              ['queued', 'preparing', 'downloading', 'verifying', 'completed'].includes(item.status)
+          );
+
+          if (existingItem) {
+            resultItems.push(existingItem);
+            continue;
+          }
+
+          const isCompleted = !!downloadedTracks[enrichedTrack.id];
+          if (isCompleted) {
+            const completedItem = currentQueue.find(item => item.trackId === enrichedTrack.id && item.status === 'completed');
+            if (completedItem) {
+              resultItems.push(completedItem);
+              continue;
+            }
+            const newItem: DownloadQueueItem = {
+              id: enrichedTrack.id,
+              trackId: enrichedTrack.id,
+              title: enrichedTrack.title,
+              artist: enrichedTrack.artist,
+              artwork: enrichedTrack.art,
+              status: 'completed',
+              progress: 100,
+              retryCount: 0,
+              queuedAt: Date.now(),
+              completedAt: Date.now(),
+              priority,
+              downloadUrl: enrichedTrack.url,
+            };
+            currentQueue.push(newItem);
+            resultItems.push(newItem);
+            continue;
+          }
+
+          const newItem: DownloadQueueItem = {
+            id: enrichedTrack.id,
+            trackId: enrichedTrack.id,
+            title: enrichedTrack.title,
+            artist: enrichedTrack.artist,
+            artwork: enrichedTrack.art,
+            status: 'queued',
+            progress: 0,
+            retryCount: 0,
+            queuedAt: Date.now(),
+            priority,
+            downloadUrl: enrichedTrack.url,
+          };
+
+          const newTask: DownloadTask = {
+            track: enrichedTrack,
+            status: 'queued',
+            progress: 0,
+            retryCount: 0,
+          };
+
+          currentQueue.push(newItem);
+          currentDownloadQueue.push(enrichedTrack.id);
+          newActiveTasks[enrichedTrack.id] = newTask;
+          resultItems.push(newItem);
+        }
+
+        set({
+          queue: pruneQueue(currentQueue),
+          downloadQueue: currentDownloadQueue,
+          activeTasks: newActiveTasks,
+        });
+
+        // Trigger scheduler once for the batch
+        import('../services/download-queue-manager').then(({ DownloadQueueManager }) => {
+          DownloadQueueManager.processQueue();
+        }).catch(() => {});
+
+        return resultItems;
+      },
+
       enqueueAlbum: async (albumId: string) => {
         try {
           const { musicService } = await import('../../../services/api/music');
           const albumDetails = await musicService.getAlbumDetails(albumId);
           if (!albumDetails || !albumDetails.tracks) return;
 
-          const { enqueueDownload } = get();
-          
-          // Preserving order
-          albumDetails.tracks.forEach((track) => {
-            const playerTrack: PlayerTrack = {
-              id: track.id,
-              title: track.title,
-              artist: track.artist,
-              art: track.art || albumDetails.thumbnail,
-              url: track.url || '',
-              duration: typeof track.duration === 'number' ? track.duration : 0,
-              albumId: albumDetails.id,
-              album: albumDetails.title,
-              artistId: albumDetails.artistId,
-              source: track.source || 'ytmusic',
-            };
-            enqueueDownload(playerTrack, 'HIGH');
-          });
+          const playerTracks: PlayerTrack[] = albumDetails.tracks.map((track) => ({
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            art: track.art || albumDetails.thumbnail,
+            url: track.url || '',
+            duration: typeof track.duration === 'number' ? track.duration : 0,
+            albumId: albumDetails.id,
+            album: albumDetails.title,
+            artistId: albumDetails.artistId,
+            source: track.source || 'ytmusic',
+          }));
+
+          get().enqueueDownloads(playerTracks, 'HIGH');
         } catch (error) {
           console.error('[DownloadStore] Failed to enqueue album:', error);
         }
@@ -188,14 +294,9 @@ export const useDownloadStore = create<DownloadStore>()(
         try {
           const { usePlaylistStore } = await import('../../playlist/store/playlist.store');
           const playlistTracks = usePlaylistStore.getState().resolveTracks(playlistId);
-          if (!playlistTracks) return;
+          if (!playlistTracks || playlistTracks.length === 0) return;
 
-          const { enqueueDownload } = get();
-
-          // Preserve order, skip already downloaded tracks (handled inside enqueueDownload check)
-          playlistTracks.forEach((track) => {
-            enqueueDownload(track, 'HIGH');
-          });
+          get().enqueueDownloads(playlistTracks, 'HIGH');
         } catch (error) {
           console.error('[DownloadStore] Failed to enqueue playlist:', error);
         }
@@ -307,6 +408,7 @@ export const useDownloadStore = create<DownloadStore>()(
                 fileSize: fSize,
                 speedBytesPerSecond: speedBytesPerSecond !== undefined ? speedBytesPerSecond : item.speedBytesPerSecond,
                 estimatedTimeRemaining: estimatedTimeRemaining !== undefined ? estimatedTimeRemaining : item.estimatedTimeRemaining,
+                updatedAt: Date.now(),
               };
             }
             return item;
@@ -331,7 +433,7 @@ export const useDownloadStore = create<DownloadStore>()(
         set((state) => {
           const updatedQueue = state.queue.map((item) => {
             if (item.trackId === trackId) {
-              const update: Partial<DownloadQueueItem> = { status, error };
+              const update: Partial<DownloadQueueItem> = { status, error, updatedAt: Date.now() };
               if (status === 'downloading') {
                 update.startedAt = Date.now();
               } else if (status === 'completed') {

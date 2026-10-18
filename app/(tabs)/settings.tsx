@@ -10,15 +10,14 @@
  * ✦ Accent colour section removed
  */
 
+import * as Haptics from "@/src/utils/haptics";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
 import { BlurView } from "expo-blur";
-import { LinearGradient } from "expo-linear-gradient";
 import Constants from "expo-constants";
 import { Image } from "expo-image";
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
-import packageJson from "../../package.json";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -34,36 +33,35 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle } from "react-native-svg";
 import Animated, {
+  Easing as ReanimatedEasing,
+  runOnJS,
+  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
-  withRepeat,
-  withTiming,
   withDelay,
-  interpolateColor,
-  interpolate,
-  useAnimatedProps,
-  runOnJS,
-  Easing as ReanimatedEasing,
+  withRepeat,
+  withTiming
 } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Circle } from "react-native-svg";
+import packageJson from "../../package.json";
 
-import { useSettingsStore, AudioQuality } from "../../src/features/settings/store/settings.store";
-import { CacheManager, StorageStats } from "../../src/features/cache/services/cache-manager.service";
-import { useDownloadStore } from "../../src/features/download/store/download.store";
-import { downloadCleanupService } from "../../src/features/download/services/download-cleanup.service";
-import { useScrollToTopOnTabPress } from "../../src/hooks/use-scroll-to-top";
 import { LiquidToggle } from "@/src/components/ui/liquid-toggle";
-import { useUpdateStore } from "../../src/features/update/store/update.store";
+import { CacheManager, StorageStats } from "../../src/features/cache/services/cache-manager.service";
+import { downloadCleanupService } from "../../src/features/download/services/download-cleanup.service";
+import { useDownloadStore } from "../../src/features/download/store/download.store";
+import { AudioQuality, useSettingsStore } from "../../src/features/settings/store/settings.store";
 import { useTasteProfileStore } from "../../src/features/taste-profile/store/taste-profile.store";
+import { useUpdateStore } from "../../src/features/update/store/update.store";
+import { useScrollToTopOnTabPress } from "../../src/hooks/use-scroll-to-top";
 
 const { width: SW } = Dimensions.get("window");
 const APP_VERSION =
   Constants.expoConfig?.version ??
   (Constants as any).nativeAppVersion ??
   packageJson.version ??
-  "3.0.0";
+  "3.1.0";
 
 // ── Palette (matches HTML exactly) ───────────────────────────────────────────
 const PRIMARY = "#BF5AF2";  // purple toggle / ring slice 1
@@ -565,12 +563,13 @@ CachePills.displayName = "CachePills";
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  
+
   // Settings selectors
   const toggleSetting = useSettingsStore(s => s.toggleSetting);
   const normalizeVolume = useSettingsStore(s => s.normalizeVolume);
   const autoplayEnabled = useSettingsStore(s => s.autoplayEnabled);
   const smartShuffleEnabled = useSettingsStore(s => s.smartShuffleEnabled);
+  const hapticsEnabled = useSettingsStore(s => s.hapticsEnabled);
   const streamingQualityWifi = useSettingsStore(s => s.streamingQualityWifi);
   const streamingQualityCellular = useSettingsStore(s => s.streamingQualityCellular);
   const downloadQualityWifi = useSettingsStore(s => s.downloadQualityWifi);
@@ -585,8 +584,10 @@ export default function SettingsScreen() {
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTopOnTabPress(scrollRef);
   const downloadedTracks = useDownloadStore(s => s.downloadedTracks);
-  // Cloud Sync selector
+  // Cloud Sync selector (preserved)
   const googleSyncEnabled = useSettingsStore(s => s.googleSyncEnabled);
+  // Local Backup selector
+  const localAutoBackupEnabled = useSettingsStore(s => s.localAutoBackupEnabled);
 
   // Update store selectors
   const hasUpdate = useUpdateStore(s => s.hasUpdate);
@@ -605,16 +606,38 @@ export default function SettingsScreen() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
 
+  // Local backup states
+  const [isLocalBackingUp, setIsLocalBackingUp] = useState(false);
+  const [isLocalRestoring, setIsLocalRestoring] = useState(false);
+  const [isScanningBackup, setIsScanningBackup] = useState(false);
+  const [localBackupMeta, setLocalBackupMeta] = useState<any>(null);
+
   const refreshStats = async () => {
     const stats = await CacheManager.getCacheStats();
     setStorageStats(stats);
   };
 
-  useEffect(() => { refreshStats(); }, []);
+  const scanLocalBackup = async () => {
+    setIsScanningBackup(true);
+    try {
+      const { LocalBackupService } = await import("@/src/services/local-backup.service");
+      const meta = await LocalBackupService.checkForBackup();
+      setLocalBackupMeta(meta);
+    } catch (_) {
+    } finally {
+      setIsScanningBackup(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshStats();
+    scanLocalBackup();
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       refreshStats();
+      scanLocalBackup();
     }, [])
   );
 
@@ -866,6 +889,13 @@ export default function SettingsScreen() {
               label="Smart Shuffle" sub="Weighted smart track shuffle"
               right={<Toggle value={smartShuffleEnabled} onChange={() => toggleSetting("smartShuffleEnabled")} />}
             />
+            <Divider />
+            {/* Haptic Feedback */}
+            <Row
+              icon="vibration" iconColor="#A78BFA" iconBg="rgba(167,139,250,0.12)"
+              label="Haptic Feedback" sub="Tactile vibration for controls and actions"
+              right={<Toggle value={hapticsEnabled} onChange={() => toggleSetting("hapticsEnabled")} />}
+            />
           </GlassCard>
         </Section>
 
@@ -933,135 +963,285 @@ export default function SettingsScreen() {
           </GlassCard>
         </Section>
 
-        {/* ── GOOGLE CLOUD BACKUP & SYNC (section 4) ─────────────────────────── */}
+        {/* ── LOCAL BACKUP & RESTORE (section 4) ─────────────────────────── */}
         <Section index={4}>
-          <SectionLabel icon="cloud-sync" title="Google Account Backup & Restore" />
+          <SectionLabel icon="save" title="Local Backup & Restore" />
           <GlassCard r={32} style={{ overflow: "hidden" }}>
-            {/* Google Sync Master Toggle */}
+            {/* Auto Backup Toggle */}
             <Row
-              icon="backup" iconColor="#60A5FA" iconBg="rgba(96,165,250,0.10)"
-              label="Google Cloud Backup" sub="Sync library, playlists & favorites automatically"
-              right={<Toggle value={googleSyncEnabled} onChange={() => toggleSetting("googleSyncEnabled")} />}
+              icon="sd-storage" iconColor="#34D399" iconBg="rgba(52,211,153,0.10)"
+              label="Auto Backup" sub="Sync library to Documents/AuraMusic/ on changes"
+              right={<Toggle value={localAutoBackupEnabled} onChange={() => toggleSetting("localAutoBackupEnabled")} />}
             />
             <Divider />
 
-            {/* Scope description */}
+            {/* Scope / Location Information */}
             <View style={{ paddingHorizontal: 20, paddingVertical: 14 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                <MaterialIcons name={googleSyncEnabled ? "check-circle" : "pause-circle"} size={16} color={googleSyncEnabled ? "#34D399" : "#F87171"} />
-                <Text style={{ fontSize: 12, fontWeight: "700", color: googleSyncEnabled ? "#34D399" : "#F87171" }}>
-                  {googleSyncEnabled ? "Backup Active (Encrypted Google Drive)" : "Cloud Backup Disabled"}
+                <MaterialIcons name={localBackupMeta?.exists ? "check-circle" : "info"} size={16} color={localBackupMeta?.exists ? "#34D399" : "rgba(255,255,255,0.45)"} />
+                <Text style={{ fontSize: 12, fontWeight: "700", color: localBackupMeta?.exists ? "#34D399" : "#DAECF8" }}>
+                  {localBackupMeta?.exists
+                    ? `Backup Available: ${localBackupMeta.songCount || 0} songs • ${localBackupMeta.playlistCount || 0} playlists`
+                    : "Target: Documents/AuraMusic/backup.json"}
                 </Text>
               </View>
               <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 16 }}>
-                {googleSyncEnabled
-                  ? "Your playlists, liked songs, listening history, and preferences are safely preserved. Audio files and caches are never backed up (< 1 MB quota)."
-                  : "Automatic backup to your Google Account is paused. Your data will remain on this device only."}
+                {localBackupMeta?.exists && localBackupMeta?.exportedAt
+                  ? `Last verified: ${new Date(localBackupMeta.exportedAt).toLocaleString()} • Size: ${formatSize(localBackupMeta.fileSize || 0)}`
+                  : "All library metadata and preferences persist across app reinstalls in your public Documents folder. No cloud account required."}
               </Text>
             </View>
 
-            {googleSyncEnabled && (
-              <>
-                <Divider />
-                {/* Manual Sync Now */}
-                <TouchableOpacity
-                  onPress={async () => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    setIsSyncing(true);
-                    try {
-                      const { AuraRestore } = await import("@/src/services/native-core");
-                      if (AuraRestore && typeof AuraRestore.triggerCloudSync === "function") {
-                        await AuraRestore.triggerCloudSync();
-                      }
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                      Alert.alert(
-                        "Backup Checkpoint Complete",
-                        "Your library, playlists, and preferences have been committed and scheduled for Google Cloud Backup."
-                      );
-                    } catch (e: any) {
-                      Alert.alert("Backup Notice", e?.message || "Failed to notify backup service.");
-                    } finally {
-                      setIsSyncing(false);
-                    }
-                  }}
-                  activeOpacity={0.7}
-                  delayPressIn={0}
-                  style={st.row}
-                  disabled={isSyncing}
-                >
-                  <View style={st.rowInner}>
-                    <View style={st.rowLeft}>
-                      <View style={[st.iconBadge, { backgroundColor: "rgba(96,165,250,0.10)" }]}>
-                        {isSyncing ? (
-                          <ActivityIndicator size="small" color="#60A5FA" />
-                        ) : (
-                          <MaterialIcons name="sync" size={20} color="#60A5FA" />
-                        )}
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={st.rowLabel}>Back Up Now</Text>
-                        <Text style={st.rowSub}>Commit pending data to Google Backup</Text>
-                      </View>
-                    </View>
-                    <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.28)" />
-                  </View>
-                </TouchableOpacity>
+            <Divider />
 
-                <Divider />
-                {/* Manual Fetch Latest Backup */}
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            {/* Manual Backup Now */}
+            <TouchableOpacity
+              onPress={async () => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                setIsLocalBackingUp(true);
+                try {
+                  const { LocalBackupService } = await import("@/src/services/local-backup.service");
+                  const res = await LocalBackupService.exportManualBackup();
+                  await scanLocalBackup();
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  Alert.alert(
+                    "Local Backup Saved",
+                    `Successfully exported ${res.songCount} songs and ${res.playlistCount} playlists to Documents/AuraMusic/backup.json.`
+                  );
+                } catch (e: any) {
+                  Alert.alert("Backup Error", e?.message || "Failed to create local backup.");
+                } finally {
+                  setIsLocalBackingUp(false);
+                }
+              }}
+              activeOpacity={0.7}
+              delayPressIn={0}
+              style={st.row}
+              disabled={isLocalBackingUp}
+            >
+              <View style={st.rowInner}>
+                <View style={st.rowLeft}>
+                  <View style={[st.iconBadge, { backgroundColor: "rgba(52,211,153,0.10)" }]}>
+                    {isLocalBackingUp ? (
+                      <ActivityIndicator size="small" color="#34D399" />
+                    ) : (
+                      <MaterialIcons name="backup" size={20} color="#34D399" />
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.rowLabel}>Manual Backup Now</Text>
+                    <Text style={st.rowSub}>Export database to Documents/AuraMusic/backup.json</Text>
+                  </View>
+                </View>
+                <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.28)" />
+              </View>
+            </TouchableOpacity>
+
+            <Divider />
+
+            {/* Restore Local Backup */}
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                Alert.alert(
+                  "Restore Local Backup",
+                  "Restore library, playlists, listening history, and preferences from Documents/AuraMusic/backup.json?",
+                  [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                      text: "Choose File (SAF)",
+                      onPress: async () => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        setIsLocalRestoring(true);
+                        try {
+                          const { LocalBackupService } = await import("@/src/services/local-backup.service");
+                          const pickRes = await LocalBackupService.pickAndRestoreBackup();
+                          if (pickRes.success) {
+                            await scanLocalBackup();
+                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                            Alert.alert("Restore Complete", pickRes.message || "Local backup restored successfully.");
+                          }
+                        } catch (err: any) {
+                          Alert.alert("Restore Notice", err?.message || "Failed to complete restore.");
+                        } finally {
+                          setIsLocalRestoring(false);
+                        }
+                      },
+                    },
+                    {
+                      text: "Restore",
+                      onPress: async () => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        setIsLocalRestoring(true);
+                        try {
+                          const { LocalBackupService } = await import("@/src/services/local-backup.service");
+                          const res = await LocalBackupService.restoreBackup();
+                          if (res.permissionRequired) {
+                            Alert.alert(
+                              "Storage Permission Needed",
+                              "Android requires All Files Access to restore backups from public Documents across app reinstalls. You can grant access in Settings, or select the backup file directly using the system picker.",
+                              [
+                                { text: "Cancel", style: "cancel" },
+                                {
+                                  text: "Select File (SAF)",
+                                  onPress: async () => {
+                                    setIsLocalRestoring(true);
+                                    try {
+                                      const pickRes = await LocalBackupService.pickAndRestoreBackup();
+                                      if (pickRes.success) {
+                                        await scanLocalBackup();
+                                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                        Alert.alert("Restore Complete", pickRes.message || "Local backup restored successfully.");
+                                      }
+                                    } catch (err: any) {
+                                      Alert.alert("Restore Notice", err?.message || "Failed to restore chosen file.");
+                                    } finally {
+                                      setIsLocalRestoring(false);
+                                    }
+                                  },
+                                },
+                                {
+                                  text: "Grant Access",
+                                  onPress: async () => {
+                                    await LocalBackupService.requestManageStoragePermission();
+                                  },
+                                },
+                              ]
+                            );
+                            return;
+                          }
+                          await scanLocalBackup();
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                          Alert.alert("Restore Complete", res.message || "Local backup restored successfully.");
+                        } catch (e: any) {
+                          Alert.alert("Restore Notice", e?.message || "Failed to complete restore.");
+                        } finally {
+                          setIsLocalRestoring(false);
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}
+              activeOpacity={0.7}
+              delayPressIn={0}
+              style={st.row}
+              disabled={isLocalRestoring || isLocalBackingUp}
+            >
+              <View style={st.rowInner}>
+                <View style={st.rowLeft}>
+                  <View style={[st.iconBadge, { backgroundColor: "rgba(191,90,242,0.10)" }]}>
+                    {isLocalRestoring ? (
+                      <ActivityIndicator size="small" color="#BF5AF2" />
+                    ) : (
+                      <MaterialIcons name="settings-backup-restore" size={20} color="#BF5AF2" />
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.rowLabel}>Restore Backup</Text>
+                    <Text style={st.rowSub}>Unpack backup.json into local database</Text>
+                  </View>
+                </View>
+                <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.28)" />
+              </View>
+            </TouchableOpacity>
+
+            <Divider />
+
+            {/* Refetch / Scan Backup */}
+            <TouchableOpacity
+              onPress={async () => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                await scanLocalBackup();
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                if (localBackupMeta?.exists) {
+                  if (localBackupMeta.permissionRequired) {
                     Alert.alert(
-                      "Fetch Latest Backup",
-                      "Re-synchronize your library, playlists, listening history, and preferences with your stored backup data?",
+                      "Local Backup Detected",
+                      "Found backup.json in Documents/AuraMusic, but Android requires storage permission to read it across app re-installs.",
                       [
-                        { text: "Cancel", style: "cancel" },
+                        { text: "Later", style: "cancel" },
                         {
-                          text: "Fetch & Restore",
+                          text: "Grant Access",
                           onPress: async () => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                            setIsRestoring(true);
-                            try {
-                              const { RestoreValidatorService } = await import("@/src/services/restore-validator.service");
-                              const result = await RestoreValidatorService.triggerManualRestore();
-                              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                              Alert.alert("Restore Complete", result.message);
-                            } catch (e: any) {
-                              Alert.alert("Restore Notice", e?.message || "Failed to complete restore.");
-                            } finally {
-                              setIsRestoring(false);
+                            const { LocalBackupService } = await import("@/src/services/local-backup.service");
+                            await LocalBackupService.requestManageStoragePermission();
+                          },
+                        },
+                        {
+                          text: "Select File (SAF)",
+                          onPress: async () => {
+                            const { LocalBackupService } = await import("@/src/services/local-backup.service");
+                            const pickRes = await LocalBackupService.pickAndRestoreBackup();
+                            if (pickRes.success) {
+                              await scanLocalBackup();
+                              Alert.alert("Restore Complete", pickRes.message || "Local backup restored successfully.");
                             }
                           },
                         },
                       ]
                     );
-                  }}
-                  activeOpacity={0.7}
-                  delayPressIn={0}
-                  style={st.row}
-                  disabled={isRestoring || isSyncing}
-                >
-                  <View style={st.rowInner}>
-                    <View style={st.rowLeft}>
-                      <View style={[st.iconBadge, { backgroundColor: "rgba(52,211,153,0.10)" }]}>
-                        {isRestoring ? (
-                          <ActivityIndicator size="small" color="#34D399" />
-                        ) : (
-                          <MaterialIcons name="cloud-download" size={20} color="#34D399" />
-                        )}
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={st.rowLabel}>Fetch Latest Backup</Text>
-                        <Text style={st.rowSub}>Re-sync library, playlists & preferences</Text>
-                      </View>
-                    </View>
-                    <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.28)" />
+                  } else {
+                    Alert.alert(
+                      "Local Backup Found",
+                      `Found backup.json (${formatSize(localBackupMeta.fileSize || 0)}):\n• Songs: ${localBackupMeta.songCount || 0}\n• Playlists: ${localBackupMeta.playlistCount || 0}\n• History: ${localBackupMeta.historyCount || 0}\n• Checksum: Valid`
+                    );
+                  }
+                } else {
+                  Alert.alert("Scan Result", "No backup.json found in Documents/AuraMusic.");
+                }
+              }}
+              activeOpacity={0.7}
+              delayPressIn={0}
+              style={st.row}
+              disabled={isScanningBackup}
+            >
+              <View style={st.rowInner}>
+                <View style={st.rowLeft}>
+                  <View style={[st.iconBadge, { backgroundColor: "rgba(96,165,250,0.10)" }]}>
+                    {isScanningBackup ? (
+                      <ActivityIndicator size="small" color="#60A5FA" />
+                    ) : (
+                      <MaterialIcons name="refresh" size={20} color="#60A5FA" />
+                    )}
                   </View>
-                </TouchableOpacity>
-              </>
-            )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={st.rowLabel}>Refetch / Scan Backup</Text>
+                    <Text style={st.rowSub}>Scan Documents/AuraMusic/ for externally placed backups</Text>
+                  </View>
+                </View>
+                <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.28)" />
+              </View>
+            </TouchableOpacity>
           </GlassCard>
+
+          {/* Preserved Google Cloud Backup (Disabled) */}
+          <View style={{ marginTop: 14 }}>
+            <GlassCard r={24} style={{ overflow: "hidden", opacity: 0.55 }}>
+              <View style={[st.row, { paddingVertical: 14 }]}>
+                <View style={st.rowInner}>
+                  <View style={st.rowLeft}>
+                    <View style={[st.iconBadge, { backgroundColor: "rgba(255,255,255,0.06)" }]}>
+                      <MaterialIcons name="cloud-off" size={20} color="rgba(255,255,255,0.40)" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Text style={[st.rowLabel, { color: "rgba(255,255,255,0.60)" }]}>Google Cloud Backup</Text>
+                        <View style={{ backgroundColor: "rgba(255,255,255,0.10)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 9, fontWeight: "700", color: "rgba(255,255,255,0.50)", textTransform: "uppercase" }}>
+                            Not available for now
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={[st.rowSub, { color: "rgba(255,255,255,0.30)" }]}>
+                        Sideloaded APKs use Scoped Storage local backup above
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            </GlassCard>
+          </View>
         </Section>
 
         {/* ── SUPPORT & ABOUT (section 5) ──────────────────────────────────── */}
@@ -1211,7 +1391,7 @@ export default function SettingsScreen() {
               </View>
               <Text style={{ fontSize: 20, fontWeight: "800", color: "#FFF", letterSpacing: -0.5, marginBottom: 4 }}>AuraMusic</Text>
               <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.60)", fontWeight: "600", marginBottom: 2 }}>Version {APP_VERSION}</Text>
-              <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.40)" }}>Updated September 2026</Text>
+              <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.40)" }}>Updated October 2026</Text>
               <Text style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", fontStyle: "italic", marginTop: 14 }}>Made with ❤️ for music lovers</Text>
             </TouchableOpacity>
           </GlassCard>

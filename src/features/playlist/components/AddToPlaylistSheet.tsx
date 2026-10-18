@@ -25,7 +25,7 @@ import Animated, {
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import { useRouter } from 'expo-router';
 import { usePlayerUIStore } from '@/src/features/player/store/player-ui.store';
 import type { PlayerTrack } from '@/src/features/player/types/player';
@@ -37,6 +37,7 @@ import { getArtworkUrl } from '@/src/features/player/utils/track-identity';
 import { resolveArtwork } from '@/src/features/player/utils/artwork-resolver';
 import { AuraArtwork } from '@/src/components/ui/aura-artwork';
 import { useBackHandler, BackPriority } from '@/src/navigation/back';
+import { useReducedMotionPreference } from '@/src/hooks/use-accessibility-preferences';
 
 interface AddToPlaylistSheetProps {
   visible: boolean;
@@ -52,6 +53,7 @@ interface FeedbackState {
 const AddToPlaylistSheet = React.memo(
   ({ visible, track, onClose }: AddToPlaylistSheetProps) => {
     const router = useRouter();
+    const reduceMotion = useReducedMotionPreference();
 
     useBackHandler({
       id: 'add-to-playlist-sheet',
@@ -148,8 +150,8 @@ const AddToPlaylistSheet = React.memo(
 
         {/* Sheet */}
         <Animated.View
-          entering={SlideInDown.springify().damping(22).stiffness(200).mass(0.8)}
-          exiting={SlideOutDown.springify().damping(22).stiffness(200).mass(0.8)}
+          entering={reduceMotion ? FadeIn.duration(150) : SlideInDown.springify().damping(24).stiffness(220).mass(0.85)}
+          exiting={reduceMotion ? FadeOut.duration(120) : SlideOutDown.springify().damping(24).stiffness(220).mass(0.85)}
           style={styles.sheet}
           pointerEvents="auto"
         >

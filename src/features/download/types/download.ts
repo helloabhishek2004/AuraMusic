@@ -47,6 +47,7 @@ export interface DownloadQueueItem {
   lastAttemptAt?: number;
   lastError?: string;
   downloadUrl?: string;
+  updatedAt?: number;
 }
 
 export interface DownloadState {
@@ -70,6 +71,7 @@ export interface DownloadState {
 export interface DownloadActions {
   addDownload: (track: PlayerTrack) => void;
   enqueueDownload: (track: PlayerTrack, priority?: 'HIGH' | 'NORMAL' | 'LOW') => DownloadQueueItem | undefined;
+  enqueueDownloads: (tracks: PlayerTrack[], priority?: 'HIGH' | 'NORMAL' | 'LOW') => DownloadQueueItem[];
   enqueueAlbum: (albumId: string) => Promise<void>;
   enqueuePlaylist: (playlistId: string) => Promise<void>;
   pauseDownload: (trackId: string) => void;

@@ -1,7 +1,7 @@
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { Ionicons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
-import * as Haptics from "expo-haptics";
+import * as Haptics from "@/src/utils/haptics";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -83,6 +83,7 @@ import { AuraArtwork } from "@/src/components/ui/aura-artwork";
 import { ConnectedPlaylistView, useConnectedLibrariesStore } from "@/src/features/connected-libraries";
 import { useNetInfo } from "@react-native-community/netinfo";
 import { requestIdleTask } from "@/src/utils/idle-task";
+import { useReducedMotionPreference } from "@/src/hooks/use-accessibility-preferences";
 
 const { width, height } = Dimensions.get("window");
 
@@ -539,6 +540,8 @@ const ListHeader = React.memo(
     glowScale,
     onAddSongsPress,
     isLikedPlaylist,
+    searchQuery = "",
+    onSearchChange,
   }: any) => {
     const [isExplanationExpanded, setIsExplanationExpanded] = React.useState(playlist?._isExpanded || false);
     const artGlowAnim = useSharedValue(isCurrentPlaylistPlaying ? 1 : 0.4);
@@ -839,6 +842,35 @@ const ListHeader = React.memo(
             </TouchableOpacity>
           </View>
         )}
+
+        {resolvedTracks.length > 0 && onSearchChange && (
+          <View style={{ marginTop: 18, width: "100%", marginBottom: 8 }}>
+            <View style={styles.playlistSearchBar}>
+              <Ionicons name="search" size={17} color={searchQuery ? gradientColors[0] : "rgba(255,255,255,0.4)"} style={{ marginLeft: 14, marginRight: 8 }} />
+              <TextInput
+                style={styles.playlistSearchInput}
+                placeholder="Search tracks by title, artist, album..."
+                placeholderTextColor="rgba(255,255,255,0.35)"
+                value={searchQuery}
+                onChangeText={onSearchChange}
+                returnKeyType="search"
+                clearButtonMode="while-editing"
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => onSearchChange("")}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  style={{ padding: 8, marginRight: 6 }}
+                  accessibilityLabel="Clear search"
+                >
+                  <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.45)" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
       </View>
     );
   },
@@ -942,6 +974,7 @@ const TrackRowItem = React.memo(
 
 const AddSongsModal = React.memo(({ isVisible, onClose, playlistId }: any) => {
   const insets = useSafeAreaInsets();
+  const reduceMotion = useReducedMotionPreference();
   const [query, setQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [onlineResults, setOnlineResults] = useState<PlayerTrack[]>([]);
@@ -951,7 +984,7 @@ const AddSongsModal = React.memo(({ isVisible, onClose, playlistId }: any) => {
 
   const searchGlowAnim = useSharedValue(0);
   const searchScaleAnim = useSharedValue(1);
-  const modalSlideAnim = useSharedValue(60);
+  const modalSlideAnim = useSharedValue(reduceMotion ? 0 : 50);
   const modalOpacityAnim = useSharedValue(0);
 
   const playlist = usePlaylistStore((s) => s.playlists[playlistId]);
@@ -960,24 +993,37 @@ const AddSongsModal = React.memo(({ isVisible, onClose, playlistId }: any) => {
 
   useEffect(() => {
     if (isVisible) {
-      modalSlideAnim.value = withSpring(0, { damping: 22, stiffness: 160 });
-      modalOpacityAnim.value = withTiming(1, { duration: 280 });
+      if (reduceMotion) {
+        modalSlideAnim.value = 0;
+        modalOpacityAnim.value = withTiming(1, { duration: MotionTiming.REDUCED });
+      } else {
+        modalSlideAnim.value = withSpring(0, MotionSpring.MODAL);
+        modalOpacityAnim.value = withTiming(1, { duration: MotionTiming.NAV_SLIDE });
+      }
       setTimeout(() => inputRef.current?.focus(), 150);
+    } else {
+      if (reduceMotion) {
+        modalSlideAnim.value = 0;
+        modalOpacityAnim.value = withTiming(0, { duration: MotionTiming.FAST });
+      } else {
+        modalSlideAnim.value = withTiming(50, { duration: MotionTiming.FAST });
+        modalOpacityAnim.value = withTiming(0, { duration: MotionTiming.FAST });
+      }
     }
-  }, [isVisible]);
+  }, [isVisible, reduceMotion]);
 
   const handleSearchFocus = useCallback(() => {
     setSearchFocused(true);
     Haptics.selectionAsync();
-    searchGlowAnim.value = withSpring(1);
-    searchScaleAnim.value = withSpring(1.015);
-  }, []);
+    searchGlowAnim.value = reduceMotion ? 1 : withSpring(1, MotionSpring.SUBTLE);
+    searchScaleAnim.value = reduceMotion ? 1 : withSpring(1.015, MotionSpring.SUBTLE);
+  }, [reduceMotion]);
 
   const handleSearchBlur = useCallback(() => {
     setSearchFocused(false);
-    searchGlowAnim.value = withSpring(0);
-    searchScaleAnim.value = withSpring(1);
-  }, []);
+    searchGlowAnim.value = reduceMotion ? 0 : withSpring(0, MotionSpring.SUBTLE);
+    searchScaleAnim.value = reduceMotion ? 1 : withSpring(1, MotionSpring.SUBTLE);
+  }, [reduceMotion]);
 
   const modalStyle = useAnimatedStyle(() => ({ transform: [{ translateY: modalSlideAnim.value }], opacity: modalOpacityAnim.value }));
   const searchContainerStyle = useAnimatedStyle(() => ({ transform: [{ scale: searchScaleAnim.value }], shadowOpacity: interpolate(searchGlowAnim.value, [0, 1], [0, 0.5]) }));
@@ -1037,7 +1083,11 @@ const AddSongsModal = React.memo(({ isVisible, onClose, playlistId }: any) => {
   return (
     <Modal visible={isVisible} animationType="none" transparent onRequestClose={onClose} statusBarTranslucent>
       <View style={{ flex: 1 }}>
-        <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+        {Platform.OS === 'ios' ? (
+          <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill} />
+        ) : (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(10, 10, 16, 0.94)" }]} />
+        )}
         <AnimatedReanimated.View style={[{ flex: 1, marginTop: insets.top + 12 }, modalStyle]}>
           <View style={{ flexDirection: "row", paddingHorizontal: 20, paddingBottom: 14 }}>
             <Text style={{ flex: 1, fontSize: 26, fontWeight: "800", color: "#FFF" }}>Add Songs</Text>
@@ -1063,6 +1113,7 @@ const AddSongsModal = React.memo(({ isVisible, onClose, playlistId }: any) => {
                   playlist?.trackIds.includes(tr.id) ? removeTrack(playlistId, tr.id) : addTrack(playlistId, tr);
                 }}
                 index={idx}
+                reduceMotion={reduceMotion}
               />
             ))}
             {query.trim().length >= 2 && !isSearching && onlineResults.length === 0 && (
@@ -1078,10 +1129,19 @@ const AddSongsModal = React.memo(({ isVisible, onClose, playlistId }: any) => {
   );
 });
 
-const SearchResultRow = ({ track, added, onToggle, index }: any) => {
-  const enterAnim = useSharedValue(0);
-  useEffect(() => { enterAnim.value = withDelay(index * 40, withSpring(1)); }, [index]);
-  const enterStyle = useAnimatedStyle(() => ({ opacity: enterAnim.value, transform: [{ translateY: interpolate(enterAnim.value, [0, 1], [10, 0]) }] }));
+const SearchResultRow = ({ track, added, onToggle, index, reduceMotion }: any) => {
+  const enterAnim = useSharedValue(reduceMotion ? 1 : 0);
+  useEffect(() => {
+    if (reduceMotion) {
+      enterAnim.value = 1;
+    } else {
+      enterAnim.value = withDelay(index * 30, withSpring(1, MotionSpring.SUBTLE));
+    }
+  }, [index, reduceMotion]);
+  const enterStyle = useAnimatedStyle(() => ({
+    opacity: enterAnim.value,
+    transform: [{ translateY: reduceMotion ? 0 : interpolate(enterAnim.value, [0, 1], [10, 0]) }],
+  }));
   return (
     <AnimatedReanimated.View style={[{ flexDirection: "row", alignItems: "center", marginBottom: 12 }, enterStyle]}>
       <AuraArtwork
@@ -1118,8 +1178,9 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
 
   const isSeedPlaylist = useMemo(() => !isLikedPlaylist && !storePlaylist, [isLikedPlaylist, storePlaylist]);
 
-  const { dailyMixes, madeForYou, becauseYouLike, rediscover, recentlyLoved, trendingSeeds, generatedAtTime } = useRecommendationsStore(
+  const { featuredHeroMix, dailyMixes, madeForYou, becauseYouLike, rediscover, recentlyLoved, trendingSeeds, generatedAtTime } = useRecommendationsStore(
     useShallow((s: any) => ({
+      featuredHeroMix: s.featuredHeroMix,
       dailyMixes: s.dailyMixes || [],
       madeForYou: s.madeForYou || [],
       becauseYouLike: s.becauseYouLike || [],
@@ -1132,8 +1193,17 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
 
   const seed = useMemo(() => {
     if (!isSeedPlaylist) return null;
-    return [...dailyMixes, ...madeForYou, ...becauseYouLike, ...rediscover, ...recentlyLoved, ...trendingSeeds].find(s => s.id === playlistId) || null;
-  }, [isSeedPlaylist, playlistId, dailyMixes, madeForYou, becauseYouLike, rediscover, recentlyLoved, trendingSeeds]);
+    const allSeeds = [
+      ...(featuredHeroMix ? [featuredHeroMix] : []),
+      ...dailyMixes,
+      ...madeForYou,
+      ...becauseYouLike,
+      ...rediscover,
+      ...recentlyLoved,
+      ...trendingSeeds,
+    ];
+    return allSeeds.find(s => s.id === playlistId) || null;
+  }, [isSeedPlaylist, playlistId, featuredHeroMix, dailyMixes, madeForYou, becauseYouLike, rediscover, recentlyLoved, trendingSeeds]);
 
   const [seedTracks, setSeedTracks] = useState<PlayerTrack[]>([]);
   const [isSeedLoading, setIsSeedLoading] = useState(false);
@@ -1307,12 +1377,10 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
   const handleDownload = useCallback(async () => {
     if (!resolvedTracks || resolvedTracks.length === 0) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const { enqueueDownload, downloadedTracks: dlMap } = useDownloadStore.getState();
+    const { enqueueDownloads, downloadedTracks: dlMap } = useDownloadStore.getState();
     const unDownloaded = resolvedTracks.filter((t: PlayerTrack) => !dlMap[t.id]);
     if (unDownloaded.length === 0) return;
-    unDownloaded.forEach((track: PlayerTrack) => {
-      enqueueDownload(track, 'NORMAL');
-    });
+    enqueueDownloads(unDownloaded, 'NORMAL');
   }, [resolvedTracks]);
   const scrollY = useSharedValue(0);
   const glowPulse = useSharedValue(0.5);
@@ -1437,10 +1505,24 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
     }
   }, [isLikedPlaylist, isSeedPlaylist, playlistId, removeTrack]);
 
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredTracks = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return resolvedTracks;
+    return resolvedTracks.filter((t) => {
+      const title = (t.title || "").toLowerCase();
+      const artist = (t.artist || (t as any).artistName || "").toLowerCase();
+      const album = (t.album || (t as any).albumName || "").toLowerCase();
+      const lang = ((t as any).language || "").toLowerCase();
+      return title.includes(q) || artist.includes(q) || album.includes(q) || lang.includes(q);
+    });
+  }, [resolvedTracks, searchQuery]);
+
   const gradientColors = useMemo(() => playlist?.gradientColors || [COLORS.primary, COLORS.primaryDeep] as [string, string], [playlist?.gradientColors]);
 
   const renderFlashItem = useCallback(({ item, index }: any) => <TrackRowItem item={item} handlePlayTrack={handlePlayTrack} index={index} handleDeleteTrack={handleDeleteTrack} playlistId={playlistId} />, [handlePlayTrack, handleDeleteTrack, playlistId]);
-  const renderDraggableItem = useCallback(({ item, drag, isActive }: any) => { const idx = resolvedTracks.findIndex(t => t.id === item.id); return <TrackRowItem item={item} drag={drag} isActive={isActive} handlePlayTrack={handlePlayTrack} index={idx} handleDeleteTrack={handleDeleteTrack} playlistId={playlistId} />; }, [resolvedTracks, handlePlayTrack, handleDeleteTrack, playlistId]);
+  const renderDraggableItem = useCallback(({ item, drag, isActive }: any) => { const idx = filteredTracks.findIndex(t => t.id === item.id); return <TrackRowItem item={item} drag={drag} isActive={isActive} handlePlayTrack={handlePlayTrack} index={idx} handleDeleteTrack={handleDeleteTrack} playlistId={playlistId} />; }, [filteredTracks, handlePlayTrack, handleDeleteTrack, playlistId]);
 
   if (isOnlineLoading || (isSeedPlaylist && isSeedLoading && resolvedTracks.length === 0)) {
     return (
@@ -1487,8 +1569,39 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
       </AnimatedReanimated.View>
 
       {isLikedPlaylist ? (
-        <AnimatedFlashList data={resolvedTracks} keyExtractor={(t: any, i: number) => `${t.id}-${i}`} renderItem={renderFlashItem} estimatedItemSize={72} extraData={currentTrack?.id} onScroll={scrollHandler} {...ScrollPhysics.STANDARD} contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: bottomPadding, paddingHorizontal: 20 }}
-          ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={handleDownload} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
+        <AnimatedFlashList
+          data={filteredTracks}
+          keyExtractor={(t: any, i: number) => `${t.id}-${i}`}
+          renderItem={renderFlashItem}
+          estimatedItemSize={72}
+          extraData={currentTrack?.id}
+          onScroll={scrollHandler}
+          {...ScrollPhysics.STANDARD}
+          contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: bottomPadding, paddingHorizontal: 20 }}
+          ListHeaderComponent={
+            <ListHeader
+              playlist={playlist}
+              resolvedTracks={resolvedTracks}
+              isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId}
+              scrollY={scrollY}
+              downloadStatus={downloadStatus}
+              downloadSpin={downloadSpin}
+              isShuffle={isShuffle && activeContextId === playlistId}
+              gradientColors={gradientColors}
+              handleDownload={handleDownload}
+              handlePlayAll={handlePlayAll}
+              shufflePress={shufflePress}
+              playPress={playPress}
+              downloadPress={downloadPress}
+              sharePress={sharePress}
+              glowPulse={glowPulse}
+              glowScale={glowScale}
+              onAddSongsPress={() => setIsAddSongsVisible(true)}
+              isLikedPlaylist={isLikedPlaylist}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+            />
+          }
           ListEmptyComponent={
             isSeedLoading ? (
               <View style={{ paddingVertical: 48, alignItems: 'center', justifyContent: 'center' }}>
@@ -1497,18 +1610,68 @@ const LocalPlaylistView = React.memo(({ playlistId }: { playlistId: string }) =>
                   Curating tracks for your mix...
                 </Text>
               </View>
+            ) : searchQuery.trim().length > 0 ? (
+              <View style={{ paddingVertical: 48, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="search-outline" size={36} color="rgba(255,255,255,0.3)" style={{ marginBottom: 12 }} />
+                <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>No matching tracks</Text>
+                <Text style={{ color: 'rgba(255,255,255,0.4)', marginTop: 6, fontSize: 13 }}>
+                  No songs match "{searchQuery.trim()}"
+                </Text>
+              </View>
             ) : null
           }
         />
       ) : (
-        <AnimatedDraggableFlatList data={resolvedTracks} onDragEnd={({ from, to }) => { reorderTracks(playlistId, from, to); if (activeContextId === playlistId) usePlayerStore.getState().reorderQueue(from, to); }} keyExtractor={(t, i) => `${t.id}-${i}`} renderItem={renderDraggableItem} extraData={currentTrack?.id} onScroll={scrollHandler} {...ScrollPhysics.STANDARD} contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: bottomPadding, paddingHorizontal: 20 }}
-          ListHeaderComponent={<ListHeader playlist={playlist} resolvedTracks={resolvedTracks} isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId} scrollY={scrollY} downloadStatus={downloadStatus} downloadSpin={downloadSpin} isShuffle={isShuffle && activeContextId === playlistId} gradientColors={gradientColors} handleDownload={handleDownload} handlePlayAll={handlePlayAll} shufflePress={shufflePress} playPress={playPress} downloadPress={downloadPress} sharePress={sharePress} glowPulse={glowPulse} glowScale={glowScale} onAddSongsPress={() => setIsAddSongsVisible(true)} isLikedPlaylist={isLikedPlaylist} />}
+        <AnimatedDraggableFlatList
+          data={filteredTracks}
+          onDragEnd={({ from, to }) => {
+            reorderTracks(playlistId, from, to);
+            if (activeContextId === playlistId) usePlayerStore.getState().reorderQueue(from, to);
+          }}
+          keyExtractor={(t, i) => `${t.id}-${i}`}
+          renderItem={renderDraggableItem}
+          extraData={currentTrack?.id}
+          onScroll={scrollHandler}
+          {...ScrollPhysics.STANDARD}
+          contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: bottomPadding, paddingHorizontal: 20 }}
+          ListHeaderComponent={
+            <ListHeader
+              playlist={playlist}
+              resolvedTracks={resolvedTracks}
+              isCurrentPlaylistPlaying={isPlaying && activeContextId === playlistId}
+              scrollY={scrollY}
+              downloadStatus={downloadStatus}
+              downloadSpin={downloadSpin}
+              isShuffle={isShuffle && activeContextId === playlistId}
+              gradientColors={gradientColors}
+              handleDownload={handleDownload}
+              handlePlayAll={handlePlayAll}
+              shufflePress={shufflePress}
+              playPress={playPress}
+              downloadPress={downloadPress}
+              sharePress={sharePress}
+              glowPulse={glowPulse}
+              glowScale={glowScale}
+              onAddSongsPress={() => setIsAddSongsVisible(true)}
+              isLikedPlaylist={isLikedPlaylist}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+            />
+          }
           ListEmptyComponent={
             isSeedLoading ? (
               <View style={{ paddingVertical: 48, alignItems: 'center', justifyContent: 'center' }}>
                 <ActivityIndicator size="large" color={gradientColors[0]} />
                 <Text style={{ color: 'rgba(255,255,255,0.7)', marginTop: 14, fontSize: 14, fontWeight: '600' }}>
                   Curating tracks for your mix...
+                </Text>
+              </View>
+            ) : searchQuery.trim().length > 0 ? (
+              <View style={{ paddingVertical: 48, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="search-outline" size={36} color="rgba(255,255,255,0.3)" style={{ marginBottom: 12 }} />
+                <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '700' }}>No matching tracks</Text>
+                <Text style={{ color: 'rgba(255,255,255,0.4)', marginTop: 6, fontSize: 13 }}>
+                  No songs match "{searchQuery.trim()}"
                 </Text>
               </View>
             ) : null
@@ -1589,4 +1752,21 @@ const styles = StyleSheet.create({
   emptyContainer: { alignItems: "center", justifyContent: "center", paddingVertical: 64, paddingHorizontal: 28 },
   emptyTitle: { fontSize: 22, fontWeight: "800", color: "#FFF", marginTop: 4, marginBottom: 8 },
   emptySubtitle: { fontSize: 14, color: "rgba(170,170,185,0.65)", textAlign: "center", lineHeight: 20, marginBottom: 28 },
+  playlistSearchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  playlistSearchInput: {
+    flex: 1,
+    height: "100%",
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "500",
+    paddingRight: 12,
+  },
 });

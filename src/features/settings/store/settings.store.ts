@@ -26,17 +26,23 @@ export interface SettingsState {
   // UI
   reduceMotion: boolean;
   accentColor: string;
+  hapticsEnabled: boolean;
 
-  // CLOUD BACKUP & SYNC
+  // CLOUD BACKUP & SYNC (Preserved)
   googleSyncEnabled: boolean;
+
+  // LOCAL BACKUP & RESTORE
+  localAutoBackupEnabled: boolean;
 
   // ACTIONS
   setStreamingQuality: (type: 'wifi' | 'cellular', quality: AudioQuality) => void;
   setDownloadQuality: (type: 'wifi' | 'cellular', quality: AudioQuality) => void;
-  toggleSetting: (key: keyof Omit<SettingsState, 'streamingQualityWifi' | 'streamingQualityCellular' | 'downloadQualityWifi' | 'downloadQualityCellular' | 'maxSongCacheGB' | 'accentColor' | 'setStreamingQuality' | 'setDownloadQuality' | 'toggleSetting' | 'setMaxSongCache' | 'setAccentColor' | 'setGoogleSyncEnabled'>) => void;
+  toggleSetting: (key: keyof Omit<SettingsState, 'streamingQualityWifi' | 'streamingQualityCellular' | 'downloadQualityWifi' | 'downloadQualityCellular' | 'maxSongCacheGB' | 'accentColor' | 'setStreamingQuality' | 'setDownloadQuality' | 'toggleSetting' | 'setMaxSongCache' | 'setAccentColor' | 'setGoogleSyncEnabled' | 'setLocalAutoBackupEnabled'>) => void;
   setMaxSongCache: (limit: number | 'unlimited') => void;
   setAccentColor: (color: string) => void;
   setGoogleSyncEnabled: (enabled: boolean) => void;
+  setLocalAutoBackupEnabled: (enabled: boolean) => void;
+  restoreSettings: (settings: Partial<SettingsState>) => void;
 }
 
 let _settingsHydrated = false;
@@ -70,7 +76,9 @@ export const useSettingsStore = create<SettingsState>()(
       maxSongCacheGB: 5,
       reduceMotion: false,
       accentColor: '#B19CD9',
+      hapticsEnabled: true,
       googleSyncEnabled: true,
+      localAutoBackupEnabled: true,
 
       // Actions
       setStreamingQuality: (type, quality) => {
@@ -123,6 +131,14 @@ export const useSettingsStore = create<SettingsState>()(
         try {
           const { SettingsSyncService } = require('../services/settings-sync.service');
           SettingsSyncService.syncGoogleSync(enabled);
+        } catch (_) {}
+      },
+      setLocalAutoBackupEnabled: (enabled) => set({ localAutoBackupEnabled: enabled }),
+      restoreSettings: (restored) => {
+        set((state) => ({ ...state, ...restored }));
+        try {
+          const { SettingsSyncService } = require('../services/settings-sync.service');
+          SettingsSyncService.syncAll();
         } catch (_) {}
       },
     }),

@@ -6,9 +6,8 @@ import {
   StyleProp,
   ViewStyle,
 } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '@/src/utils/haptics';
 import { useReducedMotionPreference } from '@/src/hooks/use-accessibility-preferences';
-import { impact } from '@/src/utils/haptics';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -49,7 +48,7 @@ function PressScaleComponent({
   const handlePressIn = useCallback(
     (event: GestureResponderEvent) => {
       if (!disabled) {
-        if (haptic) impact(haptic);
+        if (haptic) Haptics.impact(haptic);
         animateTo(scaleTo);
       }
       onPressIn?.(event);

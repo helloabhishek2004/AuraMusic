@@ -31,6 +31,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  TextInput,
   View,
   ViewStyle,
   Modal,
@@ -41,8 +42,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LiquidGlass } from "@/src/components/ui/liquid-glass";
 import { LiquidAtmosphereBackground } from "@/src/components/ui/LiquidAtmosphereBackground";
 import { useLikesStore } from "@/src/features/likes/store/likes.store";
-import { openAlbum, openArtistByName, openNowPlaying } from "@/src/navigation/music-navigation";
-import * as Haptics from "expo-haptics";
+import { openAlbum, openArtistByName } from "@/src/navigation/music-navigation";
+import * as Haptics from "@/src/utils/haptics";
 import AddToPlaylistSheet from "@/src/features/playlist/components/AddToPlaylistSheet";
 
 import AnimatedReanimated, {
@@ -59,7 +60,6 @@ import AnimatedReanimated, {
   runOnJS,
   SharedValue,
 } from "react-native-reanimated";
-import { TextInput } from "react-native";
 
 const AnimatedTextInput = AnimatedReanimated.createAnimatedComponent(TextInput) as any;
 
@@ -1108,9 +1108,8 @@ export default function DownloadsScreen() {
         sourceType: "manual",
         generatedAt: Date.now()
       });
-      openNowPlaying(router, track.id);
     },
-    [setQueue, router, tracks, setActiveContext],
+    [setQueue, tracks, setActiveContext],
   );
 
   const handleRemove = useCallback((trackId: string) => {
@@ -1158,19 +1157,64 @@ export default function DownloadsScreen() {
     [activeTab, handlePlay, handleRemove, handleCancel, isLoading, router, currentTrack, activeContext],
   );
 
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredTracks = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return tracks;
+    return tracks.filter((t) => {
+      const title = (t.title || "").toLowerCase();
+      const artist = (t.artist || "").toLowerCase();
+      const album = (t.album || "").toLowerCase();
+      const lang = ((t as any).language || "").toLowerCase();
+      return title.includes(q) || artist.includes(q) || album.includes(q) || lang.includes(q);
+    });
+  }, [tracks, searchQuery]);
+
+  const filteredAlbums = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return albums;
+    return albums.filter((a) => {
+      const title = (a.title || "").toLowerCase();
+      const artist = (a.artist || "").toLowerCase();
+      return title.includes(q) || artist.includes(q);
+    });
+  }, [albums, searchQuery]);
+
+  const filteredPlaylists = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return downloadedPlaylists;
+    return downloadedPlaylists.filter((pl) => {
+      const title = (pl.title || "").toLowerCase();
+      return title.includes(q);
+    });
+  }, [downloadedPlaylists, searchQuery]);
+
+  const filteredDownloading = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return downloading;
+    return downloading.filter((d: any) => {
+      const title = (d.track?.title || "").toLowerCase();
+      const artist = (d.track?.artist || "").toLowerCase();
+      return title.includes(q) || artist.includes(q);
+    });
+  }, [downloading, searchQuery]);
+
   const listData = useMemo(() => {
     if (isLoading) return Array(6).fill({ _skeleton: true });
-    if (activeTab === "Songs") return tracks;
-    if (activeTab === "Albums") return albums;
-    if (activeTab === "Playlists") return downloadedPlaylists;
-    if (activeTab === "Downloading") return downloading;
+    if (activeTab === "Songs") return filteredTracks;
+    if (activeTab === "Albums") return filteredAlbums;
+    if (activeTab === "Playlists") return filteredPlaylists;
+    if (activeTab === "Downloading") return filteredDownloading;
     return [];
-  }, [activeTab, tracks, albums, downloading, downloadedPlaylists, isLoading]);
+  }, [activeTab, filteredTracks, filteredAlbums, filteredPlaylists, filteredDownloading, isLoading]);
 
   const headerEntrance = useEntrance(0);
 
-  const emptyMessage =
-    activeTab === "Downloading"
+  const isSearching = searchQuery.trim().length > 0;
+  const emptyMessage = isSearching
+    ? `No results for "${searchQuery.trim()}"`
+    : activeTab === "Downloading"
       ? "No active downloads"
       : activeTab === "Playlists"
         ? "No downloaded playlists"
@@ -1226,8 +1270,36 @@ export default function DownloadsScreen() {
                 categories={tabs}
                 activeCategory={activeTab}
                 onCategoryChange={setActiveTab}
-                style={{ marginBottom: 20 }}
+                style={{ marginBottom: 14 }}
               />
+            </AnimatedReanimated.View>
+
+            {/* Local Search Field */}
+            <AnimatedReanimated.View style={[s.searchBarContainer, useEntrance(90)]}>
+              <View style={s.searchBarGlass}>
+                <Ionicons name="search" size={17} color={searchQuery ? C.primary : "rgba(255,255,255,0.4)"} style={{ marginLeft: 12, marginRight: 8 }} />
+                <TextInput
+                  style={s.searchInput}
+                  placeholder={`Search ${activeTab.toLowerCase()} by title, artist...`}
+                  placeholderTextColor="rgba(255,255,255,0.35)"
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  returnKeyType="search"
+                  clearButtonMode="while-editing"
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity
+                    onPress={() => setSearchQuery("")}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    style={{ padding: 8, marginRight: 6 }}
+                    accessibilityLabel="Clear search"
+                  >
+                    <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.45)" />
+                  </TouchableOpacity>
+                )}
+              </View>
             </AnimatedReanimated.View>
 
             {activeTab === "Downloading" && <QueueSummaryCard />}
@@ -1340,6 +1412,26 @@ const s = StyleSheet.create({
     fontWeight: "800",
     color: C.text,
     letterSpacing: -0.3,
+  },
+  searchBarContainer: {
+    marginBottom: 16,
+  },
+  searchBarGlass: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.09)",
+  },
+  searchInput: {
+    flex: 1,
+    height: "100%",
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "500",
+    paddingRight: 12,
   },
   // Downloading row
   dlRow: {
