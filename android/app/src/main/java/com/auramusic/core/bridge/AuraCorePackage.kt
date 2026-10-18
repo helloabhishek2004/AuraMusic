@@ -17,7 +17,8 @@ class AuraCorePackage : ReactPackage {
             AuraLyricsModule(reactContext),
             AuraDownloadModule(reactContext),
             AuraPlaylistModule(reactContext),
-            AuraRestoreModule(reactContext)
+            AuraRestoreModule(reactContext),
+            AuraInstallerModule(reactContext)
         )
     }
 

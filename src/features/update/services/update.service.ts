@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as FileSystem from 'expo-file-system/legacy';
+import { AuraInstaller } from '@/src/services/native-core';
 import { getInstalledAppVersion } from '../utils/app-version';
 import { isNewerVersion } from '../utils/semver';
 import {
@@ -200,9 +201,39 @@ class UpdateServiceClass {
   }
 
   /**
+   * Checks whether the app has permission to install unknown apps on Android.
+   */
+  async canInstallPackages(): Promise<boolean> {
+    if (Platform.OS !== 'android') return false;
+    if (AuraInstaller) {
+      try {
+        return await AuraInstaller.canRequestPackageInstalls();
+      } catch (e) {
+        console.warn('[UpdateService] canRequestPackageInstalls failed:', e);
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Opens the system settings screen for "Install unknown apps"
+   */
+  async requestInstallPermission(): Promise<boolean> {
+    if (Platform.OS !== 'android') return false;
+    if (AuraInstaller) {
+      try {
+        return await AuraInstaller.openInstallPermissionSettings();
+      } catch (e) {
+        console.warn('[UpdateService] openInstallPermissionSettings failed:', e);
+      }
+    }
+    return false;
+  }
+
+  /**
    * Initiates native Android APK package installation flow
    */
-  async installApk(fileUri: string): Promise<boolean> {
+  async installApk(fileUri: string): Promise<{ success: boolean; permissionRequired?: boolean; error?: string }> {
     if (Platform.OS !== 'android') {
       throw new Error('APK installation is only supported on Android devices.');
     }
@@ -213,17 +244,26 @@ class UpdateServiceClass {
         throw new Error('The downloaded update file was not found.');
       }
 
-      // Convert local file:// URI to content:// URI using FileSystemFileProvider
-      const contentUri = await FileSystem.getContentUriAsync(fileUri);
+      if (AuraInstaller) {
+        const res = await AuraInstaller.installApk(fileUri);
+        if (res.permissionRequired) {
+          return { success: false, permissionRequired: true, error: res.error };
+        }
+        if (!res.success) {
+          throw new Error(res.error || 'Failed to launch installer');
+        }
+        return { success: true };
+      }
 
-      // Trigger Android's package installer intent
+      // Fallback via Expo FileSystem & IntentLauncher
+      const contentUri = await FileSystem.getContentUriAsync(fileUri);
       await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: contentUri,
         type: 'application/vnd.android.package-archive',
-        flags: 1, // Intent.FLAG_GRANT_READ_URI_PERMISSION
+        flags: 268435457, // FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK
       });
 
-      return true;
+      return { success: true };
     } catch (err: any) {
       console.error('[UpdateService] Installation trigger failed:', err);
       throw err;

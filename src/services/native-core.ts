@@ -361,6 +361,20 @@ export const AuraRestore: AuraRestoreModuleInterface | null = isAndroid
   ? NativeModules.AuraRestoreModule
   : null;
 
+export interface AuraInstallerModuleInterface {
+  canRequestPackageInstalls(): Promise<boolean>;
+  openInstallPermissionSettings(): Promise<boolean>;
+  installApk(fileUriOrPath: string): Promise<{
+    success: boolean;
+    permissionRequired: boolean;
+    error?: string;
+  }>;
+}
+
+export const AuraInstaller: AuraInstallerModuleInterface | null = isAndroid
+  ? NativeModules.AuraInstallerModule
+  : null;
+
 let _downloadEmitter: NativeEventEmitter | null = null;
 function getDownloadEmitter(): NativeEventEmitter | null {
   if (!isAndroid || !NativeModules.AuraDownloadModule) return null;

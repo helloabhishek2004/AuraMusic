@@ -36,12 +36,17 @@ export interface UpdateState {
   // Download state
   downloadProgress: UpdateDownloadProgress;
   downloadedApkUri: string | null;
+  isPermissionModalVisible: boolean;
 
   // Actions
   checkForUpdates: (force?: boolean) => Promise<void>;
   startDownload: () => Promise<void>;
   cancelDownload: () => Promise<void>;
   installUpdate: () => Promise<void>;
+  checkInstallPermission: () => Promise<boolean>;
+  requestInstallPermission: () => Promise<boolean>;
+  setPermissionModalVisible: (visible: boolean) => void;
+  revertToReady: () => void;
   dismissNotification: () => void;
   markComplete: () => void;
   setSimulatedPhase: (phase: UpdatePhase) => void;
@@ -68,6 +73,7 @@ export const useUpdateStore = create<UpdateState>()(
         speedText: '0 MB/s',
       },
       downloadedApkUri: null,
+      isPermissionModalVisible: false,
 
       checkForUpdates: async (force = false) => {
         const state = get();
@@ -196,6 +202,25 @@ export const useUpdateStore = create<UpdateState>()(
         });
       },
 
+      checkInstallPermission: async () => {
+        return await UpdateService.canInstallPackages();
+      },
+
+      requestInstallPermission: async () => {
+        return await UpdateService.requestInstallPermission();
+      },
+
+      setPermissionModalVisible: (visible: boolean) => {
+        set({ isPermissionModalVisible: visible });
+      },
+
+      revertToReady: () => {
+        const { phase, downloadedApkUri } = get();
+        if (downloadedApkUri && (phase === 'INSTALLING' || phase === 'ERROR')) {
+          set({ phase: 'READY_TO_INSTALL', errorMessage: null });
+        }
+      },
+
       installUpdate: async () => {
         const { downloadedApkUri } = get();
         if (!downloadedApkUri) {
@@ -203,12 +228,23 @@ export const useUpdateStore = create<UpdateState>()(
           return;
         }
 
+        // Verify unknown app installation permission on Android first
+        const canInstall = await UpdateService.canInstallPackages();
+        if (!canInstall) {
+          set({ isPermissionModalVisible: true });
+          return;
+        }
+
         set({ phase: 'INSTALLING' });
         try {
-          await UpdateService.installApk(downloadedApkUri);
-          // Android will take over and display the system package installer.
-          // When the user returns to the app, it will either be running the new version
-          // or remain ready to install.
+          const res = await UpdateService.installApk(downloadedApkUri);
+          if (res.permissionRequired) {
+            set({ phase: 'READY_TO_INSTALL', isPermissionModalVisible: true });
+            return;
+          }
+          if (!res.success) {
+            throw new Error(res.error || 'Failed to launch installer');
+          }
         } catch (err: any) {
           set({
             errorMessage: err?.message || 'Failed to launch installer',

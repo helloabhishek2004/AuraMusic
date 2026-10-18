@@ -6,7 +6,9 @@ import { useRouter } from 'expo-router';
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Dimensions,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -343,6 +345,112 @@ const CircularProgressRing = memo(({ percentage }: { percentage: number }) => {
 });
 CircularProgressRing.displayName = 'CircularProgressRing';
 
+// ── Install Permission Modal ────────────────────────────────────────────────
+const InstallPermissionModal = memo(
+  ({
+    visible,
+    onClose,
+    onOpenSettings,
+  }: {
+    visible: boolean;
+    onClose: () => void;
+    onOpenSettings: () => void;
+  }) => {
+    if (!visible) return null;
+
+    return (
+      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0, 0, 0, 0.78)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 24,
+          }}
+        >
+          <LiquidGlass
+            r={28}
+            style={{
+              width: '100%',
+              maxWidth: 360,
+              padding: 24,
+              alignItems: 'center',
+              borderColor: 'rgba(218, 185, 255, 0.35)',
+              backgroundColor: 'rgba(24, 22, 33, 0.95)',
+            }}
+          >
+            {/* Security Shield Icon */}
+            <View
+              style={{
+                width: 68,
+                height: 68,
+                borderRadius: 34,
+                backgroundColor: 'rgba(218, 185, 255, 0.15)',
+                borderWidth: 1,
+                borderColor: 'rgba(218, 185, 255, 0.3)',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 18,
+              }}
+            >
+              <MaterialIcons name="security" size={34} color={PRIMARY} />
+            </View>
+
+            <View
+              style={[
+                styles.inlineStatusBadge,
+                {
+                  backgroundColor: 'rgba(218, 185, 255, 0.12)',
+                  borderColor: 'rgba(218, 185, 255, 0.25)',
+                  marginBottom: 12,
+                },
+              ]}
+            >
+              <Text style={{ fontSize: 11, fontWeight: '700', color: PRIMARY }}>Android Security Guard</Text>
+            </View>
+
+            <Text style={[styles.editorialTitle, { fontSize: 22, marginBottom: 8 }]}>
+              Permission Required
+            </Text>
+
+            <Text
+              style={{
+                fontSize: 13,
+                color: 'rgba(255, 255, 255, 0.75)',
+                textAlign: 'center',
+                lineHeight: 20,
+                marginBottom: 24,
+              }}
+            >
+              To install this update, Android requires permission to allow installs from AuraMusic. Tap{' '}
+              <Text style={{ color: PRIMARY, fontWeight: '700' }}>Open Settings</Text>, turn on{' '}
+              <Text style={{ color: SECONDARY, fontWeight: '700' }}>&quot;Allow from this source&quot;</Text>, then return here to install.
+            </Text>
+
+            <View style={{ width: '100%', gap: 10 }}>
+              <PrimaryGlowButton
+                label="Open Settings"
+                icon="settings"
+                onPress={onOpenSettings}
+              />
+              <LiquidPill
+                style={{ paddingVertical: 14, alignItems: 'center' }}
+                onPress={onClose}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '600', color: 'rgba(255, 255, 255, 0.65)' }}>
+                  Cancel
+                </Text>
+              </LiquidPill>
+            </View>
+          </LiquidGlass>
+        </View>
+      </Modal>
+    );
+  }
+);
+InstallPermissionModal.displayName = 'InstallPermissionModal';
+
 // ── Main Software Update Screen ──────────────────────────────────────────────
 export default function SoftwareUpdateScreen() {
   const router = useRouter();
@@ -358,10 +466,15 @@ export default function SoftwareUpdateScreen() {
     lastCheckedTimestamp,
     errorMessage,
     downloadProgress,
+    isPermissionModalVisible,
     checkForUpdates,
     startDownload,
     cancelDownload,
     installUpdate,
+    checkInstallPermission,
+    requestInstallPermission,
+    setPermissionModalVisible,
+    revertToReady,
     setSimulatedPhase,
   } = useUpdateStore();
 
@@ -372,6 +485,24 @@ export default function SoftwareUpdateScreen() {
   useEffect(() => {
     checkForUpdates(false);
   }, [checkForUpdates]);
+
+  // Handle app lifecycle transitions (e.g. returning from Unknown Apps Settings or Package Installer)
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (nextState) => {
+      if (nextState === 'active') {
+        if (isPermissionModalVisible) {
+          const hasPerm = await checkInstallPermission();
+          if (hasPerm) {
+            setPermissionModalVisible(false);
+          }
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isPermissionModalVisible, checkInstallPermission, setPermissionModalVisible]);
 
   const handleBack = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -619,6 +750,12 @@ export default function SoftwareUpdateScreen() {
             <Text style={{ fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.7)' }}>Not Now</Text>
           </LiquidPill>
         </View>
+
+        <InstallPermissionModal
+          visible={isPermissionModalVisible}
+          onClose={() => setPermissionModalVisible(false)}
+          onOpenSettings={requestInstallPermission}
+        />
       </View>
     );
   }
@@ -628,8 +765,12 @@ export default function SoftwareUpdateScreen() {
     return (
       <View style={[styles.root, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 16) }]}>
         <AmbientNebula />
-        <View style={[styles.topBar, { justifyContent: 'center' }]}>
-          <Text style={[styles.topBarTitle, { color: 'rgba(255,255,255,0.7)' }]}>AuraMusic</Text>
+        <View style={styles.topBar}>
+          <LiquidPill style={styles.pillIconBtn} onPress={revertToReady}>
+            <MaterialIcons name="arrow-back" size={20} color="#FFF" />
+          </LiquidPill>
+          <Text style={styles.topBarTitle}>Installing Update</Text>
+          <View style={{ width: 40 }} />
         </View>
 
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
@@ -640,18 +781,31 @@ export default function SoftwareUpdateScreen() {
             </LiquidGlass>
           </View>
 
-          <Text style={[styles.editorialTitle, { fontSize: 22 }]}>Installing update...</Text>
-          <Text style={{ fontSize: 12, color: ON_SURFACE_VARIANT, textAlign: 'center', maxWidth: 300, marginTop: 6, lineHeight: 18 }}>
-            Applying Liquid Glass refinements and preparing package installation.
+          <Text style={[styles.editorialTitle, { fontSize: 22 }]}>System Installer Launched</Text>
+          <Text style={{ fontSize: 13, color: ON_SURFACE_VARIANT, textAlign: 'center', maxWidth: 300, marginTop: 8, lineHeight: 20 }}>
+            Follow the on-screen prompts in Android&apos;s package installer to confirm and complete the upgrade.
           </Text>
 
           <View style={{ width: 200, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.1)', overflow: 'hidden', marginTop: 24 }}>
             <LinearGradient colors={[PRIMARY, SECONDARY]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ flex: 1 }} />
           </View>
           <Text style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 10 }}>
-            Finishing setup
+            Waiting for confirmation
           </Text>
         </View>
+
+        <View style={{ paddingHorizontal: 24, gap: 12 }}>
+          <PrimaryGlowButton label="Relaunch Installer" icon="refresh" onPress={installUpdate} />
+          <LiquidPill style={{ paddingVertical: 14, alignItems: 'center' }} onPress={revertToReady}>
+            <Text style={{ fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.7)' }}>Return to Update Screen</Text>
+          </LiquidPill>
+        </View>
+
+        <InstallPermissionModal
+          visible={isPermissionModalVisible}
+          onClose={() => setPermissionModalVisible(false)}
+          onOpenSettings={requestInstallPermission}
+        />
       </View>
     );
   }

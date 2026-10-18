@@ -44,12 +44,18 @@ AuraMusic is a modern, serverless Android music player engineered for pure audio
   * **Queue Auto-Scroll**: Opening the Queue sheet from Now Playing automatically and smoothly scrolls to the active track based on unique item identity, without closing Now Playing or resetting the queue.
   * **Non-Intrusive Playback Selection**: Tapping any track from Home, Search, Downloads, or Liked Songs starts immediate playback while keeping the user on the current screen with mini-player synchronization.
 
+* **Production-Grade In-App Package Installer & Security Guard**:
+  * Seamless native Android package installation (`AuraInstallerModule.kt`) for sideloaded update packages.
+  * Native check for `packageManager.canRequestPackageInstalls()` on Android 8.0+ (API 26–34+), with `<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />`.
+  * Dynamic Liquid Glass **"Android Security Guard"** permission modal guiding users to 1-tap "Open Settings" to enable "Allow from this source", automatically resuming installation upon return.
+  * Enhanced `INSTALLING` state with full user control: actionable "Relaunch Installer" and "Return to Update Screen" buttons to eliminate infinite spinner traps.
+
 ---
 
 ### 📦 Release Artifacts & Verification
 
 * **File**: `AuraMusic-v3.1.0-universal.apk` (Standard Release: `app-release.apk`)
-* **Size**: `119,142,838 bytes` (~113.62 MiB)
+* **Size**: `119,148,458 bytes` (~113.63 MiB)
 * **Build Date**: `2026-10-18`
 * **Version**: `3.1.0`
 * **Version Code**: `5`
@@ -57,7 +63,7 @@ AuraMusic is a modern, serverless Android music player engineered for pure audio
 * **Architecture**: Universal (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`)
 * **Minimum Android Version**: Android 7.0 (API Level 24)
 * **Target Android Version**: Android 16 Preview (API Level 36)
-* **SHA-256**: `419b27b5eaaa5a44631d3ab5cea49a3451e629163c6315a725b63bcb4871afb6`
+* **SHA-256**: `877c64fb75881499e80ce3bf72deb7b84eff64f0ed8dc42e3aad3708670697e3`
 * **Git Release Tag**: `v3.1.0`
 
 ---
