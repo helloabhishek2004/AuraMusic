@@ -68,7 +68,6 @@ h1, h2, h3, h4, .font-display {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 50% 38%, rgb(124 59 183 / .22), transparent 34%),
     radial-gradient(ellipse at 18% 4%, #512184 0%, transparent 46%),
     linear-gradient(145deg, #3d1566 0%, #21083f 48%, #0e031e 100%);
   opacity: 1;

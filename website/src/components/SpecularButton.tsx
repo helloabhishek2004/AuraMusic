@@ -97,13 +97,38 @@ export interface SpecularButtonProps {
   'aria-label'?: string;
 }
 
-const isTouchOrMobileDevice = (): boolean => {
-  if (typeof window === 'undefined') return true;
-  return (
+let cachedCanUseButtonWebGL: boolean | null = null;
+
+const canUseSpecularWebGL = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  if (cachedCanUseButtonWebGL !== null) return cachedCanUseButtonWebGL;
+
+  if (
+    navigator.webdriver ||
     window.matchMedia('(pointer: coarse)').matches ||
     window.matchMedia('(hover: none)').matches ||
     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-  );
+  ) {
+    cachedCanUseButtonWebGL = false;
+    return false;
+  }
+
+  try {
+    const testCanvas = document.createElement('canvas');
+    const gl = (testCanvas.getContext('webgl2') || testCanvas.getContext('webgl')) as WebGLRenderingContext | null;
+    if (!gl) {
+      cachedCanUseButtonWebGL = false;
+      return false;
+    }
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const rendererInfo = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '') : '';
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    cachedCanUseButtonWebGL = !/SwiftShader|llvmpipe|Software|Mesa/i.test(rendererInfo);
+    return cachedCanUseButtonWebGL;
+  } catch {
+    cachedCanUseButtonWebGL = false;
+    return false;
+  }
 };
 
 export const SpecularButton: React.FC<SpecularButtonProps> = ({
@@ -152,7 +177,21 @@ export const SpecularButton: React.FC<SpecularButtonProps> = ({
     autoAnimate,
   });
 
-  propsRef.current = {
+  useEffect(() => {
+    propsRef.current = {
+      radius,
+      lineColor,
+      baseColor,
+      intensity,
+      shineSize,
+      shineFade,
+      thickness,
+      speed,
+      followMouse,
+      proximity,
+      autoAnimate,
+    };
+  }, [
     radius,
     lineColor,
     baseColor,
@@ -164,18 +203,14 @@ export const SpecularButton: React.FC<SpecularButtonProps> = ({
     followMouse,
     proximity,
     autoAnimate,
-  };
+  ]);
 
   useEffect(() => {
     const btn = btnRef.current;
     const fx = fxRef.current;
     if (!btn || !fx) return;
 
-    // Do NOT initialize WebGL on mobile/touch screens:
-    // 1. Mobile devices don't have mouse cursor tracking or proximity.
-    // 2. Mobile devices have strict WebGL context limits (causes crash & [x_x] broken canvas).
-    // 3. Fallback to clean, zero-overhead CSS glass rendering.
-    if (isTouchOrMobileDevice()) {
+    if (!canUseSpecularWebGL()) {
       return;
     }
 
@@ -192,11 +227,6 @@ export const SpecularButton: React.FC<SpecularButtonProps> = ({
     let ro: ResizeObserver | null = null;
 
     try {
-      // Test WebGL availability before creating full renderer
-      const testCanvas = document.createElement('canvas');
-      const testGl = testCanvas.getContext('webgl2') || testCanvas.getContext('webgl');
-      if (!testGl) return;
-
       // Cap DPR to 2 on desktop to prevent excessive VRAM allocation
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       renderer = new Renderer({ alpha: true, premultipliedAlpha: true, antialias: true, dpr });

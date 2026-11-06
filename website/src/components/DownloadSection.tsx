@@ -5,6 +5,7 @@ import { AuraLogo } from './AuraLogo';
 import { SpecularButton } from './SpecularButton';
 import { AuraChip } from './AuraChip';
 import BlurText from './BlurText';
+import AnimatedContent from './AnimatedContent';
 import { fetchLatestRelease, FALLBACK_RELEASE, initiateApkDownload } from '../lib/release';
 import { trackGithubVisit } from '../lib/analytics';
 import { ShareButton } from './ShareButton';
@@ -33,7 +34,17 @@ export const DownloadSection: React.FC = () => {
         style={{ background: 'radial-gradient(circle, #BF5AF2 0%, #46F5E0 60%, transparent 80%)' }}
       />
 
-      <div className="relative rounded-[28px] sm:rounded-[40px] bg-[#0C0B14]/85 border border-white/[0.09] p-5 sm:p-12 md:p-16 shadow-[0_30px_90px_-20px_rgba(0,0,0,0.9),inset_0_1px_1px_rgba(255,255,255,0.15)] backdrop-blur-2xl">
+      <AnimatedContent
+        distance={80}
+        direction="vertical"
+        duration={0.85}
+        ease="power3.out"
+        blur={6}
+        scale={0.97}
+        stagger={0.08}
+        threshold={0.1}
+        className="relative rounded-[28px] sm:rounded-[40px] bg-[#0C0B14]/85 border border-white/[0.09] p-5 sm:p-12 md:p-16 shadow-[0_30px_90px_-20px_rgba(0,0,0,0.9),inset_0_1px_1px_rgba(255,255,255,0.15)] backdrop-blur-2xl"
+      >
         
         {/* Brand Icon Header */}
         <div className="inline-flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 rounded-2xl sm:rounded-3xl bg-white/[0.04] border border-white/[0.1] mb-4 sm:mb-6 shadow-inner">
@@ -153,7 +164,7 @@ export const DownloadSection: React.FC = () => {
           </div>
         </div>
 
-      </div>
+      </AnimatedContent>
     </section>
   );
 };

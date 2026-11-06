@@ -1,18 +1,29 @@
 <!doctype html>
-<html lang="en" class="dark scroll-smooth">
+<html lang="en" dir="ltr" class="dark scroll-smooth">
   <head>
     <meta charset="UTF-8" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
-    <link rel="canonical" href="https://listenwith-auramusic.vercel.app/" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="format-detection" content="telephone=no, date=no, email=no, address=no" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#21083f" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#21083f" />
+    <meta name="application-name" content="AuraMusic" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AuraMusic" />
+    <meta name="mobile-web-app-capable" content="yes" />
 
-    <!-- Google tag (gtag.js) -->
-    <script
-      async
-      src="https://www.googletagmanager.com/gtag/js?id=G-TX8EQV2624"
-    ></script>
+    <link rel="canonical" href="https://listenwith-auramusic.vercel.app/" />
+    <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml" />
+    <link rel="alternate" type="text/plain" title="AI & LLM Context" href="/llms.txt" />
+    <link rel="author" href="/humans.txt" />
+
+    <!-- Google tag (gtag.js) dataLayer bootstrap -->
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag() {
@@ -28,14 +39,14 @@
       content="J9SU7VcAcVcj0cH0xKp_ojqWvRR_FgdildZIFoitHts"
     />
 
-    <!-- Icons & Manifest -->
+    <!-- Icons & Web App Manifest -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon.png" />
     <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" href="/icon.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
 
-    <!-- Primary Meta Tags -->
+    <!-- Primary SEO Meta Tags -->
     <title>AuraMusic — Free, Ad-Free Offline Android Music Player</title>
     <meta
       name="title"
@@ -43,17 +54,32 @@
     />
     <meta
       name="description"
-      content="AuraMusic is a free, ad-free Android music player featuring offline downloads, local audio playback, synced lyrics, and native Media3 playback. Download the official universal APK."
+      content="Download AuraMusic for Android: a 100% free, ad-free offline music player with native Media3 audio, direct downloads, synced lyrics, and local library support."
     />
     <meta
       name="keywords"
-      content="free music player for Android, music player with no ads, ad-free music player, offline music player Android, free offline music player, local music player Android, AuraMusic APK, AuraMusic download, Android music player"
+      content="free music player for Android, music player with no ads, ad-free music player, offline music player Android, free offline music player, local music player Android, AuraMusic APK, AuraMusic v3.1.0 download, AndroidX Media3 music player, synced lyrics Android player"
     />
-    <meta name="theme-color" content="#07070C" />
-    <meta name="robots" content="index, follow" />
+    <meta name="author" content="Abhishek (@helloabhishek2004)" />
+    <meta name="creator" content="Abhishek (@helloabhishek2004)" />
+    <meta name="publisher" content="AuraMusic" />
+    <meta name="category" content="Music & Audio, Android Software" />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+    <meta
+      name="googlebot"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+    <meta
+      name="bingbot"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
 
-    <!-- Open Graph / Facebook -->
+    <!-- Open Graph / Facebook / Discord / Slack / iMessage -->
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
     <meta
       property="og:url"
       content="https://listenwith-auramusic.vercel.app/"
@@ -65,39 +91,50 @@
     />
     <meta
       property="og:description"
-      content="AuraMusic is a free, ad-free Android music player with native Media3 playback, offline downloads, synced lyrics, and a fluid Liquid Glass interface."
+      content="Download AuraMusic for Android: a 100% free, ad-free offline music player with native Media3 audio, direct downloads, synced lyrics, and local library support."
     />
     <meta
       property="og:image"
       content="https://listenwith-auramusic.vercel.app/aura_screen.png"
     />
+    <meta
+      property="og:image:secure_url"
+      content="https://listenwith-auramusic.vercel.app/aura_screen.png"
+    />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1080" />
     <meta property="og:image:height" content="2400" />
     <meta
       property="og:image:alt"
-      content="AuraMusic Android application interface"
+      content="AuraMusic Android application interface with Liquid Glass design and native Media3 audio engine"
     />
 
-    <!-- Twitter -->
-    <meta property="twitter:card" content="summary_large_image" />
+    <!-- Twitter / X Cards -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@helloabhishek2004" />
+    <meta name="twitter:creator" content="@helloabhishek2004" />
     <meta
-      property="twitter:url"
+      name="twitter:url"
       content="https://listenwith-auramusic.vercel.app/"
     />
     <meta
-      property="twitter:title"
+      name="twitter:title"
       content="AuraMusic — Free, Ad-Free Offline Android Music Player"
     />
     <meta
-      property="twitter:description"
-      content="AuraMusic is a free, ad-free Android music player with native Media3 playback, offline downloads, synced lyrics, and a fluid Liquid Glass interface."
+      name="twitter:description"
+      content="Download AuraMusic for Android: a 100% free, ad-free offline music player with native Media3 audio, direct downloads, synced lyrics, and local library support."
     />
     <meta
-      property="twitter:image"
+      name="twitter:image"
       content="https://listenwith-auramusic.vercel.app/aura_screen.png"
     />
+    <meta
+      name="twitter:image:alt"
+      content="AuraMusic Android application interface with Liquid Glass design and native Media3 audio engine"
+    />
 
-    <!-- Schema.org JSON-LD Structured Data -->
+    <!-- Schema.org JSON-LD Knowledge Graph -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -107,11 +144,33 @@
             "@id": "https://listenwith-auramusic.vercel.app/#website",
             "url": "https://listenwith-auramusic.vercel.app/",
             "name": "AuraMusic",
-            "alternateName": ["AuraMusic Android", "AuraMusic Player"],
-            "description": "Free, ad-free Android music player with offline playback, downloads, and native Media3 sound fidelity.",
+            "alternateName": ["AuraMusic Android", "AuraMusic Player", "AuraMusic APK"],
+            "description": "Free, ad-free Android music player with offline playback, downloads, synced lyrics, and native Media3 sound fidelity.",
+            "inLanguage": "en-US",
             "publisher": {
+              "@id": "https://listenwith-auramusic.vercel.app/#organization"
+            },
+            "creator": {
               "@id": "https://listenwith-auramusic.vercel.app/#author"
             }
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://listenwith-auramusic.vercel.app/#organization",
+            "name": "AuraMusic",
+            "url": "https://listenwith-auramusic.vercel.app/",
+            "logo": {
+              "@type": "ImageObject",
+              "url": "https://listenwith-auramusic.vercel.app/icon.png",
+              "width": 1024,
+              "height": 1024
+            },
+            "founder": {
+              "@id": "https://listenwith-auramusic.vercel.app/#author"
+            },
+            "sameAs": [
+              "https://github.com/helloabhishek2004/AuraMusic"
+            ]
           },
           {
             "@type": "Person",
@@ -127,23 +186,81 @@
             "jobTitle": "Lead Software Architect & Designer"
           },
           {
-            "@type": "SoftwareApplication",
+            "@type": "WebPage",
+            "@id": "https://listenwith-auramusic.vercel.app/#webpage",
+            "url": "https://listenwith-auramusic.vercel.app/",
+            "name": "AuraMusic — Free, Ad-Free Offline Android Music Player",
+            "description": "Download AuraMusic for Android: a 100% free, ad-free offline music player with native Media3 audio, direct downloads, synced lyrics, and local library support.",
+            "isPartOf": {
+              "@id": "https://listenwith-auramusic.vercel.app/#website"
+            },
+            "about": {
+              "@id": "https://listenwith-auramusic.vercel.app/#software"
+            },
+            "breadcrumb": {
+              "@id": "https://listenwith-auramusic.vercel.app/#breadcrumb"
+            },
+            "primaryImageOfPage": {
+              "@type": "ImageObject",
+              "url": "https://listenwith-auramusic.vercel.app/aura_screen.png",
+              "width": 1080,
+              "height": 2400
+            },
+            "datePublished": "2025-01-15T00:00:00Z",
+            "dateModified": "2026-11-06T00:00:00Z",
+            "inLanguage": "en-US"
+          },
+          {
+            "@type": "BreadcrumbList",
+            "@id": "https://listenwith-auramusic.vercel.app/#breadcrumb",
+            "itemListElement": [
+              {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Home",
+                "item": "https://listenwith-auramusic.vercel.app/"
+              },
+              {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "Privacy Policy",
+                "item": "https://listenwith-auramusic.vercel.app/privacy"
+              },
+              {
+                "@type": "ListItem",
+                "position": 3,
+                "name": "Terms of Service",
+                "item": "https://listenwith-auramusic.vercel.app/terms"
+              }
+            ]
+          },
+          {
+            "@type": ["SoftwareApplication", "MobileApplication"],
             "@id": "https://listenwith-auramusic.vercel.app/#software",
             "name": "AuraMusic",
             "alternateName": ["AuraMusic Android", "AuraMusic Player"],
             "applicationCategory": "MultimediaApplication",
+            "applicationSubCategory": "MusicPlayer",
             "operatingSystem": "Android 7.0 (API 24) and higher",
             "offers": {
               "@type": "Offer",
               "price": "0",
-              "priceCurrency": "USD"
+              "priceCurrency": "USD",
+              "availability": "https://schema.org/InStock"
             },
             "description": "Free, ad-free Android music player with native Media3 playback, offline downloads, synced lyrics, and local music file support.",
-            "downloadUrl": "https://github.com/helloabhishek2004/AuraMusic/releases/download/v3.0.0/AuraMusic-v3.0.0-universal.apk",
-            "softwareVersion": "v3.0.0",
+            "downloadUrl": "https://github.com/helloabhishek2004/AuraMusic/releases/download/v3.1.0/AuraMusic-v3.1.0-universal.apk",
+            "installUrl": "https://github.com/helloabhishek2004/AuraMusic/releases/download/v3.1.0/AuraMusic-v3.1.0-universal.apk",
+            "releaseNotes": "https://github.com/helloabhishek2004/AuraMusic/releases/tag/v3.1.0",
+            "softwareVersion": "v3.1.0",
+            "datePublished": "2026-10-18",
             "fileSize": "113.6MB",
+            "screenshot": "https://listenwith-auramusic.vercel.app/aura_screen.png",
             "author": {
               "@id": "https://listenwith-auramusic.vercel.app/#author"
+            },
+            "publisher": {
+              "@id": "https://listenwith-auramusic.vercel.app/#organization"
             },
             "codeRepository": "https://github.com/helloabhishek2004/AuraMusic",
             "url": "https://listenwith-auramusic.vercel.app/",
@@ -197,7 +314,7 @@
                 "name": "Where can I safely download the official AuraMusic APK?",
                 "acceptedAnswer": {
                   "@type": "Answer",
-                  "text": "The official signed release is distributed exclusively through the developer GitHub repository at github.com/helloabhishek2004/AuraMusic/releases. The primary build is AuraMusic-v2.0.0-universal.apk (110.2 MB). Never download AuraMusic APKs from untrusted third-party mirror portals."
+                  "text": "The official signed release is distributed exclusively through the developer GitHub repository at github.com/helloabhishek2004/AuraMusic/releases. The primary build is AuraMusic-v3.1.0-universal.apk (113.6 MB). Never download AuraMusic APKs from untrusted third-party mirror portals."
                 }
               },
               {
@@ -230,41 +347,54 @@
       }
     </script>
 
-    <!-- Google Fonts: Manrope & Inter -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Manrope:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Critical First-Paint Purple Gradient Backdrop -->
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background-color: #0e031e;
+        color: #ffffff;
+      }
+      .initial-aura-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background:
+          radial-gradient(ellipse at 18% 4%, #512184 0%, transparent 46%),
+          linear-gradient(145deg, #3d1566 0%, #21083f 48%, #0e031e 100%);
+        overflow: hidden;
+      }
+      .initial-aura-splash::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse at center, transparent 28%, rgba(24, 4, 57, 0.4) 100%);
+        pointer-events: none;
+      }
+      .sr-only-seo {
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        padding: 0 !important;
+        margin: -1px !important;
+        overflow: hidden !important;
+        clip: rect(0, 0, 0, 0) !important;
+        white-space: nowrap !important;
+        border: 0 !important;
+      }
+    </style>
   </head>
   <body
     class="bg-[#07070C] text-[#FFFFFF] antialiased selection:bg-[#BF5AF2]/30 selection:text-white overflow-x-hidden min-h-screen"
   >
     <div id="root">
-      <div
-        style="
-          padding: 2.5rem 1.5rem;
-          max-width: 800px;
-          margin: 0 auto;
-          color: #ffffff;
-          font-family:
-            system-ui,
-            -apple-system,
-            sans-serif;
-        "
-      >
-        <h1 style="font-size: 2rem; font-weight: 800; margin-bottom: 1rem">
-          AuraMusic — Free, Ad-Free Offline Android Music Player
-        </h1>
-        <p
-          style="
-            font-size: 1.1rem;
-            line-height: 1.6;
-            color: rgba(255, 255, 255, 0.75);
-            margin-bottom: 2rem;
-          "
-        >
+      <!-- Stage 1: Immediate First-Paint Purple Gradient Background -->
+      <div class="initial-aura-splash" aria-hidden="true"></div>
+
+      <!-- Crawlable Semantic SEO Content (Visually Hidden to Prevent Text Flash on Initial Load) -->
+      <div class="sr-only-seo">
+        <h1>AuraMusic — Free, Ad-Free Offline Android Music Player</h1>
+        <p>
           AuraMusic is an independent free, ad-free Android music player
           maintained by Abhishek (@helloabhishek2004) at
           github.com/helloabhishek2004/AuraMusic. Engineered for
@@ -274,17 +404,8 @@
           local music file management, and native AndroidX Media3 sound
           fidelity.
         </p>
-        <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.75rem">
-          Core Capabilities
-        </h2>
-        <ul
-          style="
-            line-height: 1.8;
-            color: rgba(255, 255, 255, 0.8);
-            margin-bottom: 2rem;
-            padding-left: 1.25rem;
-          "
-        >
+        <h2>Core Capabilities</h2>
+        <ul>
           <li>
             <strong>100% Free &amp; Ad-Free:</strong> Zero in-app banner ads,
             zero audio interruptions, and zero subscription paywalls.
@@ -308,37 +429,26 @@
             tracking powered by LRCLIB with offline caching.
           </li>
         </ul>
-        <h2 style="font-size: 1.4rem; font-weight: 700; margin-bottom: 0.75rem">
-          Official Android APK Download
-        </h2>
-        <p style="color: rgba(255, 255, 255, 0.75); margin-bottom: 1rem">
-          Version v2.0.0 (AuraMusic-v2.0.0-universal.apk, 110.2 MB) for Android
+        <h2>Official Android APK Download</h2>
+        <p>
+          Version v3.1.0 (AuraMusic-v3.1.0-universal.apk, 113.6 MB) for Android
           7.0+ (API 24+) devices.
         </p>
-        <p style="margin-bottom: 2rem">
+        <p>
           <a
-            href="https://github.com/helloabhishek2004/AuraMusic/releases/download/v2.0.0/AuraMusic-v2.0.0-universal.apk"
-            style="color: #46f5e0; font-weight: 600; text-decoration: underline"
-            >Download Official Universal APK (v2.0.0)</a
+            href="https://github.com/helloabhishek2004/AuraMusic/releases/download/v3.1.0/AuraMusic-v3.1.0-universal.apk"
+            >Download Official Universal APK (v3.1.0)</a
           >
           &bull;
-          <a
-            href="https://github.com/helloabhishek2004/AuraMusic"
-            style="color: #dab9ff; text-decoration: underline"
+          <a href="https://github.com/helloabhishek2004/AuraMusic"
             >Source Repository on GitHub</a
           >
         </p>
-        <h2 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 0.5rem">
-          Documentation &amp; Legal
-        </h2>
-        <p style="color: rgba(255, 255, 255, 0.6)">
-          <a href="/privacy" style="color: #dab9ff; text-decoration: underline"
-            >Privacy Policy</a
-          >
+        <h2>Documentation &amp; Legal</h2>
+        <p>
+          <a href="/privacy">Privacy Policy</a>
           &bull;
-          <a href="/terms" style="color: #dab9ff; text-decoration: underline"
-            >Terms of Service</a
-          >
+          <a href="/terms">Terms of Service</a>
         </p>
       </div>
     </div>

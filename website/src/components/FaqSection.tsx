@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, HelpCircle, ShieldCheck, Zap, Download, Music2, Smartphone, Radio } from 'lucide-react';
 import { AuraChip } from './AuraChip';
 import BlurText from './BlurText';
+import AnimatedContent from './AnimatedContent';
 import { trackFaqToggle } from '../lib/analytics';
 
 interface FaqItem {
@@ -75,7 +76,16 @@ export const FaqSection: React.FC = () => {
         style={{ background: 'radial-gradient(circle, #BF5AF2 0%, #46F5E0 70%, transparent 85%)' }}
       />
 
-      <div className="relative text-center mb-10 sm:mb-14">
+      <AnimatedContent
+        distance={60}
+        direction="vertical"
+        duration={0.8}
+        ease="power3.out"
+        blur={4}
+        stagger={0.08}
+        threshold={0.1}
+        className="relative text-center mb-10 sm:mb-14"
+      >
         <div className="inline-block mb-3">
           <AuraChip
             size="sm"
@@ -94,9 +104,18 @@ export const FaqSection: React.FC = () => {
         <p className="mt-3 sm:mt-4 text-sm sm:text-base text-white/60 max-w-xl mx-auto font-body">
           Everything you need to know about AuraMusic’s playback engine, offline capabilities, ad-free architecture, and APK installation.
         </p>
-      </div>
+      </AnimatedContent>
 
-      <div className="space-y-3.5 relative z-10">
+      <AnimatedContent
+        distance={65}
+        direction="vertical"
+        duration={0.75}
+        ease="power3.out"
+        blur={3}
+        stagger={0.07}
+        threshold={0.08}
+        className="space-y-3.5 relative z-10"
+      >
         {FAQS.map((faq, idx) => {
           const isOpen = openIndex === idx;
           return (
@@ -148,7 +167,7 @@ export const FaqSection: React.FC = () => {
             </div>
           );
         })}
-      </div>
+      </AnimatedContent>
     </section>
   );
 };

@@ -2,6 +2,7 @@ import React from 'react';
 import { Cpu, ShieldCheck, Waves, Mic2, Sliders, Layers, Zap } from 'lucide-react';
 import MagicBento from './MagicBento';
 import BlurText from './BlurText';
+import AnimatedContent from './AnimatedContent';
 import { AuraChip } from './AuraChip';
 
 export const ExperienceFeatures: React.FC = () => {
@@ -9,7 +10,16 @@ export const ExperienceFeatures: React.FC = () => {
     <section id="experience" className="relative py-16 sm:py-24 md:py-28 px-3 sm:px-6 md:px-12 max-w-[1440px] mx-auto">
       
       {/* ── Section Atmospheric Anchor ── */}
-      <div className="flex flex-col items-start mb-10 sm:mb-16 md:mb-24 max-w-3xl">
+      <AnimatedContent
+        distance={60}
+        direction="vertical"
+        duration={0.8}
+        ease="power3.out"
+        blur={4}
+        stagger={0.08}
+        threshold={0.1}
+        className="flex flex-col items-start mb-10 sm:mb-16 md:mb-24 max-w-3xl"
+      >
         <div className="mb-3 sm:mb-4">
           <AuraChip
             size="sm"
@@ -37,10 +47,21 @@ export const ExperienceFeatures: React.FC = () => {
         <p className="mt-4 sm:mt-5 text-sm sm:text-base md:text-lg text-white/65 font-normal leading-relaxed max-w-2xl">
           Most mobile music clients fall into two extremes: sluggish web wrappers or fragile setups requiring self-hosted cloud proxies. AuraMusic runs stream extraction, audio buffering, and state reconciliation directly on your Android device.
         </p>
-      </div>
+      </AnimatedContent>
 
       {/* ── Asymmetric Bento Matrix (Tonal Shifts & Soft Occlusion, No Hard 1px Borders Everywhere) ── */}
-      <MagicBento><div className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6 lg:gap-8">
+      <MagicBento>
+        <AnimatedContent
+          distance={85}
+          direction="vertical"
+          duration={0.85}
+          ease="power3.out"
+          blur={6}
+          scale={0.96}
+          stagger={0.1}
+          threshold={0.08}
+          className="grid grid-cols-1 md:grid-cols-12 gap-4 sm:gap-6 lg:gap-8"
+        >
         
         {/* Feature 1: Direct On-Device Stream Resolution (7 cols) */}
         <div className="magic-bento-card md:col-span-7 rounded-[24px] sm:rounded-[32px] p-5 sm:p-8 md:p-10 bg-[#0C0B14]/70 border border-white/[0.07] backdrop-blur-xl relative overflow-hidden group hover:border-white/[0.14] transition-all duration-500 flex flex-col justify-between">
@@ -207,7 +228,8 @@ export const ExperienceFeatures: React.FC = () => {
           </div>
         </div>
 
-      </div></MagicBento>
+        </AnimatedContent>
+      </MagicBento>
     </section>
   );
 };

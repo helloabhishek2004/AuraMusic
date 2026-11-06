@@ -58,7 +58,7 @@ export function initiateApkDownload(
         document.body.removeChild(link);
       }
     }, 1000);
-  } catch (e) {
+  } catch {
     // If programmatic click fails, fallback to window.location
     window.location.href = url;
   }
@@ -69,11 +69,15 @@ export function initiateApkDownload(
  */
 export async function fetchLatestRelease(): Promise<ReleaseInfo> {
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
     const res = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`, {
       headers: {
         Accept: "application/vnd.github.v3+json",
       },
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       return FALLBACK_RELEASE;
@@ -108,7 +112,7 @@ export async function fetchLatestRelease(): Promise<ReleaseInfo> {
       publishedDate: data.published_at ? new Date(data.published_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "",
       releasesPage: data.html_url || GITHUB_RELEASES_PAGE,
     };
-  } catch (err) {
+  } catch {
     return FALLBACK_RELEASE;
   }
 }

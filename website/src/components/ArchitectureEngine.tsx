@@ -1,6 +1,7 @@
 import React from 'react';
 import { Cpu, Smartphone, HardDrive, CheckCircle2 } from 'lucide-react';
 import BlurText from './BlurText';
+import AnimatedContent from './AnimatedContent';
 import { AuraChip } from './AuraChip';
 
 export const ArchitectureEngine: React.FC = () => {
@@ -8,7 +9,16 @@ export const ArchitectureEngine: React.FC = () => {
     <section id="architecture" className="relative py-16 sm:py-24 px-3 sm:px-6 md:px-12 max-w-[1440px] mx-auto">
       
       {/* ── Section Title ── */}
-      <div className="flex flex-col items-start mb-10 sm:mb-16 max-w-3xl">
+      <AnimatedContent
+        distance={60}
+        direction="vertical"
+        duration={0.8}
+        ease="power3.out"
+        blur={4}
+        stagger={0.08}
+        threshold={0.1}
+        className="flex flex-col items-start mb-10 sm:mb-16 max-w-3xl"
+      >
         <div className="mb-3 sm:mb-4">
           <AuraChip
             size="sm"
@@ -36,7 +46,7 @@ export const ArchitectureEngine: React.FC = () => {
         <p className="mt-4 sm:mt-5 text-sm sm:text-base md:text-lg text-white/65 font-normal leading-relaxed max-w-2xl">
           By partitioning UI rendering from playback execution, AuraMusic achieves the fluid responsiveness of modern declarative UI while keeping audio completely uncompromised.
         </p>
-      </div>
+      </AnimatedContent>
 
       {/* ── Architectural Flow Stage ── */}
       <div className="rounded-[28px] sm:rounded-[36px] bg-[#0A0912]/80 border border-white/[0.08] p-4 sm:p-8 md:p-14 relative overflow-hidden backdrop-blur-2xl">
@@ -50,7 +60,16 @@ export const ArchitectureEngine: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           
           {/* Left Diagram: Architectural Layers (7 cols) */}
-          <div className="lg:col-span-7 space-y-4">
+          <AnimatedContent
+            distance={70}
+            direction="vertical"
+            duration={0.8}
+            ease="power3.out"
+            blur={4}
+            stagger={0.09}
+            threshold={0.1}
+            className="lg:col-span-7 space-y-4"
+          >
             
             {/* Layer 1: Presentation Layer */}
             <div className="rounded-2xl p-5 bg-white/[0.03] border border-white/[0.08] relative group hover:border-[#DAB9FF]/30 transition-colors">
@@ -142,10 +161,20 @@ export const ArchitectureEngine: React.FC = () => {
               </p>
             </div>
 
-          </div>
+          </AnimatedContent>
 
           {/* Right Column: Comparative Metrics & Guarantees (5 cols) */}
-          <div className="lg:col-span-5 flex flex-col gap-5">
+          <AnimatedContent
+            distance={70}
+            direction="horizontal"
+            duration={0.85}
+            delay={0.12}
+            ease="power3.out"
+            blur={5}
+            stagger={0.12}
+            threshold={0.1}
+            className="lg:col-span-5 flex flex-col gap-5"
+          >
             <div className="rounded-3xl p-6 sm:p-8 bg-[#12101D]/70 border border-white/[0.09]">
               <h3 className="font-display font-bold text-xl text-white mb-4">
                 Architecture Guarantees
@@ -189,7 +218,7 @@ export const ArchitectureEngine: React.FC = () => {
                 label="~140ms"
               />
             </div>
-          </div>
+          </AnimatedContent>
 
         </div>
 

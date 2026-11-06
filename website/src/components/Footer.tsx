@@ -1,6 +1,7 @@
 import { ArrowUp, Coffee } from 'lucide-react';
 import React from 'react';
 import { trackGithubVisit, trackPageRedirect, trackPortfolioVisit, trackSocialVisit } from '../lib/analytics';
+import AnimatedContent from './AnimatedContent';
 import { AuraIconButton } from './AuraIconButton';
 import { AuraLogo } from './AuraLogo';
 import { GithubIcon } from './GithubIcon';
@@ -33,7 +34,16 @@ export const Footer: React.FC<FooterProps> = ({
       {/* Atmospheric Soft Divider */}
       <div className="max-w-[1200px] mx-auto h-[1px] bg-gradient-to-r from-transparent via-white/[0.12] to-transparent mb-12 sm:mb-20" />
 
-      <div className="max-w-[1200px] mx-auto flex flex-col items-center text-center">
+      <AnimatedContent
+        distance={50}
+        direction="vertical"
+        duration={0.8}
+        ease="power3.out"
+        blur={4}
+        stagger={0.07}
+        threshold={0.05}
+        className="max-w-[1200px] mx-auto flex flex-col items-center text-center"
+      >
 
         {/* Luminous Brand Emblem with Subtle Glow */}
         <div className="mb-4 sm:mb-6">
@@ -155,7 +165,7 @@ export const Footer: React.FC<FooterProps> = ({
           </div>
         </div>
 
-      </div>
+      </AnimatedContent>
     </footer>
   );
 };

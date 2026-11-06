@@ -3,6 +3,7 @@ import React from 'react';
 import { trackGithubVisit, trackPortfolioVisit, trackSocialVisit } from '../lib/analytics';
 import { AuraChip } from './AuraChip';
 import BlurText from './BlurText';
+import AnimatedContent from './AnimatedContent';
 import { GithubIcon } from './GithubIcon';
 import { SpecularButton } from './SpecularButton';
 
@@ -19,7 +20,16 @@ export const CreatorStory: React.FC = () => {
           style={{ background: 'radial-gradient(circle, #BF5AF2 0%, #DAB9FF 60%, transparent 80%)' }}
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 sm:gap-10 items-center">
+        <AnimatedContent
+          distance={75}
+          direction="vertical"
+          duration={0.85}
+          ease="power3.out"
+          blur={5}
+          stagger={0.12}
+          threshold={0.1}
+          className="grid grid-cols-1 lg:grid-cols-12 gap-8 sm:gap-10 items-center"
+        >
 
           {/* Creator Profile (5 cols) */}
           <div className="lg:col-span-5 flex flex-col sm:flex-row lg:flex-col items-center sm:items-start text-center sm:text-left gap-6">
@@ -144,7 +154,7 @@ export const CreatorStory: React.FC = () => {
             </div>
           </div>
 
-        </div>
+        </AnimatedContent>
 
       </div>
     </section>

@@ -12,8 +12,10 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import AnimatedContent from '../components/AnimatedContent';
 import { AuraLogo } from '../components/AuraLogo';
 import { GithubIcon } from '../components/GithubIcon';
+import { applyRouteSeo } from '../lib/seo';
 
 interface TermsOfServiceProps {
   onNavigateHome: () => void;
@@ -43,7 +45,7 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
 
   useEffect(() => {
     window.scrollTo(0, 0);
-    document.title = 'AuraMusic — Terms of Service';
+    applyRouteSeo('terms');
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -125,7 +127,16 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
       {/* ── Main Layout ── */}
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-12 lg:py-16">
         {/* Hero Title Block */}
-        <div className="max-w-3xl mb-12">
+        <AnimatedContent
+          distance={60}
+          direction="vertical"
+          duration={0.8}
+          ease="power3.out"
+          blur={4}
+          stagger={0.08}
+          trigger="mount"
+          className="max-w-3xl mb-12"
+        >
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#46F5E0]/10 border border-[#46F5E0]/20 text-[#46F5E0] text-xs font-mono uppercase tracking-wider mb-4">
             <Scale className="w-3.5 h-3.5 text-[#46F5E0]" />
             Official Terms of Service
@@ -166,13 +177,23 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </AnimatedContent>
 
         {/* Content & TOC Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
           {/* Desktop Table of Contents (Sticky) */}
           <aside className="hidden lg:block lg:col-span-4 xl:col-span-3">
-            <div className="sticky top-24 p-4 rounded-2xl bg-[#0A0912]/80 border border-white/[0.08] backdrop-blur-xl">
+            <AnimatedContent
+              distance={45}
+              direction="horizontal"
+              reverse
+              duration={0.75}
+              delay={0.1}
+              ease="power3.out"
+              blur={4}
+              trigger="mount"
+              className="sticky top-24 p-4 rounded-2xl bg-[#0A0912]/80 border border-white/[0.08] backdrop-blur-xl"
+            >
               <div className="text-[11px] font-mono uppercase tracking-widest text-[#DAB9FF]/70 mb-3 px-2">
                 Table of Contents
               </div>
@@ -202,11 +223,21 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
                   <span>GitHub Repository</span>
                 </a>
               </div>
-            </div>
+            </AnimatedContent>
           </aside>
 
           {/* Legal Document Content */}
-          <article className="lg:col-span-8 xl:col-span-9 space-y-12 text-sm leading-relaxed text-white/75 font-body">
+          <AnimatedContent
+            distance={50}
+            direction="vertical"
+            duration={0.75}
+            ease="power3.out"
+            blur={3}
+            stagger={0.05}
+            threshold={0.02}
+            trigger="mount"
+            className="lg:col-span-8 xl:col-span-9 space-y-12 text-sm leading-relaxed text-white/75 font-body"
+          >
 
             {/* SECTION 1 */}
             <section id="acceptance" className="scroll-mt-28 space-y-4">
@@ -463,11 +494,18 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
               </div>
             </section>
 
-          </article>
+          </AnimatedContent>
         </div>
 
         {/* Footer Navigation Bar */}
-        <div className="mt-16 pt-8 border-t border-white/[0.08] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-mono text-white/50">
+        <AnimatedContent
+          distance={35}
+          direction="vertical"
+          duration={0.7}
+          ease="power3.out"
+          threshold={0.05}
+          className="mt-16 pt-8 border-t border-white/[0.08] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-mono text-white/50"
+        >
           <div className="flex items-center gap-4">
             <button
               onClick={onNavigateHome}
@@ -487,7 +525,7 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({
           <div>
             © 2026 AuraMusic Project • Source-Available Client
           </div>
-        </div>
+        </AnimatedContent>
       </div>
     </div>
   );

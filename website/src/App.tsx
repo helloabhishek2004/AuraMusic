@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SonicNebulaBackground } from './components/SonicNebulaBackground';
-import { Navigation } from './components/Navigation';
+import { Navigation, getInitialIntroStage, type IntroStage } from './components/Navigation';
 import { Hero } from './components/Hero';
 import { ExperienceFeatures } from './components/ExperienceFeatures';
 import { ArchitectureEngine } from './components/ArchitectureEngine';
@@ -14,10 +14,12 @@ import { OptionWheel } from './components/OptionWheel';
 import GradualBlur from './components/GradualBlur';
 import { PrivacyPolicy } from './pages/PrivacyPolicy';
 import { TermsOfService } from './pages/TermsOfService';
-import { Analytics } from '@vercel/analytics/react';
 import { initGA, trackPageView, trackPageRedirect, trackSoundProfileChange } from './lib/analytics';
+import { applyRouteSeo, type SeoRoute } from './lib/seo';
 
-type Route = 'home' | 'privacy' | 'terms';
+const Analytics = () => null;
+
+type Route = SeoRoute;
 
 export function App() {
   const [currentRoute, setCurrentRoute] = useState<Route>(() => {
@@ -30,6 +32,7 @@ export function App() {
     return 'home';
   });
 
+  const [introStage, setIntroStage] = useState<IntroStage>(getInitialIntroStage);
   const [activeSection, setActiveSection] = useState<string>('hero');
   const [showOptionWheel, setShowOptionWheel] = useState(false);
   const [currentMood, setCurrentMood] = useState('Ambient Drift');
@@ -39,13 +42,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const pageMap: Record<Route, { path: string; title: string }> = {
-      home: { path: '/', title: 'AuraMusic — Free, Ad-Free Offline Android Music Player' },
-      privacy: { path: '/privacy', title: 'AuraMusic — Privacy Policy' },
-      terms: { path: '/terms', title: 'AuraMusic — Terms of Service' },
-    };
-    const info = pageMap[currentRoute] || pageMap.home;
-    trackPageView(info.path, info.title);
+    const meta = applyRouteSeo(currentRoute);
+    trackPageView(meta.path, meta.title);
   }, [currentRoute]);
 
   useEffect(() => {
@@ -75,16 +73,14 @@ export function App() {
     const path = route === 'home' ? '/' : `/${route}`;
     window.history.pushState({}, '', path);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    if (route === 'home') {
-      document.title = 'AuraMusic — Music, in its element.';
-    }
+    applyRouteSeo(route);
   };
 
   useEffect(() => {
     if (currentRoute !== 'home') return;
 
     const sections = ['hero', 'experience', 'architecture', 'showcase', 'download'];
-    
+
     const handleScroll = () => {
       const scrollPosition = window.scrollY + 250;
       for (const sectionId of sections) {
@@ -130,16 +126,22 @@ export function App() {
     );
   }
 
+  const isStageRevealed = introStage === 'morphing' || introStage === 'settled';
+
   return (
     <div className="relative min-h-screen w-full max-w-full overflow-x-clip bg-[#07070C] text-white selection:bg-[#BF5AF2]/30 selection:text-white">
       {/* ── Multi-Layer Sonic Nebula Background ── */}
       <SonicNebulaBackground />
 
       {/* ── Cinematic Intro & Floating Glass Capsule Navigation ── */}
-      <Navigation activeSection={activeSection} />
+      <Navigation activeSection={activeSection} onIntroStageChange={setIntroStage} />
 
-      {/* ── Main Continuous Stage (One unified atmospheric environment) ── */}
-      <main className="relative z-10 w-full max-w-full overflow-x-clip">
+      {/* ── Main Continuous Stage (Revealed smoothly as the purple intro splash morphs) ── */}
+      <main
+        className={`relative z-10 w-full max-w-full overflow-x-clip transition-opacity duration-700 ease-out ${
+          isStageRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none select-none'
+        }`}
+      >
         <div id="hero">
           <Hero />
         </div>
@@ -167,7 +169,7 @@ export function App() {
 
       {/* ── Left-Anchored Atmospheric Sound Wheel (Big screens only, starts from Core Capabilities) ── */}
       <AnimatePresence>
-        {showOptionWheel && (
+        {showOptionWheel && isStageRevealed && (
           <motion.aside
             initial={{ opacity: 0, x: -40 }}
             animate={{ opacity: 1, x: 0 }}
@@ -201,7 +203,7 @@ export function App() {
                     'Dark Techno',
                     'Deep House',
                     'Ether Wave',
-                    'Neo-Classical'
+                    'Neo-Classical',
                   ]}
                   defaultSelected={0}
                   side="left"
@@ -234,7 +236,7 @@ export function App() {
                       className="w-1 rounded-full bg-[#BF5AF2]"
                       style={{
                         height: `${h}%`,
-                        animation: `pulse ${1 + (i % 3) * 0.4}s ease-in-out infinite`
+                        animation: `pulse ${1 + (i % 3) * 0.4}s ease-in-out infinite`,
                       }}
                     />
                   ))}
@@ -246,10 +248,16 @@ export function App() {
       </AnimatePresence>
 
       {/* ── Liquid Glass Dissolving Footer ── */}
-      <Footer
-        onNavigatePrivacy={() => navigateTo('privacy')}
-        onNavigateTerms={() => navigateTo('terms')}
-      />
+      <div
+        className={`transition-opacity duration-700 ease-out ${
+          isStageRevealed ? 'opacity-100' : 'opacity-0 pointer-events-none select-none'
+        }`}
+      >
+        <Footer
+          onNavigatePrivacy={() => navigateTo('privacy')}
+          onNavigateTerms={() => navigateTo('terms')}
+        />
+      </div>
 
       {/* Subtle fixed edge treatment: ten percent of the visible viewport. */}
       <GradualBlur

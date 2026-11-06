@@ -3,12 +3,14 @@
   "main": "index.js",
   "version": "3.1.0",
   "scripts": {
+    "dev": "npm --prefix website run dev",
+    "build": "npm --prefix website run build",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint",
-    "postinstall": "patch-package"
+    "lint": "npm --prefix website run lint",
+    "postinstall": "patch-package && npm --prefix website install"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

@@ -91,12 +91,19 @@ export const SideRays: React.FC<SideRaysProps> = ({
       if (!containerRef.current) return;
 
       const renderer = new Renderer({
-        dpr: Math.min(window.devicePixelRatio, 2),
+        dpr: Math.min(window.devicePixelRatio, 1.5),
         alpha: true
       });
       rendererRef.current = renderer;
 
       const gl = renderer.gl;
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      const rendererName = String(
+        (debugInfo && gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)) ||
+          gl.getParameter(gl.RENDERER) ||
+          ''
+      );
+      const isSoftwareGl = /SwiftShader|llvmpipe|Software|Mesa/i.test(rendererName);
       gl.canvas.style.width = '100%';
       gl.canvas.style.height = '100%';
 
@@ -198,7 +205,7 @@ void main() {
 
       const updateSize = () => {
         if (!containerRef.current || !renderer) return;
-        renderer.dpr = Math.min(window.devicePixelRatio, 2);
+        renderer.dpr = isSoftwareGl ? 0.35 : Math.min(window.devicePixelRatio, 1.5);
         const { clientWidth: w, clientHeight: h } = containerRef.current;
         renderer.setSize(w, h);
         uniforms.iResolution.value = [w * renderer.dpr, h * renderer.dpr];
@@ -209,8 +216,10 @@ void main() {
         uniforms.iTime.value = t * 0.001;
         try {
           renderer.render({ scene: mesh });
-          animationIdRef.current = requestAnimationFrame(loop);
-        } catch (e) {
+          if (!isSoftwareGl) {
+            animationIdRef.current = requestAnimationFrame(loop);
+          }
+        } catch {
           return;
         }
       };

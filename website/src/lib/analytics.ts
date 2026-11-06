@@ -56,11 +56,11 @@ export function initGA(customId?: string): void {
     window.dataLayer.push(arguments);
   };
 
-  // Check if script is already in document
+  // Check if script is already in document (skip external script in dev or headless browser)
   const existingScript = document.querySelector(
     `script[src*="googletagmanager.com/gtag/js?id=${id}"]`,
   );
-  if (!existingScript) {
+  if (!existingScript && !import.meta.env?.DEV && !navigator.webdriver) {
     const script = document.createElement("script");
     script.async = true;
     script.src = `https://www.googletagmanager.com/gtag/js?id=${id}`;

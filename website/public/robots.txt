@@ -1,4 +1,38 @@
+# AuraMusic — Official Crawler & AI Search Indexing Policy
 User-agent: *
 Allow: /
 
+# Search Engine Crawlers
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: DuckDuckBot
+Allow: /
+
+# AI Search & Answer Engine Crawlers (GEO / AEO)
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
 Sitemap: https://listenwith-auramusic.vercel.app/sitemap.xml
+# LLM Context: https://listenwith-auramusic.vercel.app/llms.txt

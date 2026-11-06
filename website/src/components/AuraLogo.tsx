@@ -11,19 +11,37 @@ export const AuraLogo: React.FC<AuraLogoProps> = ({
   size = 28,
   glow = false,
 }) => {
+  const isLarge = size >= 64;
+
   return (
     <div
       className={`relative inline-flex items-center justify-center shrink-0 ${className}`}
       style={{ width: size, height: size }}
     >
       {glow && (
-        <div
-          className="absolute inset-0 rounded-full blur-md opacity-70 pointer-events-none transition-opacity duration-700"
-          style={{
-            background: 'radial-gradient(circle, rgba(191,90,242,0.85) 0%, rgba(70,245,224,0.4) 70%, transparent 100%)',
-            transform: 'scale(1.4)',
-          }}
-        />
+        <>
+          <div
+            className="absolute inset-0 rounded-full pointer-events-none transition-opacity duration-700"
+            style={{
+              background:
+                'radial-gradient(circle, rgba(218,185,255,0.95) 0%, rgba(191,90,242,0.78) 38%, rgba(70,245,224,0.35) 68%, transparent 100%)',
+              transform: isLarge ? 'scale(1.9)' : 'scale(1.4)',
+              filter: isLarge ? 'blur(26px)' : 'blur(8px)',
+              opacity: isLarge ? 0.92 : 0.7,
+            }}
+          />
+          {isLarge && (
+            <div
+              className="absolute inset-0 rounded-full pointer-events-none animate-pulse"
+              style={{
+                background:
+                  'radial-gradient(circle, rgba(248,240,255,0.75) 0%, rgba(191,90,242,0.68) 45%, transparent 75%)',
+                transform: 'scale(1.35)',
+                filter: 'blur(14px)',
+              }}
+            />
+          )}
+        </>
       )}
       <svg
         width="100%"
@@ -32,7 +50,13 @@ export const AuraLogo: React.FC<AuraLogoProps> = ({
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
         className="relative z-10"
-        style={{ filter: glow ? 'drop-shadow(0 0 8px rgba(191, 90, 242, 0.6))' : 'none' }}
+        style={{
+          filter: glow
+            ? isLarge
+              ? 'drop-shadow(0 0 18px rgba(218, 185, 255, 0.85)) drop-shadow(0 0 36px rgba(191, 90, 242, 0.65))'
+              : 'drop-shadow(0 0 8px rgba(191, 90, 242, 0.6))'
+            : 'none',
+        }}
       >
         <g transform="matrix(1.44,0,0,1.44,1500,1500)">
           <g transform="matrix(1,0,0,1,-1041.666667,-1041.666667)">

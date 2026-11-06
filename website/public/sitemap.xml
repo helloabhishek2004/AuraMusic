@@ -1,21 +1,33 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset
+  xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+  xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+>
   <url>
     <loc>https://listenwith-auramusic.vercel.app/</loc>
-    <lastmod>2026-09-27</lastmod>
+    <lastmod>2026-11-06</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://listenwith-auramusic.vercel.app/aura_screen.png</image:loc>
+      <image:title>AuraMusic — Free, Ad-Free Offline Android Music Player</image:title>
+      <image:caption>AuraMusic Android application interface with Liquid Glass UI and native Media3 audio engine</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://listenwith-auramusic.vercel.app/icon.png</image:loc>
+      <image:title>AuraMusic Official App Icon</image:title>
+    </image:image>
   </url>
   <url>
     <loc>https://listenwith-auramusic.vercel.app/privacy</loc>
-    <lastmod>2026-09-27</lastmod>
+    <lastmod>2026-11-06</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.5</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://listenwith-auramusic.vercel.app/terms</loc>
-    <lastmod>2026-09-27</lastmod>
+    <lastmod>2026-11-06</lastmod>
     <changefreq>monthly</changefreq>
-    <priority>0.5</priority>
+    <priority>0.7</priority>
   </url>
 </urlset>

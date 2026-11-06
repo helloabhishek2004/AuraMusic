@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Eye, Sparkles, Smartphone, Music2, Search as SearchIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import BlurText from './BlurText';
+import AnimatedContent from './AnimatedContent';
 import { AuraChip } from './AuraChip';
 import { ShowcasePlayerScreen } from './ShowcasePlayerScreen';
 import { ShowcaseLyricsScreen } from './ShowcaseLyricsScreen';
@@ -50,7 +51,16 @@ export const ShowcaseGallery: React.FC = () => {
     <section id="showcase" className="relative py-16 sm:py-24 md:py-28 px-3 sm:px-6 md:px-12 max-w-[1440px] mx-auto">
       
       {/* ── Section Title ── */}
-      <div className="flex flex-col items-center text-center mb-8 sm:mb-14 max-w-2xl mx-auto">
+      <AnimatedContent
+        distance={60}
+        direction="vertical"
+        duration={0.8}
+        ease="power3.out"
+        blur={4}
+        stagger={0.08}
+        threshold={0.1}
+        className="flex flex-col items-center text-center mb-8 sm:mb-14 max-w-2xl mx-auto"
+      >
         <div className="mb-3 sm:mb-4">
           <AuraChip
             size="sm"
@@ -124,7 +134,7 @@ export const ShowcaseGallery: React.FC = () => {
             );
           })}
         </div>
-      </div>
+      </AnimatedContent>
 
       {/* ── Main Showcase Stage ── */}
       <div className="relative rounded-[28px] sm:rounded-[40px] bg-[#0A0912]/80 border border-white/[0.08] p-4 sm:p-10 md:p-16 overflow-hidden flex flex-col lg:flex-row items-center justify-between gap-8 sm:gap-12 shadow-[0_30px_90px_-20px_rgba(0,0,0,0.9)]">
@@ -136,7 +146,17 @@ export const ShowcaseGallery: React.FC = () => {
         />
 
         {/* Left Side: Editorial Design System Notes (Order 2 on mobile, Order 1 on desktop) */}
-        <div className="lg:w-1/2 flex flex-col items-start text-left z-10 order-2 lg:order-1">
+        <AnimatedContent
+          distance={70}
+          direction="horizontal"
+          reverse
+          duration={0.85}
+          ease="power3.out"
+          blur={4}
+          stagger={0.09}
+          threshold={0.1}
+          className="lg:w-1/2 flex flex-col items-start text-left z-10 order-2 lg:order-1"
+        >
           <div className="mb-3">
             <AuraChip
               size="xs"
@@ -180,10 +200,20 @@ export const ShowcaseGallery: React.FC = () => {
               </p>
             </div>
           </div>
-        </div>
+        </AnimatedContent>
 
         {/* Right Side: Android App Frame Visual (Order 1 on mobile, Order 2 on desktop) */}
-        <div className="lg:w-1/2 flex justify-center z-10 w-full order-1 lg:order-2">
+        <AnimatedContent
+          distance={80}
+          direction="vertical"
+          duration={0.9}
+          delay={0.1}
+          ease="power3.out"
+          scale={0.94}
+          blur={6}
+          threshold={0.1}
+          className="lg:w-1/2 flex justify-center z-10 w-full order-1 lg:order-2"
+        >
           <div className="relative w-full max-w-[310px] sm:max-w-[360px] rounded-[38px] sm:rounded-[48px] p-2.5 sm:p-3 bg-gradient-to-b from-white/20 via-white/5 to-white/15 shadow-[0_30px_90px_-20px_rgba(0,0,0,0.95)]">
             
             {/* Outer Bezel Frame */}
@@ -245,7 +275,7 @@ export const ShowcaseGallery: React.FC = () => {
               style={{ background: 'radial-gradient(circle, #BF5AF2 0%, #46F5E0 70%, transparent 100%)' }}
             />
           </div>
-        </div>
+        </AnimatedContent>
 
       </div>
     </section>

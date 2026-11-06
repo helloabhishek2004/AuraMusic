@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowUpRight, Download, Play, Pause, SkipForward, SkipBack, Sparkles, ShieldCheck, Cpu, Radio, Disc3 } from 'lucide-react';
-import { motion } from 'framer-motion';
 import { AuraLogo } from './AuraLogo';
 import { SpecularButton } from './SpecularButton';
 import { AuraChip } from './AuraChip';
 import { AuraIconButton } from './AuraIconButton';
-import { staggerContainerPreset, fadeUpItem } from '../lib/motion-tokens';
+import AnimatedContent from './AnimatedContent';
 import { fetchLatestRelease, FALLBACK_RELEASE, initiateApkDownload } from '../lib/release';
 import { trackGithubVisit, trackPageRedirect, trackTrackSkipped, trackAudioPlayback } from '../lib/analytics';
 
@@ -98,25 +97,29 @@ export const Hero: React.FC = () => {
         <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center my-auto py-8">
           
           {/* Left Column: Editorial Headline & Copy (7 cols) */}
-          <motion.div
-            variants={staggerContainerPreset}
-            initial="hidden"
-            animate="visible"
+          <AnimatedContent
+            distance={70}
+            direction="vertical"
+            duration={0.85}
+            ease="power3.out"
+            blur={6}
+            stagger={0.08}
+            threshold={0.1}
+            trigger="mount"
             className="lg:col-span-7 flex flex-col items-start text-left max-w-2xl"
           >
             {/* Context Pill Badge */}
-            <motion.div variants={fadeUpItem} className="mb-6">
+            <div className="mb-6">
               <AuraChip
                 size="sm"
                 variant="violet"
                 pulseDot="#BF5AF2"
                 label={`AuraMusic ${release.version} Official Architecture`}
               />
-            </motion.div>
+            </div>
 
             {/* Main Headline */}
-            <motion.h1
-              variants={fadeUpItem}
+            <h1
               className="font-display font-extrabold text-3xl sm:text-5xl lg:text-[72px] leading-[1.1] sm:leading-[1.08] tracking-[-0.03em] text-white"
             >
               Music,{' '}
@@ -130,19 +133,18 @@ export const Hero: React.FC = () => {
                   style={{ background: 'linear-gradient(90deg, #BF5AF2 0%, #46F5E0 100%)' }}
                 />
               </span>
-            </motion.h1>
+            </h1>
 
             {/* Concise Supporting Copy */}
-            <motion.p
-              variants={fadeUpItem}
+            <p
               className="mt-4 sm:mt-6 text-sm sm:text-lg text-white/75 leading-relaxed font-body font-normal max-w-xl"
             >
               A free, ad-free Android music player engineered for distraction-free listening,
               featuring true offline playback, local file management, and native AndroidX Media3 sound fidelity.
-            </motion.p>
+            </p>
 
             {/* High-Intent Value Chips */}
-            <motion.div variants={fadeUpItem} className="mt-4 flex flex-wrap items-center gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-[#BF5AF2]/15 text-[#DAB9FF] border border-[#BF5AF2]/25">
                 100% Ad-Free
               </span>
@@ -155,11 +157,10 @@ export const Hero: React.FC = () => {
               <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-white/[0.08] text-white/80 border border-white/10">
                 Direct APK
               </span>
-            </motion.div>
+            </div>
 
             {/* CTAs Cluster */}
-            <motion.div
-              variants={fadeUpItem}
+            <div
               className="mt-6 sm:mt-10 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 w-full sm:w-auto"
             >
               {/* Primary CTA */}
@@ -232,11 +233,10 @@ export const Hero: React.FC = () => {
                 <Download size={14} strokeWidth={1.8} />
                 <span>Download APK ({release.version})</span>
               </SpecularButton>
-            </motion.div>
+            </div>
 
             {/* Quick Architecture Indicators */}
-            <motion.div
-              variants={fadeUpItem}
+            <div
               className="mt-8 sm:mt-12 flex flex-wrap items-center gap-2.5 sm:gap-3"
             >
               <AuraChip
@@ -257,11 +257,22 @@ export const Hero: React.FC = () => {
                 icon={<Disc3 size={13} strokeWidth={1.8} className="text-[#DAB9FF]" />}
                 label="Room SQLite Offline"
               />
-            </motion.div>
-          </motion.div>
+            </div>
+          </AnimatedContent>
 
           {/* Right Column: Floating AuraMusic Player Surface (5 cols) */}
-          <div className="lg:col-span-5 flex justify-center lg:justify-end relative w-full">
+          <AnimatedContent
+            distance={80}
+            direction="horizontal"
+            duration={0.95}
+            delay={0.15}
+            ease="power3.out"
+            blur={8}
+            scale={0.95}
+            threshold={0.1}
+            trigger="mount"
+            className="lg:col-span-5 flex justify-center lg:justify-end relative w-full"
+          >
             
             {/* Ambient Radial Under-Glow for the Player */}
             <div
@@ -411,11 +422,20 @@ export const Hero: React.FC = () => {
                 />
               </div>
             </div>
-          </div>
+          </AnimatedContent>
         </div>
 
         {/* ── Stage Bottom Bar: Scroll Indicator & Ticker ── */}
-        <div className="relative z-10 pt-4 sm:pt-6 mt-4 sm:mt-6 border-t border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs font-mono text-white/40">
+        <AnimatedContent
+          distance={35}
+          direction="vertical"
+          duration={0.7}
+          delay={0.35}
+          ease="power3.out"
+          threshold={0.1}
+          trigger="mount"
+          className="relative z-10 pt-4 sm:pt-6 mt-4 sm:mt-6 border-t border-white/[0.06] flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs font-mono text-white/40"
+        >
           <div className="flex items-center gap-2.5 text-[11px] sm:text-xs">
             <span className="inline-flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-white/[0.06] text-white/70">
               ↓
@@ -430,7 +450,7 @@ export const Hero: React.FC = () => {
             <span className="hidden sm:inline text-white/20">•</span>
             <span className="text-white/60">100% Free • Source Available</span>
           </div>
-        </div>
+        </AnimatedContent>
 
       </div>
     </section>
